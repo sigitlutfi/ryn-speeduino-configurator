@@ -1,0 +1,343 @@
+import React, { useState } from "react";
+import {
+  BarChart2,
+  Activity,
+  Database,
+  Flame,
+  Target,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  Cpu,
+  Radio,
+  ChevronDown,
+  Thermometer,
+  Droplets,
+  Zap,
+  Flag,
+  Plug,
+  Terminal,
+  ShieldAlert,
+  Clock,
+  Wrench,
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useLocation } from "wouter";
+import { ROUTES } from "../routes.js";
+
+/**
+ * Modern Neon Sidebar Configuration
+ * Each category has its own theme color for better visual hierarchy.
+ */
+const NAV_CONFIG = [
+  {
+    category: "MONITOR & LOGS",
+    icon: Activity,
+    theme: "cyan",
+    items: [
+      { path: ROUTES.DASHBOARD, label: "Realtime View", icon: Activity },
+      { path: ROUTES.ANALYSIS, label: "Telemetries", icon: BarChart2 },
+    ],
+  },
+  {
+    category: "ENGINE FUNDAMENTALS",
+    icon: Cpu,
+    theme: "white",
+    items: [
+      { path: ROUTES.SETTINGS_ENGINE, label: "Master Setup", icon: Cpu },
+      {
+        path: ROUTES.SETTINGS_INJECTOR,
+        label: "Injector Char",
+        icon: Droplets,
+      },
+      { path: ROUTES.SETTINGS_TRIGGER, label: "Trigger Setup", icon: Zap },
+      {
+        path: ROUTES.SETTINGS_PROTECTION,
+        label: "Safety / Cut",
+        icon: ShieldAlert,
+      },
+    ],
+  },
+  {
+    category: "FUEL TUNING",
+    icon: Database,
+    theme: "cyan",
+    items: [
+      { path: ROUTES.TUNING_VE, label: "VE Table 1", icon: Database },
+      {
+        path: ROUTES.TUNING_VE2,
+        label: "VE Table 2",
+        icon: Database,
+        sub: true,
+      },
+      { path: ROUTES.TUNING_AFR, label: "AFR Target", icon: Target },
+      { path: ROUTES.SETTINGS_AFR, label: "O2 Settings", icon: Settings },
+      { path: ROUTES.SETTINGS_FLEX, label: "Flex Fuel", icon: Zap },
+      {
+        path: ROUTES.SETTINGS_IAT,
+        label: "IAT Compensation",
+        icon: Thermometer,
+      },
+    ],
+  },
+  {
+    category: "IGNITION / SPARK",
+    icon: Flame,
+    theme: "orange",
+    items: [
+      { path: ROUTES.TUNING_IGNITION, label: "Spark Table 1", icon: Flame },
+      {
+        path: ROUTES.TUNING_IGNITION2,
+        label: "Spark Table 2",
+        icon: Flame,
+        sub: true,
+      },
+      { path: ROUTES.SETTINGS_SPARK, label: "Spark Settings", icon: Zap },
+    ],
+  },
+  {
+    category: "STARTUP & IDLE",
+    icon: Clock,
+    theme: "cyan",
+    items: [
+      { path: ROUTES.STARTUP_CRANKING, label: "Cranking Setup", icon: Zap },
+      { path: ROUTES.STARTUP_CURVES, label: "ASE/WUE Curves", icon: Droplets },
+      { path: ROUTES.STARTUP_IDLE, label: "Idle Control", icon: Settings },
+    ],
+  },
+  {
+    category: "ADDONS & RACING",
+    icon: Flag,
+    theme: "red",
+    items: [
+      { path: ROUTES.RACING_LAUNCH, label: "Launch Control", icon: Flag },
+      { path: ROUTES.RACING_FLATSHIFT, label: "Flat Shift", icon: Zap },
+      { path: ROUTES.SETTINGS_FAN, label: "Fan Control", icon: Activity },
+      {
+        path: ROUTES.SETTINGS_PROGRAMMABLE,
+        label: "Prog. Outputs",
+        icon: Plug,
+      },
+    ],
+  },
+  {
+    category: "SYSTEM TOOLS",
+    icon: Wrench,
+    theme: "white",
+    items: [
+      { path: ROUTES.COMM, label: "Communication", icon: Radio },
+      { path: ROUTES.TERMINAL, label: "Raw Console", icon: Terminal },
+      {
+        path: ROUTES.APP_SETTINGS,
+        label: "Configurator Settings",
+        icon: Settings,
+      },
+    ],
+  },
+];
+
+const NavItem = ({
+  path,
+  label,
+  icon: Icon,
+  collapsed,
+  theme = "cyan",
+  isActive,
+  sub = false,
+}) => {
+  const [_, navigate] = useLocation();
+
+  const themeClasses = {
+    cyan: "text-neon-cyan bg-neon-cyan/5 border-neon-cyan/20 box-glow-cyan",
+    orange:
+      "text-neon-orange bg-neon-orange/5 border-neon-orange/20 box-glow-orange",
+    red: "text-neon-red bg-neon-red/5 border-neon-red/20 box-glow-red",
+    white:
+      "text-white bg-white/5 border-white/20 shadow-[0_0_15px_rgba(255,255,255,0.1)]",
+  };
+
+  const activeTheme = themeClasses[theme] || themeClasses.cyan;
+
+  return (
+    <motion.button
+      whileHover={{ x: 4 }}
+      whileTap={{ scale: 0.98 }}
+      onClick={() => navigate(path)}
+      className={`w-full flex items-center gap-2.5 ${sub ? "pl-8 pr-2 py-1.5" : "px-3 py-2"} rounded-lg transition-all relative group overflow-hidden ${
+        isActive
+          ? `${activeTheme} border`
+          : "text-gray-500 hover:text-white border border-transparent hover:bg-white/5"
+      }`}
+    >
+      {isActive && (
+        <motion.div
+          layoutId="active-nav-line"
+          className={`absolute left-0 w-0.5 h-3/5 rounded-full ${theme === "white" ? "bg-white" : `bg-neon-${theme}`}`}
+        />
+      )}
+
+      <div
+        className={`p-1 rounded-md shrink-0 ${isActive ? "bg-white/5" : "bg-transparent"}`}
+      >
+        <Icon size={sub ? 14 : 16} strokeWidth={isActive ? 2.5 : 2} />
+      </div>
+
+      {!collapsed && (
+        <span
+          className={`${sub ? "text-[8px]" : "text-[9px]"} font-orbitron font-black uppercase tracking-widest ${isActive ? "opacity-100" : "opacity-60"}`}
+        >
+          {label}
+        </span>
+      )}
+    </motion.button>
+  );
+};
+
+export default function Sidebar() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [location] = useLocation();
+  const [openSections, setOpenSections] = useState({
+    "MONITOR & LOGS": true,
+    "ENGINE FUNDAMENTALS": true,
+    "FUEL TUNING": false,
+    "IGNITION / SPARK": false,
+    "STARTUP & IDLE": false,
+    "ADDONS & RACING": false,
+    "SYSTEM TOOLS": false,
+  });
+
+  const toggleSection = (key) =>
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  return (
+    <motion.div
+      initial={false}
+      animate={{ width: collapsed ? 80 : 250 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className="h-full bg-bg-deep/80 border-r border-white/5 backdrop-blur-2xl flex flex-col relative z-30 shadow-2xl"
+    >
+      {/* Branding Section */}
+      <div
+        className={`h-24 flex items-center ${collapsed ? "justify-center" : "px-8"} relative overflow-hidden`}
+      >
+        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+        <div className="flex items-center gap-4 relative z-10 transition-all">
+          <div className="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center shadow-inner group">
+            <Cpu
+              size={22}
+              className="text-white group-hover:scale-110 transition-transform"
+            />
+          </div>
+          {!collapsed && (
+            <div className="flex flex-col">
+              <span className="text-xs font-orbitron font-black text-white uppercase tracking-[0.2em] leading-none">
+                RYN SPEED
+              </span>
+              <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest mt-1">
+                Configurator v2.0
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Navigation Groups */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-8">
+        {NAV_CONFIG.map((group) => {
+          const isOpen = openSections[group.category];
+          const hasActiveInGroup = group.items.some(
+            (item) =>
+              location === item.path || location.startsWith(item.path + "/"),
+          );
+
+          return (
+            <div key={group.category} className="space-y-3">
+              <button
+                onClick={() => !collapsed && toggleSection(group.category)}
+                className={`w-full flex items-center ${collapsed ? "justify-center" : "justify-between px-2"} group transition-all`}
+              >
+                {!collapsed ? (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`text-[8px] font-orbitron font-black uppercase tracking-[0.3em] ${hasActiveInGroup ? "text-white" : "text-white/30"} transition-colors`}
+                      >
+                        {group.category}
+                      </span>
+                    </div>
+                    <ChevronDown
+                      size={10}
+                      className={`text-white/20 group-hover:text-white transition-all ${isOpen ? "" : "-rotate-90"}`}
+                    />
+                  </>
+                ) : (
+                  <group.icon
+                    size={16}
+                    className={`${hasActiveInGroup ? "text-white" : "text-white/20"} transition-colors`}
+                  />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {(isOpen || collapsed) && (
+                  <motion.div
+                    initial={
+                      collapsed ? { opacity: 1 } : { height: 0, opacity: 0 }
+                    }
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex flex-col gap-1.5 overflow-hidden"
+                  >
+                    {group.items.map((item) => (
+                      <NavItem
+                        key={item.path}
+                        {...item}
+                        collapsed={collapsed}
+                        theme={group.theme}
+                        isActive={
+                          location === item.path ||
+                          location.startsWith(item.path + "/")
+                        }
+                      />
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Collapse Handle (Floating Style) */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="mx-4 my-6 py-3 rounded-2xl bg-white/5 border border-white/5 hover:border-white/20 flex items-center justify-center text-white/40 hover:text-white transition-all group"
+      >
+        {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+      </button>
+
+      {/* Footer / Connection Alert */}
+      {!collapsed && (
+        <div className="p-6 bg-black/40 border-t border-white/5">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[7px] font-black text-gray-600 uppercase tracking-widest">
+                ECU Status
+              </span>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-neon-cyan animate-pulse shadow-glow-cyan" />
+                <span className="text-[9px] font-black font-orbitron text-white uppercase tracking-widest">
+                  Connected
+                </span>
+              </div>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-neon-cyan/10 flex items-center justify-center text-neon-cyan">
+              <Radio size={14} className="animate-pulse" />
+            </div>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
