@@ -309,7 +309,6 @@ export default function ProgrammableOutputs() {
                       ))}
                     </select>
                   </div>
-
                   {/* Condition 2 */}
                   {getVal("bitwise") > 0 ? (
                     <div className="flex items-center gap-3 bg-black/40 p-4 rounded-xl border border-white/5 animate-in slide-in-from-top-2">
@@ -352,35 +351,57 @@ export default function ProgrammableOutputs() {
                   )}
                 </div>
               </section>
-            </div>            {/* Micro-Sidebar */}
+            </div>{" "}
+            {/* Micro-Sidebar */}
             <div className="xl:col-span-3 space-y-4">
-               {(() => {
-                 const getLabel = (list, val) => {
-                   if (!list) return "None";
-                   const found = list.find(opt => (typeof opt === 'object' ? opt.index === val : false));
-                   if (found) return found.label;
-                   return list[val] || "None"; // Fallback for simple string arrays
-                 };
+              {(() => {
+                const getLabel = (list, val) => {
+                  if (!list) return "None";
+                  const found = list.find((opt) =>
+                    typeof opt === "object" ? opt.index === val : false,
+                  );
+                  if (found) return found.label;
+                  return list[val] || "None"; // Fallback for simple string arrays
+                };
 
-                 return (
-                   <div className="p-5 rounded-[28px] border border-neon-cyan/20 bg-neon-cyan/5 text-neon-cyan space-y-4 shadow-glow-cyan/5">
-                      <div className="flex items-center gap-2">
-                         <Target size={14} />
-                         <span className="text-[9px] font-black uppercase tracking-widest">Logic Preview</span>
-                      </div>
-                      <p className="text-[10px] font-mono leading-relaxed lowercase opacity-80 break-words">
-                         if ({getLabel(iniOptions.firstDataIn, getVal("firstDataIn"))}{" "}
-                         {getLabel(iniOptions.firstComp, getVal("firstCompType"))}{" "}
-                         {getVal("firstTarget")})
-                         {getVal("bitwise") > 0 && (
-                            <> <br/>{getLabel(iniOptions.logic, getVal("bitwise"))} <br/> ({getLabel(iniOptions.secondDataIn, getVal("secondDataIn"))} {getLabel(iniOptions.firstComp, getVal("secondCompType"))} {getVal("secondTarget")})</>
-                         )}
-                      </p>
-                   </div>
-                 );
-               })()}
+                return (
+                  <div className="p-5 rounded-[28px] border border-neon-cyan/20 bg-neon-cyan/5 text-neon-cyan space-y-4 shadow-glow-cyan/5">
+                    <div className="flex items-center gap-2">
+                      <Target size={14} />
+                      <span className="text-[9px] font-black uppercase tracking-widest">
+                        Logic Preview
+                      </span>
+                    </div>
+                    <p className="text-[10px] font-mono leading-relaxed lowercase opacity-80 break-words">
+                      if (
+                      {getLabel(iniOptions.firstDataIn, getVal("firstDataIn"))}{" "}
+                      {getLabel(iniOptions.firstComp, getVal("firstCompType"))}{" "}
+                      {getVal("firstTarget")})
+                      {getVal("bitwise") > 0 && (
+                        <>
+                          {" "}
+                          <br />
+                          {getLabel(
+                            iniOptions.logic,
+                            getVal("bitwise"),
+                          )} <br /> (
+                          {getLabel(
+                            iniOptions.secondDataIn,
+                            getVal("secondDataIn"),
+                          )}{" "}
+                          {getLabel(
+                            iniOptions.firstComp,
+                            getVal("secondCompType"),
+                          )}{" "}
+                          {getVal("secondTarget")})
+                        </>
+                      )}
+                    </p>
+                  </div>
+                );
+              })()}
 
-               <div className="p-5 rounded-[28px] border border-white/5 bg-black/40 space-y-3">
+              <div className="p-5 rounded-[28px] border border-white/5 bg-black/40 space-y-3">
                 <div className="flex items-center gap-2 text-white/40">
                   <Cpu size={14} />
                   <span className="text-[9px] font-black uppercase tracking-widest">

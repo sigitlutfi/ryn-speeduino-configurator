@@ -30,7 +30,11 @@ import StartupCurves from "./features/startup/StartupCurves.jsx";
 import IdleControl from "./features/startup/IdleControl.jsx";
 import LaunchControl from "./features/racing/LaunchControl.jsx";
 import FlatShift from "./features/racing/FlatShift.jsx";
+import Nitrous from "./features/racing/Nitrous.jsx";
+import FuelPump from "./features/io/FuelPump.jsx";
+import WMI from "./features/racing/WMI.jsx";
 import FanSettings from "./features/io/FanSettings.jsx";
+import SensorCalibration from "./features/tools/SensorCalibration.jsx";
 
 // Analytics Placeholder moved to features/dashboard/Analysis.jsx
 
@@ -182,26 +186,15 @@ export default function App() {
                 path={ROUTES.STARTUP_CRANKING}
                 component={CrankingSettings}
               />
-              <Route
-                path={ROUTES.STARTUP_CURVES}
-                component={StartupCurves}
-              />
-              <Route
-                path={ROUTES.STARTUP_IDLE}
-                component={IdleControl}
-              />
-              <Route
-                path={ROUTES.RACING_LAUNCH}
-                component={LaunchControl}
-              />
-              <Route
-                path={ROUTES.RACING_FLATSHIFT}
-                component={FlatShift}
-              />
-              <Route
-                path={ROUTES.SETTINGS_FAN}
-                component={FanSettings}
-              />
+              <Route path={ROUTES.STARTUP_CURVES} component={StartupCurves} />
+              <Route path={ROUTES.STARTUP_IDLE} component={IdleControl} />
+              <Route path={ROUTES.RACING_LAUNCH} component={LaunchControl} />
+              <Route path={ROUTES.RACING_FLATSHIFT} component={FlatShift} />
+              <Route path={ROUTES.RACING_NITROUS} component={Nitrous} />
+              <Route path={ROUTES.ADDON_FUELPUMP} component={FuelPump} />
+              <Route path={ROUTES.SETTINGS_FAN} component={FanSettings} />
+              <Route path={ROUTES.SETTINGS_WMI} component={WMI} />
+              <Route path={ROUTES.SETTINGS_CALIBRATION} component={SensorCalibration} />
               <Route path={ROUTES.COMM} component={Communications} />
               <Route path={ROUTES.TERMINAL} component={TerminalPlaceholder} />
               <Route

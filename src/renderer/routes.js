@@ -23,7 +23,11 @@ export const ROUTES = {
   STARTUP_IDLE: "/startup/idle",
   RACING_LAUNCH: "/racing/launch",
   RACING_FLATSHIFT: "/racing/flatshift",
+  RACING_NITROUS: "/racing/nitrous",
   SETTINGS_VVT: "/engine/vvt",
   SETTINGS_FAN: "/io/fan",
+  SETTINGS_WMI: "/io/wmi",
+  SETTINGS_CALIBRATION: "/tools/calibration",
+  ADDON_FUELPUMP: "/io/fuelpump",
   APP_SETTINGS: "/app-settings",
 };

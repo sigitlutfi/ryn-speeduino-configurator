@@ -57,18 +57,18 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 - [✓] Priming Pulse Settings
 - [✓] Warm-Up Enrichment (WUE)
 - [✓] Afterstart Enrichment (ASE)
-- [ ] Idle Control (IAC)
+- [✓] Idle Control (IAC)
 - [✓] Idle RPM Target (curved)
-- [ ] Idle Stepper Motor Settings
-- [ ] Idle Up Settings
-- [ ] Idle Advance Settings
+- [✓] Idle Stepper Motor Settings
+- [✓] Idle Up Settings
+- [✓] Idle Advance Settings
 
 ## RACING FEATURES
 
-- [ ] Launch Control
-- [ ] Nitrous
-- [ ] Water Meth Injection Control
-- [ ] Flat Shift
+- [✓] Launch Control
+- [✓] Nitrous
+- [✓] Water Meth Injection Control
+- [✓] Flat Shift
 - [ ] Pit Speed Limiter
 - [ ] Rumble Idle (patternized)
 - [ ] Anti-Lag
@@ -77,8 +77,8 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 ## 🔌 ACCESSORIES / I/O
 
 - [✓] Programmable Outputs
-- [ ] Thermal Fan
-- [ ] Fuel Pump Control
+- [✓] Thermal Fan
+- [✓] Fuel Pump Control
 - [ ] VSS & Gear Detection
 - [ ] Air Conditioner Control
 - [ ] Fuel & Oil Pressure
@@ -91,9 +91,9 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 
 ## 🛠️ TOOLS & CALIBRATIONS
 
-- [ ] Sensor Calibration (TPS, IAT, CLT)
+- [ ] Sensor Calibration (TPS, IAT, CLT, EMAP,MAP,BARO,BATT any?)
+- [ ] Set Analog Inputs Filter
 - [ ] Protocol STATS
 - [ ] Update/Upgrade Firmware
-- [ ] Set Analog Inputs Filter
 - [✓] Communications (Serial Setup)
 - [-] Terminal / Console

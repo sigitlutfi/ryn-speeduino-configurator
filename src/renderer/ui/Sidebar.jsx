@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import {
-  BarChart2,
+  FlaskConical,
+  Flag,
   Activity,
   Database,
   Flame,
@@ -14,12 +15,12 @@ import {
   Thermometer,
   Droplets,
   Zap,
-  Flag,
   Plug,
   Terminal,
   ShieldAlert,
   Clock,
   Wrench,
+  BarChart2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
@@ -106,18 +107,38 @@ const NAV_CONFIG = [
     ],
   },
   {
-    category: "ADDONS & RACING",
+    category: "RACING",
     icon: Flag,
     theme: "red",
     items: [
       { path: ROUTES.RACING_LAUNCH, label: "Launch Control", icon: Flag },
-      { path: ROUTES.RACING_FLATSHIFT, label: "Flat Shift", icon: Zap },
-      { path: ROUTES.SETTINGS_FAN, label: "Fan Control", icon: Activity },
+      {
+        path: ROUTES.RACING_FLATSHIFT,
+        label: "Flat Shift",
+        icon: Zap,
+        theme: "orange",
+      },
+      {
+        path: ROUTES.RACING_NITROUS,
+        label: "Nitrous Oxide",
+        icon: Flame,
+      },
+      { path: ROUTES.SETTINGS_WMI, label: "WMI Control", icon: FlaskConical },
+    ],
+  },
+  {
+    category: "Add On",
+    icon: Plug,
+    theme: "white",
+    items: [
       {
         path: ROUTES.SETTINGS_PROGRAMMABLE,
         label: "Prog. Outputs",
         icon: Plug,
       },
+      { path: ROUTES.SETTINGS_FAN, label: "Fan Control", icon: Activity },
+
+      { path: ROUTES.ADDON_FUELPUMP, label: "Fuel Pump", icon: Droplets },
     ],
   },
   {
@@ -125,6 +146,7 @@ const NAV_CONFIG = [
     icon: Wrench,
     theme: "white",
     items: [
+      { path: ROUTES.SETTINGS_CALIBRATION, label: "Sensor Calibrations", icon: Wrench },
       { path: ROUTES.COMM, label: "Communication", icon: Radio },
       { path: ROUTES.TERMINAL, label: "Raw Console", icon: Terminal },
       {
