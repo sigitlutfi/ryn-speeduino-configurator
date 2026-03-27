@@ -21,6 +21,7 @@ import {
   Clock,
   Wrench,
   BarChart2,
+  Snail,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
@@ -47,11 +48,18 @@ const NAV_CONFIG = [
     items: [
       { path: ROUTES.SETTINGS_ENGINE, label: "Master Setup", icon: Cpu },
       {
+        path: ROUTES.SETTINGS_CALIBRATION,
+        label: "Sensor Calibrations",
+        icon: Wrench,
+      },
+      {
         path: ROUTES.SETTINGS_INJECTOR,
         label: "Injector Char",
         icon: Droplets,
       },
       { path: ROUTES.SETTINGS_TRIGGER, label: "Trigger Setup", icon: Zap },
+      { path: ROUTES.SETTINGS_BOOST, label: "Boost Control", icon: Snail },
+      { path: ROUTES.SETTINGS_VVT, label: "VVT Control", icon: Settings },
       {
         path: ROUTES.SETTINGS_PROTECTION,
         label: "Safety / Cut",
@@ -78,6 +86,11 @@ const NAV_CONFIG = [
         path: ROUTES.SETTINGS_IAT,
         label: "IAT Compensation",
         icon: Thermometer,
+      },
+      {
+        path: ROUTES.SETTINGS_STAGED,
+        label: "Staged Injection",
+        icon: Droplets,
       },
     ],
   },
@@ -119,6 +132,24 @@ const NAV_CONFIG = [
         theme: "orange",
       },
       {
+        path: ROUTES.RACING_PITLIMITER,
+        label: "Pit Limiter",
+        icon: Snail,
+        theme: "cyan",
+      },
+      {
+        path: ROUTES.RACING_RUMBLEIDLE,
+        label: "Rumble Idle",
+        icon: Activity,
+        theme: "orange",
+      },
+      {
+        path: ROUTES.RACING_ANTILAG,
+        label: "Anti-Lag System",
+        icon: Flame,
+        theme: "red",
+      },
+      {
         path: ROUTES.RACING_NITROUS,
         label: "Nitrous Oxide",
         icon: Flame,
@@ -139,6 +170,7 @@ const NAV_CONFIG = [
       { path: ROUTES.SETTINGS_FAN, label: "Fan Control", icon: Activity },
 
       { path: ROUTES.ADDON_FUELPUMP, label: "Fuel Pump", icon: Droplets },
+      { path: ROUTES.SETTINGS_TACHO, label: "Tacho Control", icon: Activity },
     ],
   },
   {
@@ -146,7 +178,11 @@ const NAV_CONFIG = [
     icon: Wrench,
     theme: "white",
     items: [
-      { path: ROUTES.SETTINGS_CALIBRATION, label: "Sensor Calibrations", icon: Wrench },
+      {
+        path: ROUTES.TOOLS_DIAGNOSTICS,
+        label: "Protocol Stats",
+        icon: Activity,
+      },
       { path: ROUTES.COMM, label: "Communication", icon: Radio },
       { path: ROUTES.TERMINAL, label: "Raw Console", icon: Terminal },
       {

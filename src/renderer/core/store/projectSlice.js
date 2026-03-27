@@ -1,4 +1,6 @@
-import { parseIni } from '../../../shared/ini-parser.js';
+import { parseIni, getVarMetadata } from '../../../shared/ini-parser.js';
+import { formatWriteCommand, formatBurnCommand, formatReadCommand } from '../../../shared/protocol/ecu-commands.js';
+import { parsePage } from '../../../shared/protocol/binary-parser.js';
 import { INITIAL_CONNECTION } from './connectionSlice.js';
 import { INITIAL_TABLES } from './tableSlice.js';
 
@@ -195,18 +197,76 @@ export const createProjectSlice = (set, get) => ({
   },
 
   updateConstants: (newConstants) => {
+    const { syncConstantToECU, connection } = get();
+    const isConnected = connection.status === 'connected';
+
     set((s) => {
       if (!s.currentProject) return {};
+      const updatedConstants = {
+        ...(s.currentProject.constants || {}),
+        ...newConstants
+      };
+
+      // Live Sync: If connected, send changes to ECU RAM
+      if (isConnected) {
+        Object.keys(newConstants).forEach((name) => {
+          syncConstantToECU(name, newConstants[name]);
+        });
+      }
+
       return {
         currentProject: {
           ...s.currentProject,
-          constants: {
-            ...(s.currentProject.constants || {}),
-            ...newConstants
-          }
+          constants: updatedConstants
         }
       };
     });
+  },
+
+  syncConstantToECU: async (name, value) => {
+    const { parsedIni, connection } = get();
+    if (connection.status !== 'connected' || !parsedIni) return;
+
+    const meta = getVarMetadata(parsedIni, name);
+    if (!meta) return;
+
+    try {
+      const cmd = formatWriteCommand(meta.page, meta.offset, meta.meta.length || 1, value, meta.meta.dataType);
+      await window.serial.sendCommand(cmd);
+      console.log(`[ECU] Synced ${name} to Page ${meta.page}, Offset ${meta.offset}`);
+    } catch (e) {
+      console.error(`[ECU] Sync failed for ${name}:`, e);
+    }
+  },
+
+  burnPage: async (pageId) => {
+    const { connection, notify } = get();
+    if (connection.status !== 'connected') {
+      notify('Device not connected', 'error');
+      return { ok: false };
+    }
+
+    try {
+      const cmd = formatBurnCommand(pageId);
+      await window.serial.sendCommand(cmd);
+      notify(`Page ${pageId} burned to EEPROM`, 'success');
+      return { ok: true };
+    } catch (e) {
+      notify(`Burn failed for Page ${pageId}`, 'error');
+      return { ok: false, error: e.message };
+    }
+  },
+
+  burnActiveProjectPages: async () => {
+    const { currentProject, burnPage } = get();
+    if (!currentProject?.constants) return;
+
+    const pages = Object.keys(currentProject.constants).map(Number);
+    for (const pId of pages) {
+       await burnPage(pId);
+       // Small delay between burns to allow EEPROM write
+       await new Promise(r => setTimeout(r, 200));
+    }
   },
 
   // Feature: Change INI / Update Firmware Definition
@@ -242,6 +302,82 @@ export const createProjectSlice = (set, get) => ({
       console.error('[project] updateIni failed:', e);
       return { ok: false, error: e.message };
     }
+  },
 
+  // ECU Synchronization (Fetch from Hardware)
+  readPageFromECU: (pageId) => {
+    const { parsedIni, notify } = get();
+    if (!parsedIni) return Promise.reject('No INI loaded');
+
+    // Get expected page size
+    const pageSize = parsedIni.constants.pageSizes[pageId] || 256;
+    const cmd = formatReadCommand(pageId, 0, pageSize);
+
+    return new Promise((resolve, reject) => {
+      let timeout = setTimeout(() => {
+        window.serial.offAll(); // This is a bit aggressive, might need a better way to unregister only one
+        // Re-register the global realtime listener (from App.jsx logic)
+        // Actually App.jsx re-registers on mount, but we are in a hook... 
+        // A better way is to use a specific event emitter or handle it in App.jsx
+        reject('Read Timeout');
+      }, 3000);
+
+      const handleData = (bytes) => {
+        if (bytes.length === pageSize) {
+          clearTimeout(timeout);
+          try {
+            const pageMeta = parsedIni.constants.pages[pageId];
+            const parsed = parsePage(Buffer.from(bytes), pageMeta);
+            resolve(parsed);
+          } catch (e) {
+            reject(e);
+          }
+        }
+      };
+
+      window.serial.onData(handleData);
+      window.serial.sendCommand(cmd);
+    });
+  },
+
+  syncAllFromECU: async () => {
+    const { parsedIni, readPageFromECU, connection, notify } = get();
+    if (connection.status !== 'connected') {
+      notify('Not connected to ECU', 'error');
+      return;
+    }
+
+    notify('Synchronizing with ECU...', 'info');
+    
+    // Pages typically used in Speeduino for tuning
+    const pagesToSync = [1, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    const newConstants = {};
+
+    try {
+      for (const pId of pagesToSync) {
+        if (parsedIni.constants.pages[pId]) {
+          console.log(`[ECU Sync] Reading Page ${pId}...`);
+          const data = await readPageFromECU(pId);
+          newConstants[pId] = data;
+          // Small delay between pages
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+
+      set((s) => ({
+        currentProject: {
+          ...s.currentProject,
+          constants: {
+            ...(s.currentProject.constants || {}),
+            ...newConstants
+          }
+        }
+      }));
+
+      notify('ECU Data Synchronized', 'success');
+    } catch (e) {
+      console.error('[ECU Sync] Failed:', e);
+      notify(`Sync Failed: ${e}`, 'error');
+    }
   }
 });

@@ -120,6 +120,16 @@ export function createMockSerial(onData) {
         const sigBytes = new Uint8Array(sig.length + 1);
         for (let i = 0; i < sig.length; i++) sigBytes[i] = sig.charCodeAt(i);
         setTimeout(() => onData(sigBytes), 5);
+      } else if (cmd === 'w') {
+        // Write command: Log for debugging
+        const page = buf[1];
+        const offset = buf.readUInt16LE(2);
+        const length = buf.readUInt16LE(4);
+        console.log(`[Mock ECU] Received WRITE: Page ${page}, Offset ${offset}, Length ${length}`);
+      } else if (cmd === 'b') {
+        // Burn command: Log for debugging
+        const page = buf[1];
+        console.log(`[Mock ECU] Received BURN: Page ${page}`);
       }
     },
     close() {

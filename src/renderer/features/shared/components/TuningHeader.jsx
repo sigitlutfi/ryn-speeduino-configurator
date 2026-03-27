@@ -100,7 +100,7 @@ export default function TuningHeader({
           </div>
         </div>
 
-        {/* Global Hardware Status (Center) */}
+        {/* Global Hardware Status (Center)
         <div className="hidden xl:flex items-center gap-8 px-8 border-x border-white/5 h-12">
           <div className="flex flex-col items-end">
             <span className="text-[8px] font-black text-gray-600 uppercase tracking-widest">
@@ -122,7 +122,7 @@ export default function TuningHeader({
               <Unplug size={16} />
             </div>
           )}
-        </div>
+        </div> */}
 
         {/* Action Buttons Section */}
         <div className="flex items-center gap-3 w-full lg:w-auto justify-end">

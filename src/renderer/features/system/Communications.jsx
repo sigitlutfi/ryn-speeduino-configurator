@@ -28,22 +28,6 @@ export default function Communications() {
     window.serial.listPorts().then(setPorts);
   }, []);
 
-  useEffect(() => {
-    window.serial.onData((bytes) => {
-      if (bytes.length === 138) {
-        const data = parseRealtime(bytes);
-        if (data) useStore.getState().setRealtime(data);
-      }
-    });
-    window.serial.onStatus((status) => {
-      if (status === "connected") setConnectionStatus("connected");
-      else if (status === "disconnected") setConnectionStatus("disconnected");
-      else if (status.startsWith("error:"))
-        setConnectionStatus("error", status.slice(6));
-    });
-    return () => window.serial.offAll();
-  }, []);
-
   const handleConnect = async () => {
     if (!connection.port) return;
     setConnectionStatus("connecting");

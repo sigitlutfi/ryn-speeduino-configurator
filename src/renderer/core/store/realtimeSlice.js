@@ -10,12 +10,20 @@ export const createRealtimeSlice = (set) => ({
   logRecording: false,
   logEntries: [],
 
-  setRealtime: (data) => set({ realtime: data }),
+  setRealtime: (data) => set((s) => {
+    const newState = { realtime: data };
+    if (s.logRecording) {
+      const entry = { ...data, timestamp: Date.now() };
+      // Limit log entries to 10,000 pts (~15-20 mins)
+      newState.logEntries = [...s.logEntries.slice(-9999), entry];
+    }
+    return newState;
+  }),
 
   setLogRecording: (val) => set({ logRecording: val }),
 
   appendLogEntry: (entry) =>
-    set((s) => ({ logEntries: [...s.logEntries.slice(-5000), entry] })),
+    set((s) => ({ logEntries: [...s.logEntries.slice(-9999), entry] })),
 
   clearLog: () => set({ logEntries: [] }),
 });

@@ -16,8 +16,12 @@ import {
   Monitor,
   Maximize,
   ExternalLink,
+  Zap,
   SlidersHorizontal,
+  SlidersHorizontalIcon,
+  Activity,
 } from "lucide-react";
+
 import { motion, AnimatePresence } from "framer-motion";
 import SettingsDialog from "./SettingsDialog.jsx";
 import ProjectSettings from "../features/projects/ProjectSettings.jsx";
@@ -81,7 +85,8 @@ export default function AppToolbar() {
   const [openMenu, setOpenMenu] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
-  const { currentProject, closeProject, connection } = useStore();
+  const { currentProject, closeProject, connection, toggleIndicatorTray, showIndicatorTray } = useStore();
+
 
   const handleMenuClick = (menu) => {
     setOpenMenu(openMenu === menu ? null : menu);
@@ -163,7 +168,7 @@ export default function AppToolbar() {
             <Divider />
             {currentProject && (
               <MenuItem
-                icon={SlidersHorizontal}
+                icon={SlidersHorizontalIcon}
                 label="Project Settings…"
                 onClick={() => {
                   setIsProjectSettingsOpen(true);
@@ -269,6 +274,32 @@ export default function AppToolbar() {
           className="flex items-center gap-4 px-3"
           style={{ WebkitAppRegion: "no-drag" }}
         >
+          {connection.status === "connected" && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => useStore.getState().syncAllFromECU()}
+                className="group flex items-center gap-2 px-3 py-1.5 bg-neon-cyan/10 border border-neon-cyan/30 rounded-lg text-neon-cyan hover:bg-neon-cyan hover:text-black transition-all duration-300 shadow-glow-cyan/20"
+                title="Fetch all settings from ECU RAM"
+              >
+                <RefreshCcw size={12} className="group-hover:animate-spin" />
+                <span className="text-[9px] font-black uppercase tracking-widest">
+                  Sync
+                </span>
+              </button>
+
+              <button
+                onClick={() => useStore.getState().burnActiveProjectPages()}
+                className="group flex items-center gap-2 px-3 py-1.5 bg-neon-yellow/10 border border-neon-yellow/30 rounded-lg text-neon-yellow hover:bg-neon-yellow hover:text-black transition-all duration-300 shadow-glow-yellow/20"
+                title="Burn all modified pages to EEPROM"
+              >
+                <Zap size={12} className="fill-current" />
+                <span className="text-[9px] font-black uppercase tracking-widest">
+                  Burn
+                </span>
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <span
               className={`w-1.5 h-1.5 rounded-full ${connection.status === "connected" ? "bg-neon-green animate-pulse" : "bg-gray-700"}`}
@@ -277,6 +308,15 @@ export default function AppToolbar() {
               {connection.status}
             </span>
           </div>
+
+          <button
+            onClick={toggleIndicatorTray}
+            className={`p-1.5 rounded-lg transition-all flex items-center gap-2 group ${showIndicatorTray ? 'bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 shadow-glow-cyan/20' : 'text-gray-500 hover:text-white hover:bg-white/5 border border-transparent'}`}
+            title="Toggle Engine Indicators"
+          >
+            <Activity size={14} className={showIndicatorTray ? "animate-pulse" : ""} />
+            <span className="text-[9px] font-black uppercase tracking-widest hidden lg:block">Status</span>
+          </button>
         </div>
       </div>
     </>

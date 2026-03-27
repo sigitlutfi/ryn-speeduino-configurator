@@ -168,7 +168,7 @@ const EngineSettings = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-black select-none animate-in fade-in duration-700">
+    <div className="flex flex-col h-full  select-none animate-in fade-in duration-700">
       <TuningHeader
         title="Engine Strategy"
         icon={Settings}
@@ -228,10 +228,26 @@ const EngineSettings = () => {
                   </span>
                 </div>
 
-                <StatField name="stoich" label="Stoichiometric Ratio" unit="AFR" />
-                <SelectField name="pinLayout" label="Speeduino Board" icon={Cpu} />
-                <SelectField name="nCylinders" label="Cylinder Count" icon={Activity} />
-                <StatField name="nInjectors" label="Injector Count" icon={Zap} />
+                <StatField
+                  name="stoich"
+                  label="Stoichiometric Ratio"
+                  unit="AFR"
+                />
+                <SelectField
+                  name="pinLayout"
+                  label="Speeduino Board"
+                  icon={Cpu}
+                />
+                <SelectField
+                  name="nCylinders"
+                  label="Cylinder Count"
+                  icon={Activity}
+                />
+                <StatField
+                  name="nInjectors"
+                  label="Injector Count"
+                  icon={Zap}
+                />
                 <SelectField name="twoStroke" label="Stroke Cycle" />
                 <SelectField name="engineType" label="Engine Stroke" />
               </div>
@@ -250,14 +266,19 @@ const EngineSettings = () => {
                     label="Control Algorithm"
                     icon={ShieldAlert}
                   />
-                  <StatField 
-                    name="divider" 
+                  <StatField
+                    name="divider"
                     label="Squirts per Cycle"
                     description="Firing events per cycle (720°)"
                   />
                   <SelectField name="injType" label="Injection Type" />
                   <SelectField name="alternate" label="Injektor Timing" />
-                  <StatField name="injOpen" label="Injector Open Time" unit="ms" step={0.1} />
+                  <StatField
+                    name="injOpen"
+                    label="Injector Open Time"
+                    unit="ms"
+                    step={0.1}
+                  />
                   <SelectField name="mapSample" label="MAP Sampling" />
                 </div>
               </div>

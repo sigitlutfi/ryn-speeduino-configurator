@@ -30,6 +30,17 @@ const FLEX_FIELDS = [
   "boostEnabled",
 ];
 
+const FALLBACK_CONSTANTS = {
+  flexFuelBins: [0, 20, 40, 60, 80, 100],
+  flexFuelAdj: [100, 110, 120, 130, 140, 150],
+  flexAdvBins: [0, 20, 40, 60, 80, 100],
+  // Raw values (Speeduino uses 40-based offset for timing: Display = Raw - 40)
+  // So 40 raw = 0 deg, 50 raw = 10 deg
+  flexAdvAdj: [40, 42, 44, 46, 48, 50],
+  flexBoostBins: [0, 20, 40, 60, 80, 100],
+  flexBoostAdj: [0, 0, 0, 0, 0, 0],
+};
+
 export default function FlexFuelSettings() {
   const {
     getFieldValue,
@@ -43,7 +54,7 @@ export default function FlexFuelSettings() {
     isConnected,
     isDirty,
     isReady,
-  } = useTuningModule(FLEX_FIELDS, {});
+  } = useTuningModule(FLEX_FIELDS, { fallbacks: FALLBACK_CONSTANTS });
 
   const getValue = (name) => {
     const info = getFieldInfo(name);
@@ -197,7 +208,7 @@ export default function FlexFuelSettings() {
                       xLabel="Ethanol %"
                       yLabel="Timing Add (°)"
                       xRange={{ min: 0, max: 100 }}
-                      yRange={{ min: 0, max: 50 }}
+                      yRange={{ min: 0, max: 20 }}
                       onChange={(nx, ny) => updateCurve("flexAdvBins", "flexAdvAdj", nx, ny)}
                    />
                 </div>

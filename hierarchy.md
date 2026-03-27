@@ -5,9 +5,9 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 
 ## 📊 DASHBOARD & LOGGING
 
-- [-] Main Dashboard (Realtime Data)
-- [-] Race Analysis / Log
-- [ ] Gauge Editor and Setup
+- [✓] Dashboard (Live Gauges)
+- [✓] Analysis (Telemetries/Charts)
+- [✓] Tuning Table 1 (VE, Ignition, AFR)
 - [ ] Tuning & Dyno Views
 - [ ] Graphing & Logging
 - [ ] Diagnostic & HIGH SPEED LOGGER
@@ -17,6 +17,8 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 - [✓] Engine Settings (ReqFuel, Algorithm)
 - [✓] Injector Characteristics
 - [✓] Trigger Setup (Decoder, Crank Angle)
+- [✓] VVT Control
+- [✓] Boost Control
 
 ### Engine Protection (part of Engine Parameters Settings)
 
@@ -36,7 +38,7 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 - [✓] Lambda Target Table
 - [✓] IAT Correction
 - [✓] Flex Fuel
-- [ ] Staged Injection
+- [✓] Staged Injection
 - [ ] Sequential Fuel Trim 1-4
 - [ ] Fuel Temp Correction
 
@@ -69,10 +71,9 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 - [✓] Nitrous
 - [✓] Water Meth Injection Control
 - [✓] Flat Shift
-- [ ] Pit Speed Limiter
-- [ ] Rumble Idle (patternized)
-- [ ] Anti-Lag
-- [ ] Two Step
+- [✓] Pit Speed Limiter
+- [✓] Rumble Idle (patternized)
+- [✓] Anti-Lag
 
 ## 🔌 ACCESSORIES / I/O
 
@@ -82,18 +83,16 @@ Silakan pindahkan atau tambahkan item di bawah ini.
 - [ ] VSS & Gear Detection
 - [ ] Air Conditioner Control
 - [ ] Fuel & Oil Pressure
-- [ ] Tacho Output
-- [ ] Boost Control
-- [ ] VVT Control
+- [✓] Tacho Output
 - [ ] CAN Bus & Secondary Serial IO Interface
 - [ ] External Auxilliary Inputs Channels Config
 - [ ] Local Auxilliary Inputs Channels Config
 
 ## 🛠️ TOOLS & CALIBRATIONS
 
-- [ ] Sensor Calibration (TPS, IAT, CLT, EMAP,MAP,BARO,BATT any?)
-- [ ] Set Analog Inputs Filter
-- [ ] Protocol STATS
+- [✓] Sensor Calibration (TPS, IAT, CLT, MAP, BARO, BATT)
+- [✓] Set Analog Inputs Filter
+- [✓] Protocol STATS (Loops/s, RAM, Sync Losses)
 - [ ] Update/Upgrade Firmware
 - [✓] Communications (Serial Setup)
 - [-] Terminal / Console

@@ -145,7 +145,14 @@ function parseVarEntry(tokens) {
     }
 
     const labels = tokens.slice(labelStart).map(unquote).filter(Boolean);
-    return { type: "bits", dataType, offset, bitRange, labels, options: labels };
+    return {
+      type: "bits",
+      dataType,
+      offset,
+      bitRange,
+      labels,
+      options: labels,
+    };
   }
 
   if (type === "string") {
@@ -185,7 +192,7 @@ export function parseIni(content, preprocessorSymbols = {}) {
   let currentTable = null;
   let currentCurve = null;
   let currentDialog = null;
-  const lastOffsetMap = {}; 
+  const lastOffsetMap = {};
 
   const lines = content.split(/\r?\n/);
 
@@ -227,14 +234,14 @@ export function parseIni(content, preprocessorSymbols = {}) {
         const symbol = parts[1];
         const isTrue = !!preprocessorSymbols[symbol];
         const parentActive = branchStack[branchStack.length - 1];
-        
+
         branchStack.push(parentActive && isTrue);
         executedStack.push(isTrue);
         continue;
       } else if (directive === "#else") {
         const parentActive = branchStack[branchStack.length - 2] ?? true;
         const alreadyExecuted = executedStack[executedStack.length - 1];
-        
+
         branchStack[branchStack.length - 1] = parentActive && !alreadyExecuted;
         continue;
       } else if (directive === "#endif") {
@@ -249,7 +256,7 @@ export function parseIni(content, preprocessorSymbols = {}) {
           macros[defMatch[1].trim()] = resolveMacros(defMatch[2].trim());
         continue;
       }
-      
+
       continue; // Skip unknown or other # directives
     }
 
@@ -302,7 +309,11 @@ export function parseIni(content, preprocessorSymbols = {}) {
         // Handle lastOffset support
         if (tokens[2]?.trim().toLowerCase() === "lastoffset") {
           parsed.offset = lastOffsetMap[currentPage] || 0;
-        } else if (parsed.offset !== undefined && parsed.offset !== null && !isNaN(parsed.offset)) {
+        } else if (
+          parsed.offset !== undefined &&
+          parsed.offset !== null &&
+          !isNaN(parsed.offset)
+        ) {
           lastOffsetMap[currentPage] = parsed.offset;
         }
         result.constants.pages[currentPage][name] = parsed;
@@ -417,7 +428,8 @@ export function parseIni(content, preprocessorSymbols = {}) {
 }
 
 export function getTableMetadata(parsedIni, tableId) {
-  if (!parsedIni || !parsedIni.tables) return null;
+  if (!parsedIni || !parsedIni.tables || typeof tableId !== "string")
+    return null;
   let table = parsedIni.tables[tableId];
   if (!table) {
     const key = Object.keys(parsedIni.tables).find((k) =>

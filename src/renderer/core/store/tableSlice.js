@@ -40,6 +40,31 @@ export const INITIAL_TABLES = {
     rpmAxis: VE_RPM_AXIS,
     loadAxis: VE_LOAD_AXIS,
   },
+  staging: {
+    values: Array.from({ length: 8 }, () => Array(8).fill(0)),
+    rpmAxis: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000],
+    loadAxis: [20, 40, 60, 80, 100, 120, 140, 160],
+  },
+  vvtTbl: {
+    values: Array.from({ length: 8 }, () => Array(8).fill(0)),
+    rpmAxis: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000],
+    loadAxis: [20, 40, 60, 80, 100, 120, 140, 160],
+  },
+  vvt2Tbl: {
+    values: Array.from({ length: 8 }, () => Array(8).fill(0)),
+    rpmAxis: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000],
+    loadAxis: [20, 40, 60, 80, 100, 120, 140, 160],
+  },
+  boostTbl: {
+    values: Array.from({ length: 8 }, () => Array(8).fill(0)),
+    rpmAxis: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000],
+    loadAxis: [0, 20, 40, 60, 80, 100, 120, 140],
+  },
+  boostDCLupTbl: {
+    values: Array.from({ length: 8 }, () => Array(8).fill(0)),
+    rpmAxis: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000],
+    loadAxis: [0, 20, 40, 60, 80, 100, 120, 140],
+  },
 };
 
 export const createTableSlice = (set) => ({

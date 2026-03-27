@@ -33,7 +33,8 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
     return {
       scale: zDef?.scale || 1,
       offset: zDef?.translate || 0,
-      digits: zDef?.digits || 0
+      digits: zDef?.digits || 0,
+      shape: zDef?.shape
     };
   }, [meta, parsedIni]);
 
@@ -45,11 +46,12 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
     if (!pageData) return;
 
     const zData = pageData[meta.zBinsVar];
-    if (zData) {
+    if (zData && scaling) {
       const flatData = Array.from(zData);
+      const [rows, cols] = scaling.shape || [16, 16];
       let matrix = [];
-      for (let i = 0; i < 16; i++) {
-        const row = flatData.slice(i * 16, i * 16 + 16).map(val => {
+      for (let i = 0; i < rows; i++) {
+        const row = flatData.slice(i * cols, (i + 1) * cols).map((val) => {
           // If custom transform provided, use it. Otherwise use INI scaling.
           if (options.transform?.toDisplay) {
             return options.transform.toDisplay(val, scaling);

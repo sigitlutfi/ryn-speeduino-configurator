@@ -10,6 +10,7 @@
  */
 export function parseRealtime(bytes) {
   if (!bytes || bytes.length < 138) return null;
+  const isExtended = bytes.length >= 144;
 
   const b = bytes;
 
@@ -33,27 +34,86 @@ export function parseRealtime(bytes) {
   const flexCorr   = b[36];          // %
   const fuelTemp   = b[116] - 40;    // °C
   const engineByte = b[2];
+  const status1 = b[1];
   const engineStatus2 = b[32];
+  const status3 = b[84];
+  const status4 = b[110];
   const protectStatus = b[85];
 
   const engine = {
-    running:    !!(engineByte & 0x01),
-    cranking:   !!(engineByte & 0x02),
-    ase:        !!(engineByte & 0x04),
-    warmup:     !!(engineByte & 0x08),
-    accelTPS:   !!(engineByte & 0x10),
-    decelTPS:   !!(engineByte & 0x20),
-    // Limiter flags from status2
-    hardLimit:  !!(engineStatus2 & 0x04),
-    softLimit:  !!(engineStatus2 & 0x08),
-    boostCut:   !!(engineStatus2 & 0x10),
+    running:          !!(engineByte & 0x01),
+    cranking:         !!(engineByte & 0x02),
+    ase:              !!(engineByte & 0x04),
+    warmup:           !!(engineByte & 0x08),
+    accelTPS:         !!(engineByte & 0x10),
+    decelTPS:         !!(engineByte & 0x20),
+    accelMAP:         !!(engineByte & 0x40),
+    decelMAP:         !!(engineByte & 0x80),
+    // Status 1
+    dfco:             !!(status1 & 0x10),
+    boostCutFuel:     !!(status1 & 0x20),
+    // Limiter/Status flags from status2
+    launchHard:       !!(engineStatus2 & 0x01),
+    launchSoft:       !!(engineStatus2 & 0x02),
+    hardLimit:        !!(engineStatus2 & 0x04),
+    softLimit:        !!(engineStatus2 & 0x08),
+    boostCutSpark:    !!(engineStatus2 & 0x10),
+    error:            !!(engineStatus2 & 0x20),
+    idleControl:      !!(engineStatus2 & 0x40),
+    sync:             !!(engineStatus2 & 0x80),
+    // Status 3
+    resetLock:        !!(status3 & 0x01),
+    nitrous:          !!(status3 & 0x02),
+    halfSync:         !!(status3 & 0x10),
+    // Status 4
+    wmiEmpty:         !!(status4 & 0x01),
+    vvt1Error:        !!(status4 & 0x02),
+    vvt2Error:        !!(status4 & 0x04),
+    fanStatus:        !!(status4 & 0x08),
+    burnPending:      !!(status4 & 0x10),
+    stagingActive:    !!(status4 & 0x20),
     // Protection flags from engineProtectStatus
-    protectRPM: !!(protectStatus & 0x01),
-    protectMAP: !!(protectStatus & 0x02),
-    protectOil: !!(protectStatus & 0x04),
-    protectAFR: !!(protectStatus & 0x08),
-    protectCLT: !!(protectStatus & 0x10),
+    protectActive:    !!(protectStatus > 0),
+    protectRPM:       !!(protectStatus & 0x01),
+    protectMAP:       !!(protectStatus & 0x02),
+    protectOil:       !!(protectStatus & 0x04),
+    protectAFR:       !!(protectStatus & 0x08),
+    protectCLT:       !!(protectStatus & 0x10),
+    ioError:          !!(protectStatus & 0x80),
   };
+
+  // Performance Features (Expanded Protocol 144 bytes)
+  let performance = {
+    pitLimiterActive: false,
+    pitLimiterSwitch: false,
+    rumbleIdleActive: false,
+    rumbleIdleBeat:   true,
+    alsActive:        false,
+    alsSwitch:        false,
+    alsTimingCorr:    0,
+    alsFuelCorr:      100,
+    alsActiveTime:    0
+  };
+
+  if (isExtended) {
+    const perfByte1 = b[139];
+    const perfByte2 = b[140];
+    performance = {
+      pitLimiterActive: !!(perfByte1 & 0x01),
+      pitLimiterSwitch: !!(perfByte1 & 0x02),
+      rumbleIdleActive: !!(perfByte1 & 0x04),
+      rumbleIdleBeat:   !!(perfByte1 & 0x08),
+      alsActive:        !!(perfByte2 & 0x01),
+      alsSwitch:        !!(perfByte2 & 0x02),
+      alsTimingCorr:    new Int8Array([b[141]])[0],
+      alsFuelCorr:      b[142],
+      alsActiveTime:    b[143]
+    };
+  }
+
+  const loopsPerSecond = b[26] | (b[27] << 8); // uint16
+  const freeRAM = b[28] | (b[29] << 8);        // uint16
+  const syncLossCounter = b[3];                // byte
 
   return {
     rpm,
@@ -76,5 +136,10 @@ export function parseRealtime(bytes) {
     flexCorr,
     fuelTemp,
     engine,
+    performance,
+    // Diagnostic stats
+    loopsPerSecond,
+    freeRAM,
+    syncLossCounter,
   };
 }

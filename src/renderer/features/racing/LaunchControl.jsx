@@ -12,6 +12,7 @@ import {
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
+import { SelectRow, InputField, ToggleRow, InfoCard } from "../shared/components/TuningComponents";
 
 const LAUNCH_FIELDS = [
   "launchEnable", "launchPin", "launchHiLo", "lnchPullRes", 
@@ -24,7 +25,6 @@ const LaunchControl = () => {
     getFieldValue, setFieldValue, getFieldInfo, handleSave, discardChanges,
     isSaving, saveStatus, isConnected, isDirty, isReady,
   } = useTuningModule(LAUNCH_FIELDS, {});
-
   const getValue = (name) => {
     const info = getFieldInfo(name);
     const rawVal = getFieldValue(name);
@@ -38,50 +38,10 @@ const LaunchControl = () => {
 
   const launchEnable = getValue("launchEnable");
 
-  const SectionHeader = ({ title, icon: Icon, theme = "red" }) => (
-    <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-2">
-      <div className={`w-1 h-3 bg-neon-${theme} shadow-glow-${theme} rounded-full`} />
-      <span className="text-[9px] font-black text-white/80 uppercase tracking-[0.2em]">{title}</span>
-      {Icon && <Icon size={12} className={`ml-auto text-neon-${theme} opacity-30`} />}
-    </div>
-  );
-
-  const FormField = ({ name, label, unit, type = "number", theme = "red", disabled = false, step = 1 }) => {
-    const val = getValue(name);
-    const info = getFieldInfo(name);
-
-    return (
-      <div className={`flex flex-col gap-1.5 p-2.5 rounded-xl transition-all ${disabled ? "opacity-20 select-none cursor-not-allowed grayscale" : "hover:bg-white/5"}`}>
-        <label className="text-[7px] font-black text-gray-400 uppercase tracking-widest flex justify-between">
-          {label}
-          {unit && <span className="text-white/20 italic">{unit}</span>}
-        </label>
-        
-        {type === "select" ? (
-          <select
-            value={val}
-            onChange={(e) => updateValue(name, parseInt(e.target.value))}
-            className="bg-black/30 text-[10px] font-bold text-white outline-none border-none cursor-pointer focus:text-neon-red py-1"
-          >
-            {info?.meta?.options?.map((opt, i) => opt !== "INVALID" && (
-              <option key={i} value={i} className="bg-bg-deep text-white">{opt}</option>
-            ))}
-          </select>
-        ) : (
-          <input
-            type="number"
-            step={step}
-            value={val}
-            onChange={(e) => updateValue(name, parseFloat(e.target.value))}
-            className={`bg-transparent text-sm font-mono font-black text-white outline-none border-none focus:text-neon-${theme}`}
-          />
-        ) }
-      </div>
-    );
-  };
+  if (!isReady) return null;
 
   return (
-    <div className="flex flex-col h-full bg-black select-none overflow-hidden h-screen animate-in fade-in duration-700">
+    <div className="flex flex-col h-full bg-black select-none overflow-hidden animate-in fade-in duration-700">
       <TuningHeader
         title="Launch Control"
         icon={Flag}
@@ -95,54 +55,70 @@ const LaunchControl = () => {
         <div className="max-w-[1400px] mx-auto space-y-6 pb-20">
           
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-12 p-5 rounded-3xl glass-card border border-white/5 bg-gradient-to-r from-neon-red/[0.02] to-transparent">
-              <SectionHeader title="Global Hardware" icon={Settings} theme="red" />
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                <FormField name="launchPin" label="Input Pin" type="select" />
-                <FormField name="launchHiLo" label="Signal Type" type="select" />
-                <FormField name="lnchPullRes" label="Pullup" type="select" />
-                <div className="col-span-1 md:col-span-3 flex items-center gap-6 px-6 border-l border-white/5 ml-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[7px] font-bold text-white/30 uppercase tracking-[0.2em]">Launch Status</span>
-                    <div className={`px-4 py-1 rounded-full text-[9px] font-black tracking-widest flex items-center gap-2 ${launchEnable > 0 ? 'bg-neon-red/20 text-neon-red shadow-glow-red/20' : 'bg-white/5 text-white/20'}`}>
-                      <Orbit size={10} className={launchEnable > 0 ? "animate-spin" : ""} />
-                      {launchEnable > 0 ? "ARMED & READY" : "INACTIVE"}
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div className="lg:col-span-12">
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <SelectRow 
+                    label="Input Pin" 
+                    value={getValue("launchPin")} 
+                    onChange={(v) => updateValue("launchPin", v)}
+                    options={getFieldInfo("launchPin")?.meta?.options}
+                    icon={Settings}
+                  />
+                  <SelectRow 
+                    label="Signal Type" 
+                    value={getValue("launchHiLo")} 
+                    onChange={(v) => updateValue("launchHiLo", v)}
+                    options={getFieldInfo("launchHiLo")?.meta?.options}
+                  />
+                  <SelectRow 
+                    label="Internal Pullup" 
+                    value={getValue("lnchPullRes")} 
+                    onChange={(v) => updateValue("lnchPullRes", v)}
+                    options={getFieldInfo("lnchPullRes")?.meta?.options}
+                  />
+               </div>
+            </div>
+
+            <div className="lg:col-span-12">
+               <ToggleRow 
+                  label="Launch Control Master"
+                  value={getValue("launchEnable")}
+                  onChange={(v) => updateValue("launchEnable", v)}
+                  description="Arm the drag-staging system using the configured hardware trigger"
+               />
             </div>
           </div>
 
-          <div className={`p-6 rounded-[32px] glass-card border transition-all ${launchEnable > 0 ? 'border-neon-red/30 bg-neon-red/[0.01]' : 'border-white/5 opacity-40 grayscale'}`}>
-            <SectionHeader title="Launch Strategy" icon={Flame} theme="red" />
-            
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField name="launchEnable" label="System Mode" type="select" />
-                  <FormField name="lnchCtrlTPS" label="TPS Activation" unit="%" disabled={launchEnable === 0} />
-                  <FormField name="lnchCtrlVss" label="VSS Limit" unit="KPH" disabled={launchEnable === 0} />
-                  <FormField name="lnchFuelAdd" label="Fuel Adder" unit="%" theme="orange" disabled={launchEnable === 0} />
+          <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 transition-all duration-500 ${launchEnable > 0 ? 'opacity-100' : 'opacity-40 grayscale pointer-events-none'}`}>
+             <div className="space-y-6">
+                <div className="p-8 rounded-[40px] bg-white/5 border border-white/10 backdrop-blur-xl">
+                   <h3 className="text-[9px] font-black text-white/60 uppercase tracking-[0.3em] pl-4 mb-8 border-l-2 border-neon-red/50">Activation Envelope</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <InputField label="TPS Threshold" value={getValue("lnchCtrlTPS")} onChange={(v) => updateValue("lnchCtrlTPS", v)} units="%" />
+                      <InputField label="VSS Limit" value={getValue("lnchCtrlVss")} onChange={(v) => updateValue("lnchCtrlVss", v)} units="KPH" />
+                      <div className="md:col-span-2">
+                         <InputField label="Fuel Enrichment" value={getValue("lnchFuelAdd")} onChange={(v) => updateValue("lnchFuelAdd", v)} units="%" description="Additional fuel mass during launch phase" />
+                      </div>
+                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-2xl bg-black/40 border border-white/5 h-fit">
-                <div className="space-y-4">
-                  <h4 className="text-[8px] font-black text-neon-red/50 uppercase tracking-widest border-l-2 border-neon-red pl-3">Rev Limits</h4>
-                  <FormField name="lnchSoftLim" label="Soft Target" unit="RPM" theme="red" disabled={launchEnable === 0} />
-                  <FormField name="lnchRetard" label="Timing Fix" unit="°" theme="red" disabled={launchEnable === 0} />
+                <InfoCard title="Antilag Strategy" icon={Flame} theme="red">
+                   Launch control uses aggressive spark cut and fuel management to build boost while stationary. Use with caution on stock turbo manifolds.
+                </InfoCard>
+             </div>
+
+             <div className="space-y-6">
+                <div className="p-8 rounded-[40px] bg-neon-red/5 border border-neon-red/20 backdrop-blur-3xl">
+                   <h3 className="text-[9px] font-black text-neon-red uppercase tracking-[0.3em] pl-4 mb-8 border-l-2 border-neon-red">Limit Geometry</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <InputField label="Soft Target" value={getValue("lnchSoftLim")} onChange={(v) => updateValue("lnchSoftLim", v)} units="RPM" description="Initial retard begins" />
+                      <InputField label="Hard Limit" value={getValue("lnchHardLim")} onChange={(v) => updateValue("lnchHardLim", v)} units="RPM" description="Full ignition cutout" />
+                      <div className="md:col-span-2">
+                         <InputField label="Timing Retard" value={getValue("lnchRetard")} onChange={(v) => updateValue("lnchRetard", v)} units="°" description="Absolute timing value while on the limiter" icon={Zap} />
+                      </div>
+                   </div>
                 </div>
-                <div className="space-y-4">
-                  <h4 className="text-[8px] font-black text-neon-red/50 uppercase tracking-widest border-l-2 border-neon-red pl-3">Ultimate Cut</h4>
-                  <FormField name="lnchHardLim" label="Hard Limit" unit="RPM" theme="red" disabled={launchEnable === 0} />
-                  <div className="p-3 rounded-xl bg-neon-red/[0.03] border border-neon-red/10 flex items-center gap-3">
-                    <ShieldCheck size={14} className="text-neon-red opacity-50" />
-                    <span className="text-[8px] font-bold text-white/30 uppercase leading-tight italic">Antilag-style spark cut enabled</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+             </div>
           </div>
 
           <div className="p-6 rounded-3xl border border-dashed border-white/5 flex items-center justify-center">

@@ -687,7 +687,8 @@ export default function SurfacePlot3D({
     >
       <ColorLegend min={minVal} max={maxVal} unit={unitLabel} />
       <Canvas
-        shadows={true}
+        shadows={{ type: THREE.PCFShadowMap }}
+        clock={new THREE.Timer()}
         camera={{ position: [15, 15, 15], fov: 35 }}
         gl={{ antialias: true, alpha: true }}
       >

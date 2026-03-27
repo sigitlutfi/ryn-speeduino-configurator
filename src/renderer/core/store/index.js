@@ -7,6 +7,8 @@ import { createRealtimeSlice } from './realtimeSlice.js';
 import { createUnitsSlice } from './unitsSlice.js';
 import { createNotificationSlice } from './notificationSlice.js';
 
+import { createUISlice } from './uiSlice.js';
+
 export { DEFAULT_PROJECT_UNITS, SCHEMA_VERSION, migrateProject } from './projectSlice.js';
 
 export const useStore = create((...a) => ({
@@ -17,4 +19,5 @@ export const useStore = create((...a) => ({
   ...createRealtimeSlice(...a),
   ...createUnitsSlice(...a),
   ...createNotificationSlice(...a),
+  ...createUISlice(...a),
 }));

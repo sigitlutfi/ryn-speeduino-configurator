@@ -214,7 +214,15 @@ export function useTuningModule(targets, options = {}) {
 
     try {
       updateConstants(localConstants);
-      if (isBurn) await new Promise((r) => setTimeout(r, 600));
+
+      if (isBurn) {
+        const { burnPage } = useStore.getState();
+        for (const pId of pagesFound) {
+          await burnPage(pId);
+          // EEPROM write delay
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
 
       const result = await saveProject();
       if (result.ok) {

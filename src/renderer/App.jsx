@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { useStore } from "./core/store.js";
 import { ROUTES } from "./routes.js";
+import { parseRealtime } from "../shared/protocol/realtime.js";
 import Communications from "./features/system/Communications.jsx";
 import Dashboard from "./features/dashboard/Dashboard.jsx";
 import VETable from "./features/fuel/VETable.jsx";
@@ -18,6 +19,9 @@ import IATCorrection from "./features/fuel/curves/IATCorrection.jsx";
 import InjectorCharacteristics from "./features/engine/InjectorCharacteristics.jsx";
 import ProgrammableOutputs from "./features/io/ProgrammableOutputs.jsx";
 import SparkSetup from "./features/spark/SparkSetup.jsx";
+import VVTControl from "./features/engine/VVTControl.jsx";
+import BoostControl from "./features/fuel/BoostControl.jsx";
+import StagedInjection from "./features/fuel/StagedInjection.jsx";
 import GettingStarted from "./features/projects/GettingStarted.jsx";
 import Analysis from "./features/dashboard/Analysis.jsx";
 import AppToolbar from "./ui/AppToolbar.jsx";
@@ -35,6 +39,13 @@ import FuelPump from "./features/io/FuelPump.jsx";
 import WMI from "./features/racing/WMI.jsx";
 import FanSettings from "./features/io/FanSettings.jsx";
 import SensorCalibration from "./features/tools/SensorCalibration.jsx";
+import ProtocolStats from "./features/tools/ProtocolStats.jsx";
+import TachoOutput from "./features/io/TachoOutput.jsx";
+import PitLimiter from "./features/racing/PitLimiter.jsx";
+import RumbleIdle from "./features/racing/RumbleIdle.jsx";
+import AntiLag from "./features/racing/AntiLag.jsx";
+
+import IndicatorTray from "./features/shared/components/IndicatorTray.jsx";
 
 // Analytics Placeholder moved to features/dashboard/Analysis.jsx
 
@@ -46,11 +57,35 @@ const TerminalPlaceholder = () => (
 
 export default function App() {
   const [, navigate] = useLocation();
-  const { currentProject, closeProject, init, settings } = useStore();
+  const {
+    currentProject,
+    closeProject,
+    init,
+    settings,
+    setConnectionStatus,
+    setRealtime,
+  } = useStore();
 
   useEffect(() => {
     init();
-  }, []);
+
+    // Global Serial Listeners
+    window.serial.onData((bytes) => {
+      if (bytes.length === 138 || bytes.length === 144) {
+        const data = parseRealtime(bytes);
+        if (data) setRealtime(data);
+      }
+    });
+
+    window.serial.onStatus((status) => {
+      if (status === "connected") setConnectionStatus("connected");
+      else if (status === "disconnected") setConnectionStatus("disconnected");
+      else if (status.startsWith("error:"))
+        setConnectionStatus("error", status.slice(6));
+    });
+
+    return () => window.serial.offAll();
+  }, [init, setConnectionStatus, setRealtime]);
 
   const bgStyle = settings.backgroundImage
     ? {
@@ -128,6 +163,7 @@ export default function App() {
         <div className="relative z-10 flex flex-col h-full bg-black/40">
           <NotificationTray />
           <AppToolbar />
+          <IndicatorTray />
           <GettingStarted />
         </div>
       </div>
@@ -145,6 +181,7 @@ export default function App() {
       <NotificationTray />
       <div className="neon-grid pointer-events-none" />
       <AppToolbar />
+      <IndicatorTray />
 
       <div className="flex flex-1 overflow-hidden relative z-10">
         <Sidebar />
@@ -190,11 +227,28 @@ export default function App() {
               <Route path={ROUTES.STARTUP_IDLE} component={IdleControl} />
               <Route path={ROUTES.RACING_LAUNCH} component={LaunchControl} />
               <Route path={ROUTES.RACING_FLATSHIFT} component={FlatShift} />
+              <Route path={ROUTES.RACING_PITLIMITER} component={PitLimiter} />
+              <Route path={ROUTES.RACING_RUMBLEIDLE} component={RumbleIdle} />
+              <Route path={ROUTES.RACING_ANTILAG} component={AntiLag} />
               <Route path={ROUTES.RACING_NITROUS} component={Nitrous} />
               <Route path={ROUTES.ADDON_FUELPUMP} component={FuelPump} />
               <Route path={ROUTES.SETTINGS_FAN} component={FanSettings} />
               <Route path={ROUTES.SETTINGS_WMI} component={WMI} />
-              <Route path={ROUTES.SETTINGS_CALIBRATION} component={SensorCalibration} />
+              <Route path={ROUTES.SETTINGS_VVT} component={VVTControl} />
+              <Route path={ROUTES.SETTINGS_BOOST} component={BoostControl} />
+              <Route
+                path={ROUTES.SETTINGS_STAGED}
+                component={StagedInjection}
+              />
+              <Route
+                path={ROUTES.SETTINGS_CALIBRATION}
+                component={SensorCalibration}
+              />
+              <Route
+                path={ROUTES.TOOLS_DIAGNOSTICS}
+                component={ProtocolStats}
+              />
+              <Route path={ROUTES.SETTINGS_TACHO} component={TachoOutput} />
               <Route path={ROUTES.COMM} component={Communications} />
               <Route path={ROUTES.TERMINAL} component={TerminalPlaceholder} />
               <Route
