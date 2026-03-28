@@ -20,7 +20,8 @@ import { createIniSchema } from "../shared/utils/validation";
 import { evaluateCondition } from "../shared/utils/evaluator";
 
 export default function TriggerSetup() {
-  const { currentProject, parsedIni } = useStore();
+  const currentProject = useStore((s) => s.currentProject);
+  const parsedIni = useStore((s) => s.parsedIni);
   const [validationErrors, setValidationErrors] = useState({});
 
   const {

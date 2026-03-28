@@ -27,7 +27,6 @@ import {
 } from "lucide-react";
 
 import { motion, AnimatePresence } from "framer-motion";
-import SettingsDialog from "./SettingsDialog.jsx";
 import ProjectSettings from "../features/projects/ProjectSettings.jsx";
 import { useState } from "react";
 
@@ -49,7 +48,7 @@ const MenuButton = ({ label, children, isOpen, onClick }) => (
           initial={{ opacity: 0, y: 8, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.95 }}
-          className="absolute top-full left-0 mt-2 min-w-[240px] glass-strong rounded-2xl border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-50 p-2 overflow-hidden backdrop-blur-2xl ring-1 ring-white/5"
+          className="absolute top-full left-0 mt-2 min-w-[240px] bg-black/20 rounded-2xl border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-50 p-2 overflow-hidden backdrop-blur-2xl ring-1 ring-white/5"
         >
           {children}
         </motion.div>
@@ -61,7 +60,7 @@ const MenuButton = ({ label, children, isOpen, onClick }) => (
 const MenuItem = ({ icon: Icon, label, shortcut, onClick, danger, active }) => (
   <button
     onClick={onClick}
-    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[11px] transition-all group ${
+    className={`w-full flex items-center justify-between  px-3.5 py-2.5 rounded-xl text-[11px] transition-all group ${
       active
         ? "bg-neon-cyan/10 text-neon-cyan"
         : danger
@@ -96,20 +95,17 @@ const Divider = () => <div className="h-[1px] bg-white/5 my-1 mx-1.5" />;
 
 export default function AppToolbar() {
   const [openMenu, setOpenMenu] = useState(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
-  const {
-    currentProject,
-    closeProject,
-    connection,
-    toggleIndicatorTray,
-    showIndicatorTray,
-    sidebarCollapsed,
-    toggleSidebar,
-    recentProjects,
-    notify,
-    operation,
-  } = useStore();
+  const currentProject = useStore((s) => s.currentProject);
+  const closeProject = useStore((s) => s.closeProject);
+  const connectionStatus = useStore((s) => s.connection.status);
+  const toggleIndicatorTray = useStore((s) => s.toggleIndicatorTray);
+  const showIndicatorTray = useStore((s) => s.showIndicatorTray);
+  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
+  const recentProjects = useStore((s) => s.recentProjects);
+  const notify = useStore((s) => s.notify);
+  const operation = useStore((s) => s.operation);
   const [, navigate] = useLocation();
   const isSyncing = operation?.type === "pull" || operation?.type === "compare";
   const isBurning = operation?.type === "burn";
@@ -120,8 +116,7 @@ export default function AppToolbar() {
     (snapshot) => snapshot?.syncState === "burn-pending",
   );
   const needsPullCta =
-    connection.status === "connected" &&
-    syncState !== "fully-verified";
+    connectionStatus === "connected" && syncState !== "fully-verified";
 
   const handleMenuClick = (menu) => {
     setOpenMenu(openMenu === menu ? null : menu);
@@ -165,9 +160,7 @@ export default function AppToolbar() {
       if (result?.ok) {
         const burned = result.pages?.length || 0;
         notify(
-          burned > 0
-            ? `Burned ${burned} page(s)`
-            : "Nothing to burn",
+          burned > 0 ? `Burned ${burned} page(s)` : "Nothing to burn",
           burned > 0 ? "success" : "info",
         );
       } else {
@@ -199,10 +192,6 @@ export default function AppToolbar() {
 
   return (
     <>
-      <SettingsDialog
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
       <ProjectSettings
         isOpen={isProjectSettingsOpen}
         onClose={() => setIsProjectSettingsOpen(false)}
@@ -297,7 +286,7 @@ export default function AppToolbar() {
               label="Global Preferences…"
               shortcut="Ctrl+,"
               onClick={() => {
-                setIsSettingsOpen(true);
+                navigate(ROUTES.APP_SETTINGS);
                 closeMenus();
               }}
             />
@@ -436,7 +425,7 @@ export default function AppToolbar() {
                       notify,
                       connection,
                     } = useStore.getState();
-                    if (connection.status !== "connected") {
+                    if (connectionStatus !== "connected") {
                       notify("Connect to ECU first", "error");
                       return;
                     }
@@ -527,7 +516,7 @@ export default function AppToolbar() {
           className="flex items-center gap-4 px-3"
           style={{ WebkitAppRegion: "no-drag" }}
         >
-          {connection.status === "connected" && (
+          {connectionStatus === "connected" && (
             <div className="flex items-center gap-2">
               {needsPullCta ? (
                 <button
@@ -536,7 +525,14 @@ export default function AppToolbar() {
                   className="group flex items-center gap-2 px-3 py-1.5 bg-neon-cyan/10 border border-neon-cyan/30 rounded-lg text-neon-cyan hover:bg-neon-cyan hover:text-black transition-all duration-300 shadow-glow-cyan/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-cyan/10 disabled:hover:text-neon-cyan"
                   title="Pull all settings from ECU RAM"
                 >
-                  <Download size={12} className={isSyncing ? "animate-bounce" : "group-hover:translate-y-0.5 transition-transform"} />
+                  <Download
+                    size={12}
+                    className={
+                      isSyncing
+                        ? "animate-bounce"
+                        : "group-hover:translate-y-0.5 transition-transform"
+                    }
+                  />
                   <span className="text-[9px] font-black uppercase tracking-widest">
                     {isSyncing ? "Pulling" : "Pull"}
                   </span>
@@ -560,7 +556,10 @@ export default function AppToolbar() {
                   className="group flex items-center gap-2 px-3 py-1.5 bg-neon-yellow/10 border border-neon-yellow/30 rounded-lg text-neon-yellow hover:bg-neon-yellow hover:text-black transition-all duration-300 shadow-glow-yellow/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-yellow/10 disabled:hover:text-neon-yellow"
                   title="Save pending changes permanently to ECU"
                 >
-                  <Zap size={12} className={`fill-current ${isBurning ? "animate-pulse" : ""}`} />
+                  <Zap
+                    size={12}
+                    className={`fill-current ${isBurning ? "animate-pulse" : ""}`}
+                  />
                   <span className="text-[9px] font-black uppercase tracking-widest">
                     {isBurning ? "Burning" : "Burn"}
                   </span>
@@ -585,10 +584,10 @@ export default function AppToolbar() {
             title="Click to manage ECU connection"
           >
             <span
-              className={`w-1.5 h-1.5 rounded-full ${connection.status === "connected" ? "bg-neon-green animate-pulse" : "bg-gray-700"}`}
+              className={`w-1.5 h-1.5 rounded-full ${connectionStatus === "connected" ? "bg-neon-green animate-pulse" : "bg-gray-700"}`}
             />
             <span className="text-[9px] font-mono font-bold text-gray-500 uppercase tracking-widest">
-              {connection.status}
+              {connectionStatus}
             </span>
           </div>
 

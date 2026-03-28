@@ -80,6 +80,19 @@ const CurveEditor = ({
   const [showSettings, setShowSettings] = useState(false);
 
   const colors = THEMES[theme] || THEMES.cyan;
+  const normalizedXValues = Array.isArray(xValues)
+    ? xValues
+    : xValues === undefined || xValues === null
+      ? []
+      : [xValues];
+  const normalizedYValues = Array.isArray(yValues)
+    ? yValues
+    : yValues === undefined || yValues === null
+      ? []
+      : [yValues];
+  const pointCount = Math.min(normalizedXValues.length, normalizedYValues.length);
+  const curveXValues = normalizedXValues.slice(0, pointCount);
+  const curveYValues = normalizedYValues.slice(0, pointCount);
 
   const padding = { top: 30, right: 30, bottom: 50, left: 60 };
   const width = 800;
@@ -118,22 +131,23 @@ const CurveEditor = ({
   };
 
   const getInterpolatedY = (xVal) => {
-    if (xValues.length < 2) return yValues[0] || 0;
-    for (let i = 0; i < xValues.length - 1; i++) {
-      if (xVal >= xValues[i] && xVal <= xValues[i + 1]) {
-        const t = (xVal - xValues[i]) / (xValues[i + 1] - xValues[i]);
-        return yValues[i] + t * (yValues[i + 1] - yValues[i]);
+    if (curveXValues.length < 2) return curveYValues[0] || 0;
+    for (let i = 0; i < curveXValues.length - 1; i++) {
+      if (xVal >= curveXValues[i] && xVal <= curveXValues[i + 1]) {
+        const t = (xVal - curveXValues[i]) / (curveXValues[i + 1] - curveXValues[i]);
+        return curveYValues[i] + t * (curveYValues[i + 1] - curveYValues[i]);
       }
     }
-    if (xVal < xValues[0]) return yValues[0];
-    return yValues[yValues.length - 1];
+    if (xVal < curveXValues[0]) return curveYValues[0];
+    return curveYValues[curveYValues.length - 1];
   };
 
   const handleAutoScale = () => {
-    const minX = Math.min(...xValues) - (xRange.max - xRange.min) * 0.1;
-    const maxX = Math.max(...xValues) + (xRange.max - xRange.min) * 0.1;
-    const minY = Math.min(...yValues) - (yRange.max - yRange.min) * 0.1;
-    const maxY = Math.max(...yValues) + (yRange.max - yRange.min) * 0.1;
+    if (!curveXValues.length || !curveYValues.length) return;
+    const minX = Math.min(...curveXValues) - (xRange.max - xRange.min) * 0.1;
+    const maxX = Math.max(...curveXValues) + (xRange.max - xRange.min) * 0.1;
+    const minY = Math.min(...curveYValues) - (yRange.max - yRange.min) * 0.1;
+    const maxY = Math.max(...curveYValues) + (yRange.max - yRange.min) * 0.1;
     setXRange({ min: round(minX), max: round(maxX) });
     setYRange({ min: round(minY), max: round(maxY) });
     setShowSettings(false);
@@ -157,8 +171,8 @@ const CurveEditor = ({
 
       const newX = fromX(pixelX);
       const newY = fromY(pixelY);
-      const nextXValues = [...xValues];
-      const nextYValues = [...yValues];
+      const nextXValues = [...curveXValues];
+      const nextYValues = [...curveYValues];
 
       if (!xFixed) {
         const prevX =
@@ -178,8 +192,8 @@ const CurveEditor = ({
     },
     [
       draggingIdx,
-      xValues,
-      yValues,
+      curveXValues,
+      curveYValues,
       xRange,
       yRange,
       xFixed,
@@ -272,8 +286,8 @@ const CurveEditor = ({
     return lines;
   };
 
-  const pathData = xValues
-    .map((x, i) => `${i === 0 ? "M" : "L"} ${getX(x)} ${getY(yValues[i])}`)
+  const pathData = curveXValues
+    .map((x, i) => `${i === 0 ? "M" : "L"} ${getX(x)} ${getY(curveYValues[i])}`)
     .join(" ");
 
   const renderCrosshair = () => {
@@ -511,9 +525,9 @@ const CurveEditor = ({
 
         {renderCrosshair()}
 
-        {xValues.map((x, i) => {
+        {curveXValues.map((x, i) => {
           const cx = getX(x);
-          const cy = getY(yValues[i]);
+          const cy = getY(curveYValues[i]);
           const isTarget =
             draggingIdx === i || hoveredIdx === i || activeIdx === i;
           return (
@@ -553,7 +567,7 @@ const CurveEditor = ({
                     fill="white"
                     textAnchor="middle"
                   >
-                    {x}, {yValues[i]}
+                    {x}, {curveYValues[i]}
                   </text>
                 </g>
               )}

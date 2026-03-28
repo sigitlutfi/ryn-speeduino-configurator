@@ -29,7 +29,7 @@ import Analysis from "./features/dashboard/Analysis.jsx";
 import AppToolbar from "./ui/AppToolbar.jsx";
 import Sidebar from "./ui/Sidebar.jsx";
 import NotificationTray from "./ui/NotificationTray.jsx";
-import AppearanceSettings from "./features/system/AppearanceSettings.jsx";
+import GlobalPreferencesPage from "./features/system/GlobalPreferencesPage.jsx";
 import EngineProtection from "./features/engine/EngineProtection.jsx";
 import CrankingSettings from "./features/startup/CrankingSettings.jsx";
 import StartupCurves from "./features/startup/StartupCurves.jsx";
@@ -59,19 +59,17 @@ const TerminalPlaceholder = () => (
 
 export default function App() {
   const [, navigate] = useLocation();
-  const {
-    currentProject,
-    init,
-    settings,
-    parsedIni,
-    connection,
-    setConnectionStatus,
-    setRealtime,
-    notify,
-    syncDialogOpen,
-    syncDialogResults,
-    closeSyncDialog,
-  } = useStore();
+  const currentProject = useStore((s) => s.currentProject);
+  const init = useStore((s) => s.init);
+  const settings = useStore((s) => s.settings);
+  const parsedIni = useStore((s) => s.parsedIni);
+  const connectionStatus = useStore((s) => s.connection.status);
+  const setConnectionStatus = useStore((s) => s.setConnectionStatus);
+  const setRealtime = useStore((s) => s.setRealtime);
+  const notify = useStore((s) => s.notify);
+  const syncDialogOpen = useStore((s) => s.syncDialogOpen);
+  const syncDialogResults = useStore((s) => s.syncDialogResults);
+  const closeSyncDialog = useStore((s) => s.closeSyncDialog);
 
   const accent = getAccent(settings.accentColor);
 
@@ -92,18 +90,24 @@ export default function App() {
       if (status === "connected") {
         // Perform handshake before marking as fully connected
         try {
-          console.log('[App] Serial connected, performing handshake...');
+          console.log("[App] Serial connected, performing handshake...");
           const handshakeInfo = await serialService.handshake();
           setConnectionStatus("connected");
           notify("ECU connected", "success", 2000);
 
-          const { currentProject, compareWithECU, updateECUConnectionInfo, parsedIni } = useStore.getState();
+          const {
+            currentProject,
+            compareWithECU,
+            updateECUConnectionInfo,
+            parsedIni,
+          } = useStore.getState();
           updateECUConnectionInfo(handshakeInfo);
 
           if (
             currentProject?.ini?.signature &&
             handshakeInfo?.signature &&
-            currentProject.ini.signature.trim() !== handshakeInfo.signature.trim()
+            currentProject.ini.signature.trim() !==
+              handshakeInfo.signature.trim()
           ) {
             console.warn("[App] INI signature mismatch detected", {
               projectName: currentProject.projectName,
@@ -151,7 +155,7 @@ export default function App() {
             serialService.startOutputChannelsPolling(parsedIni);
           }
         } catch (err) {
-          console.error('[App] Handshake failed:', err);
+          console.error("[App] Handshake failed:", err);
           setConnectionStatus("error", "Handshake failed");
           notify("ECU handshake failed", "error");
           // Disconnect if handshake fails
@@ -173,16 +177,19 @@ export default function App() {
   }, [init, setConnectionStatus, setRealtime, notify]);
 
   useEffect(() => {
-    if (connection.status !== "connected" || !parsedIni?.outputChannels?.ochGetCommand) {
+    if (
+      connectionStatus !== "connected" ||
+      !parsedIni?.outputChannels?.ochGetCommand
+    ) {
       serialService.stopOutputChannelsPolling();
     }
 
     return () => {
-      if (connection.status !== "connected") {
+      if (connectionStatus !== "connected") {
         serialService.stopOutputChannelsPolling();
       }
     };
-  }, [connection.status, parsedIni]);
+  }, [connectionStatus, parsedIni]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -250,9 +257,15 @@ export default function App() {
       {/* Background image is only visible in GettingStarted or via low opacity */}
       {settings.backgroundImage && (
         <div
-          className="absolute inset-0 bg-cover bg-center z-0 transition-opacity duration-1000 opacity-20 pointer-events-none"
+          className="absolute inset-0 bg-cover bg-center z-0 transition-[opacity,filter] duration-500 pointer-events-none"
           style={{
             backgroundImage: `url("atom:///${settings.backgroundImage.replace(/\\/g, "/")}")`,
+            opacity: Math.max(
+              0,
+              Math.min(1, (settings.backgroundOpacity ?? 20) / 100),
+            ),
+            filter: `blur(${Math.max(0, settings.backgroundBlur ?? 0)}px)`,
+            transform: (settings.backgroundBlur ?? 0) > 0 ? "scale(1.03)" : "none",
           }}
         />
       )}
@@ -275,7 +288,7 @@ export default function App() {
             <Sidebar />
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
               <IndicatorTray />
-              <main className="flex-1 overflow-hidden relative bg-[#0a0b10]">
+              <main className="flex-1 overflow-hidden relative ">
                 <Switch>
                   <Route path={ROUTES.ANALYSIS} component={Analysis} />
                   <Route path={ROUTES.TUNING_VE} component={VETable} />
@@ -369,7 +382,7 @@ export default function App() {
                   />
                   <Route
                     path={ROUTES.APP_SETTINGS}
-                    component={AppearanceSettings}
+                    component={GlobalPreferencesPage}
                   />
                   <Route path={ROUTES.DASHBOARD} component={Dashboard} />
                   <Route>

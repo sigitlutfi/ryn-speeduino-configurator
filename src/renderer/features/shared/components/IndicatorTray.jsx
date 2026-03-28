@@ -55,9 +55,10 @@ const GroupHeader = ({ icon: Icon, label }) => (
 );
 
 export default function IndicatorTray() {
-  const { showIndicatorTray, toggleIndicatorTray, realtime } = useStore();
-  const engine = realtime?.engine || {};
-  const performance = realtime?.performance || {};
+  const showIndicatorTray = useStore((s) => s.showIndicatorTray);
+  const toggleIndicatorTray = useStore((s) => s.toggleIndicatorTray);
+  const engine = useStore((s) => s.realtime?.engine || {});
+  const performance = useStore((s) => s.realtime?.performance || {});
 
   if (!showIndicatorTray) return null;
 

@@ -122,6 +122,34 @@ const EngineProtection = () => {
     return meta?.defaultValue ?? 0;
   };
 
+  const getCurveValues = (page, xName, yName) => {
+    const rawX = getValue(page, xName);
+    const rawY = getValue(page, yName);
+    const x = Array.isArray(rawX)
+      ? rawX
+      : rawX === undefined || rawX === null
+        ? []
+        : [rawX];
+    const y = Array.isArray(rawY)
+      ? rawY
+      : rawY === undefined || rawY === null
+        ? []
+        : [rawY];
+    const pointCount = Math.min(x.length, y.length);
+
+    if (pointCount > 0) {
+      return {
+        x: x.slice(0, pointCount),
+        y: y.slice(0, pointCount),
+      };
+    }
+
+    return {
+      x: DEFAULT_CURVES[xName] || [],
+      y: DEFAULT_CURVES[yName] || [],
+    };
+  };
+
   const updateValue = (page, name, val) => {
     const meta = getMetadata(name);
     const rawVal = toRaw(val, meta);
@@ -233,6 +261,9 @@ const EngineProtection = () => {
   );
 
   const isRolling = getValue(P1, "hardCutType") === 1;
+  const rollingCurve = getCurveValues(P15, "rollingProtRPMDelta", "rollingProtCutPercent");
+  const coolantCurve = getCurveValues(P9, "coolantProtTemp", "coolantProtRPM");
+  const oilCurve = getCurveValues(P10, "oilPressureProtRPM", "oilPressureProtMins");
 
   return (
     <div className="flex flex-col h-full bg-transparent select-none animate-in fade-in duration-700">
@@ -359,8 +390,8 @@ const EngineProtection = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
               <div className="h-[200px]">
                 <CurveEditor
-                  xValues={getValue(P15, "rollingProtRPMDelta")}
-                  yValues={getValue(P15, "rollingProtCutPercent")}
+                  xValues={rollingCurve.x}
+                  yValues={rollingCurve.y}
                   theme="cyan"
                   xLabel="RPM Delta"
                   yLabel="Event Cut (%)"
@@ -466,8 +497,8 @@ const EngineProtection = () => {
               <GroupHeader title="CLT Protection RPM" icon={Thermometer} />
               <div className="h-[250px]">
                 <CurveEditor
-                  xValues={getValue(P9, "coolantProtTemp")}
-                  yValues={getValue(P9, "coolantProtRPM")}
+                  xValues={coolantCurve.x}
+                  yValues={coolantCurve.y}
                   theme="cyan"
                   xLabel="Temp (C)"
                   yLabel="Limit (RPM)"
@@ -490,8 +521,8 @@ const EngineProtection = () => {
               <GroupHeader title="Min Oil Pressure" icon={Activity} />
               <div className="h-[250px]">
                 <CurveEditor
-                  xValues={getValue(P10, "oilPressureProtRPM")}
-                  yValues={getValue(P10, "oilPressureProtMins")}
+                  xValues={oilCurve.x}
+                  yValues={oilCurve.y}
                   theme="cyan"
                   xLabel="RPM"
                   yLabel="Min PSI"

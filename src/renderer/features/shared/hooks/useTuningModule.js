@@ -11,16 +11,14 @@ import { getDecodedPages } from "../utils/projectConstants.js";
  */
 export function useTuningModule(targets, options = {}) {
   const { onValidate, onSaveSuccess, fallbacks = {} } = options;
-  const {
-    currentProject,
-    parsedIni,
-    updateConstants,
-    writePagesToRAM,
-    burnPendingPages,
-    saveProject,
-    connection,
-    notify,
-  } = useStore();
+  const currentProject = useStore((s) => s.currentProject);
+  const parsedIni = useStore((s) => s.parsedIni);
+  const updateConstants = useStore((s) => s.updateConstants);
+  const writePagesToRAM = useStore((s) => s.writePagesToRAM);
+  const burnPendingPages = useStore((s) => s.burnPendingPages);
+  const saveProject = useStore((s) => s.saveProject);
+  const connection = useStore((s) => s.connection);
+  const notify = useStore((s) => s.notify);
 
   const [localConstants, setLocalConstants] = useState({});
   const [isSaving, setIsSaving] = useState(false);

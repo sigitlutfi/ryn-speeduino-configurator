@@ -193,7 +193,7 @@ const NAV_CONFIG = [
       { path: ROUTES.TERMINAL, label: "Raw Console", icon: Terminal },
       {
         path: ROUTES.APP_SETTINGS,
-        label: "Configurator Settings",
+        label: "Global Preferences",
         icon: Settings,
       },
     ],
@@ -233,7 +233,13 @@ const NavItem = ({
       whileHover={{ y: -1 }}
       whileTap={{ scale: 0.98 }}
       onClick={() => navigate(path)}
-      className={`w-full flex items-center gap-2.5 ${sub ? "pl-8 pr-2 py-1.5" : collapsed ? "justify-center py-2" : "px-3 py-2"} rounded-lg transition-all relative group overflow-hidden ${
+      className={`w-full flex items-center gap-2.5 ${
+        collapsed
+          ? "justify-center py-2"
+          : sub
+            ? "pl-8 pr-2 py-1.5"
+            : "px-3 py-2"
+      } rounded-lg transition-all relative group overflow-hidden ${
         isActive
           ? `${activeTheme} border`
           : "text-gray-500 hover:text-white border border-transparent hover:bg-white/5"
@@ -280,7 +286,8 @@ const NavItem = ({
 };
 
 export default function Sidebar() {
-  const { sidebarCollapsed: collapsed, toggleSidebar } = useStore();
+  const collapsed = useStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
   const [location] = useLocation();
   const [openSections, setOpenSections] = useState({
     "MONITOR & LOGS": true,
@@ -299,7 +306,7 @@ export default function Sidebar() {
     <motion.aside
       initial={false}
       animate={{ width: collapsed ? 80 : 280 }}
-      className="h-full glass-sidebar glass-noise flex flex-col relative z-20 group"
+      className="h-full glass-sidebar backdrop-blur-xl  flex flex-col relative z-20 group"
     >
       {/* Branding Section */}
       <div
@@ -340,7 +347,11 @@ export default function Sidebar() {
             <div key={group.category} className="space-y-3">
               <button
                 onClick={() => !collapsed && toggleSection(group.category)}
-                className={`w-full flex items-center ${collapsed ? "justify-center" : "justify-between px-2"} group transition-all`}
+                className={`w-full flex items-center rounded-2xl transition-all ${
+                  collapsed
+                    ? "justify-center p-2.5"
+                    : "justify-between px-2.5 py-2 hover:bg-white/5 active:bg-white/10"
+                } group`}
               >
                 {!collapsed ? (
                   <>

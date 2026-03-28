@@ -75,11 +75,14 @@ const O2_PRESETS = {
 
 const SensorCalibration = () => {
   const [activeTab, setActiveTab] = useState("filters");
-  const realtime = useStore((s) => s.realtime);
+  const tpsADC = useStore((s) => s.realtime?.tpsADC ?? 0);
+  const clt = useStore((s) => s.realtime?.clt ?? 0);
+  const iat = useStore((s) => s.realtime?.iat ?? 0);
+  const afr = useStore((s) => s.realtime?.afr ?? 0);
+  const vbatt = useStore((s) => s.realtime?.vbatt ?? 0);
 
   // Speeduino usually puts TPS ADC in a field like tpsADC or just adc1.
   // We'll fallback to tps (percent) if ADC isn't explicitly in the slice yet.
-  const tpsADC = realtime?.tpsADC ?? 0;
 
   const {
     getFieldValue,
@@ -112,8 +115,9 @@ const SensorCalibration = () => {
 
   const TabButton = ({ id, label, icon: Icon }) => (
     <button
+      type="button"
       onClick={() => setActiveTab(id)}
-      className={`flex items-center gap-3 px-6 py-4 border-b-2 transition-all duration-500 font-bold uppercase tracking-widest text-[10px] ${
+      className={`relative z-10 flex items-center gap-3 px-6 py-4 border-b-2 transition-all duration-500 font-bold uppercase tracking-widest text-[10px] pointer-events-auto ${
         activeTab === id
           ? "border-neon-cyan text-white bg-neon-cyan/5 shadow-[inset_0_-10px_20px_-10px_rgba(0,243,255,0.2)]"
           : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/5"
@@ -250,7 +254,7 @@ const SensorCalibration = () => {
                 </h3>
                 <p className="text-[8px] text-white/30 uppercase tracking-[0.3em]">
                   Live Feed:{" "}
-                  {sensorKey === "clt" ? realtime?.clt : realtime?.iat}°C
+                  {sensorKey === "clt" ? clt : iat}°C
                 </p>
               </div>
             </div>
@@ -368,7 +372,7 @@ const SensorCalibration = () => {
   };
 
   return (
-    <div className="flex flex-col h-full animate-in fade-in duration-700">
+    <div className="relative flex flex-col h-full min-h-0 animate-in fade-in duration-700">
       <TuningHeader
         title="Sensor Management"
         icon={Wrench}
@@ -384,7 +388,10 @@ const SensorCalibration = () => {
       />
 
       {/* Internal Navigation */}
-      <div className="flex bg-white/5 border-b border-white/10 px-6 backdrop-blur-xl shrink-0">
+      <div
+        className="relative z-20 flex bg-white/5 border-b border-white/10 px-6 backdrop-blur-xl shrink-0 pointer-events-auto"
+        style={{ WebkitAppRegion: "no-drag" }}
+      >
         <TabButton id="filters" label="Analog Filters" icon={Activity} />
         <TabButton id="tps" label="TPS Calibration" icon={MousePointer2} />
         <TabButton id="o2" label="O2 Calibration" icon={Activity} />
@@ -393,7 +400,7 @@ const SensorCalibration = () => {
         <TabButton id="battery" label="Battery" icon={Zap} />
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-10">
+      <div className="relative z-0 flex-1 min-h-0 overflow-y-auto custom-scrollbar p-10">
         <div className="max-w-[1400px] mx-auto">
           {activeTab === "filters" && (
             <div className="space-y-12 animate-in slide-in-from-bottom-4 duration-500">
@@ -604,7 +611,7 @@ const SensorCalibration = () => {
                         O2 Sensor Cal
                       </h3>
                       <p className="text-[8px] text-white/30 uppercase tracking-[0.3em]">
-                        Live Feed: {realtime?.afr} AFR
+                        Live Feed: {afr} AFR
                       </p>
                     </div>
                   </div>
@@ -888,7 +895,7 @@ const SensorCalibration = () => {
                     <div className="absolute inset-0 bg-neon-yellow/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-[40px]" />
                     <div className="relative">
                       <div className="text-[100px] font-mono font-black text-white leading-none tracking-tighter glow-yellow">
-                        {realtime?.vbatt ?? "0.0"}
+                        {vbatt ?? "0.0"}
                       </div>
                       <span className="text-[12px] font-black text-neon-yellow absolute -right-10 top-4 uppercase tracking-widest">
                         VOLTS
@@ -898,7 +905,7 @@ const SensorCalibration = () => {
                       <div
                         className="h-full bg-neon-yellow shadow-glow-yellow transition-all duration-300"
                         style={{
-                          width: `${Math.min(100, ((realtime?.vbatt ?? 0) / 16) * 100)}%`,
+                          width: `${Math.min(100, ((vbatt ?? 0) / 16) * 100)}%`,
                         }}
                       />
                     </div>

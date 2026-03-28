@@ -19,7 +19,7 @@ const FUEL_FIELDS = [
 ];
 
 export default function FuelSettings() {
-  const { parsedIni } = useStore();
+  const parsedIni = useStore((s) => s.parsedIni);
   const {
     getFieldValue,
     setFieldValue,

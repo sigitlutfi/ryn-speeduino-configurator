@@ -69,7 +69,7 @@ export default function Gauge({
   warningMode = "high",
   size = 140,
 }) {
-  const { settings } = useStore();
+  const settings = useStore((s) => s.settings);
   const accent = getAccent(settings?.accentColor);
 
   const safeMax = max === min ? min + 1 : max;

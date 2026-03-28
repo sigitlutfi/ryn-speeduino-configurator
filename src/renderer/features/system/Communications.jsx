@@ -15,23 +15,24 @@ import { motion } from "framer-motion";
 
 export default function Communications() {
   const [ports, setPorts] = useState([]);
-  const {
-    connection,
-    setConnectionStatus,
-    setConnectionPort,
-    setConnectionBaud,
-  } = useStore();
+  const connectionStatus = useStore((s) => s.connection.status);
+  const connectionPort = useStore((s) => s.connection.port);
+  const connectionBaud = useStore((s) => s.connection.baud);
+  const connectionError = useStore((s) => s.connection.errorMsg);
+  const setConnectionStatus = useStore((s) => s.setConnectionStatus);
+  const setConnectionPort = useStore((s) => s.setConnectionPort);
+  const setConnectionBaud = useStore((s) => s.setConnectionBaud);
 
   useEffect(() => {
     window.serial.listPorts().then(setPorts);
   }, []);
 
   const handleConnect = async () => {
-    if (!connection.port) return;
+    if (!connectionPort) return;
     setConnectionStatus("connecting");
     const result = await window.serial.connect(
-      connection.port,
-      connection.baud,
+      connectionPort,
+      connectionBaud,
     );
     if (!result.ok) setConnectionStatus("error", result.error);
   };
@@ -41,8 +42,8 @@ export default function Communications() {
     setConnectionStatus("disconnected");
   };
 
-  const isConnected = connection.status === "connected";
-  const isConnecting = connection.status === "connecting";
+  const isConnected = connectionStatus === "connected";
+  const isConnecting = connectionStatus === "connecting";
 
   return (
     <div className="p-10 max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -60,7 +61,7 @@ export default function Communications() {
             className={`w-2 h-2 rounded-full ${isConnected ? "bg-neon-green animate-pulse shadow-[0_0_10px_rgba(0,255,180,0.8)]" : "bg-gray-700"}`}
           />
           <span className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-widest">
-            {connection.status}
+              {connectionStatus}
           </span>
         </div>
       </div>
@@ -82,7 +83,7 @@ export default function Communications() {
               </label>
               <div className="flex gap-2">
                 <select
-                  value={connection.port}
+                  value={connectionPort}
                   onChange={(e) => setConnectionPort(e.target.value)}
                   disabled={isConnected || isConnecting}
                   className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs outline-none focus:border-neon-cyan transition-all"
@@ -108,7 +109,7 @@ export default function Communications() {
                 Baud Rate
               </label>
               <select
-                value={connection.baud}
+                value={connectionBaud}
                 onChange={(e) => setConnectionBaud(Number(e.target.value))}
                 disabled={isConnected || isConnecting}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs outline-none focus:border-neon-cyan transition-all"
@@ -126,7 +127,7 @@ export default function Communications() {
             {!isConnected ? (
               <button
                 onClick={handleConnect}
-                disabled={!connection.port || isConnecting}
+                disabled={!connectionPort || isConnecting}
                 className="w-full py-4 bg-neon-green/10 text-neon-green border border-neon-green/30 rounded-2xl font-orbitron font-bold uppercase tracking-[0.2em] text-[11px] hover:bg-neon-green hover:text-bg-deep transition-all duration-500 shadow-[0_0_20px_rgba(0,255,180,0.1)] disabled:opacity-30"
               >
                 {isConnecting ? "Initializing Link..." : "Establish Connection"}
@@ -191,9 +192,9 @@ export default function Communications() {
               <div className="flex gap-2">
                 <span className="text-neon-cyan">[SYS]</span> Application Ready
               </div>
-              {connection.status === "error" && (
+              {connectionStatus === "error" && (
                 <div className="flex gap-2 text-neon-red">
-                  <span className="font-bold">[ERR]</span> {connection.errorMsg}
+                  <span className="font-bold">[ERR]</span> {connectionError}
                 </div>
               )}
               {isConnected && (

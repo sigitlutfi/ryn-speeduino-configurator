@@ -36,7 +36,8 @@ const ENGINE_FIELDS = [
 
 const EngineSettings = () => {
   const [showReqFuelCalc, setShowReqFuelCalc] = useState(false);
-  const { currentProject, updateProjectField } = useStore();
+  const currentProject = useStore((s) => s.currentProject);
+  const updateProjectField = useStore((s) => s.updateProjectField);
 
   const {
     getFieldValue,
@@ -199,7 +200,7 @@ const EngineSettings = () => {
 
         <div className="max-w-[1400px] mx-auto space-y-10 pb-24">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="p-8 rounded-[40px] glass-card border border-white/5 bg-gradient-to-br from-bg-deep to-black">
+            <div className="p-8 rounded-[40px] backdrop-blur-md border border-white/5 bg-black/20">
               <GroupHeader
                 title="Core Constants"
                 icon={Cpu}

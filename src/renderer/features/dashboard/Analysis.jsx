@@ -22,21 +22,18 @@ import { getAccent } from "../../core/theme.js";
  * Uses uPlot for real-time telemetry trace.
  */
 const Analysis = () => {
-  const {
-    realtime,
-    logRecording,
-    logEntries,
-    setLogRecording,
-    clearLog,
-    connection,
-    settings,
-  } = useStore();
+  const logRecording = useStore((s) => s.logRecording);
+  const logEntries = useStore((s) => s.logEntries);
+  const setLogRecording = useStore((s) => s.setLogRecording);
+  const clearLog = useStore((s) => s.clearLog);
+  const connectionStatus = useStore((s) => s.connection.status);
+  const settings = useStore((s) => s.settings);
 
   const accent = getAccent(settings?.accentColor);
   const [startTime, setStartTime] = useState(null);
   const [elapsed, setElapsed] = useState("00:00:00");
 
-  const isConnected = connection.status === "connected";
+  const isConnected = connectionStatus === "connected";
 
   // Helper to format durations
   useEffect(() => {

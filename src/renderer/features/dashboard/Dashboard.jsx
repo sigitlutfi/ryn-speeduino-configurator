@@ -57,23 +57,21 @@ function DashboardToolbar({ activePreset, presets, onPresetChange, editing, onTo
 }
 
 export default function Dashboard() {
-  const {
-    currentProject,
-    realtime,
-    settings,
-    connection,
-    updateRealtimeDashboard,
-    convertTemp,
-    convertPress,
-    convertSpeed,
-    tempUnit,
-    pressUnit,
-    speedUnit,
-  } = useStore();
+  const currentProject = useStore((s) => s.currentProject);
+  const realtime = useStore((s) => s.realtime);
+  const settings = useStore((s) => s.settings);
+  const connectionStatus = useStore((s) => s.connection.status);
+  const updateRealtimeDashboard = useStore((s) => s.updateRealtimeDashboard);
+  const convertTemp = useStore((s) => s.convertTemp);
+  const convertPress = useStore((s) => s.convertPress);
+  const convertSpeed = useStore((s) => s.convertSpeed);
+  const tempUnit = useStore((s) => s.tempUnit);
+  const pressUnit = useStore((s) => s.pressUnit);
+  const speedUnit = useStore((s) => s.speedUnit);
   const [editing, setEditing] = useState(false);
 
   const accent = getAccent(settings?.accentColor);
-  const isConnected = connection.status === "connected";
+  const isConnected = connectionStatus === "connected";
 
   const dashboardConfig = useMemo(
     () => normalizeRealtimeDashboard(settings?.realtimeDashboard),
