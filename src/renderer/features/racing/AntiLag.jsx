@@ -19,7 +19,6 @@ const ALS_FIELDS = [
   "alsMaxCLT",
   "alsMinVSS",
   "alsMaxDuration",
-  "alsMaxEGT",
   "alsIgnCutEnable",
   "alsIgnCutPattern",
   "alsFuelCutPattern"
@@ -78,9 +77,9 @@ export default function AntiLag() {
                    <h2 className="text-lg font-orbitron font-black text-white uppercase tracking-widest">Racing Use Only - Extreme Stress</h2>
                    <p className="text-[9px] font-medium text-gray-300 leading-relaxed uppercase tracking-wider max-w-3xl">
                       Anti-Lag moves the combustion process into the exhaust manifold to maintain turbine speed. 
-                      This results in <span className="text-neon-red font-black">VOLCANIC EXHAUST GAS TEMPERATURES</span>. 
-                      Continuous activation WILL destroy turbochargers, manifolds, and valves. 
-                      EGT and CLT based safety limits are MANDATORY.
+                     This results in <span className="text-neon-red font-black">VOLCANIC EXHAUST GAS TEMPERATURES</span>. 
+                     Continuous activation WILL destroy turbochargers, manifolds, and valves. 
+                     Duration and CLT based safety limits are mandatory.
                    </p>
                 </div>
              </div>
@@ -190,7 +189,6 @@ export default function AntiLag() {
                     <h3 className="text-[9px] font-black text-neon-red uppercase tracking-[0.3em] pl-4 mb-8 border-l-2 border-neon-red">Failsafe Thresholds</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <InputField label="Max Duration" value={getValue("alsMaxDuration")} onChange={(val) => updateValue("alsMaxDuration", val)} units="SEC" description="Strict cycle cutout" icon={Timer} />
-                        <InputField label="Max EGT" value={getValue("alsMaxEGT")} onChange={(val) => updateValue("alsMaxEGT", val)} units="°C" description="Hard cutout if exceeded" icon={Thermometer} />
                         <InputField label="Min CLT" value={getValue("alsMinCLT")} onChange={(val) => updateValue("alsMinCLT", val)} units="°C" description="Engine must be warm" />
                         <InputField label="Max CLT" value={getValue("alsMaxCLT")} onChange={(val) => updateValue("alsMaxCLT", val)} units="°C" description="Hard cutout if overheating" />
                     </div>
