@@ -11,6 +11,14 @@ import {
   Database,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+ 
+const COLORS = [
+  { id: "cyan", hex: "#00d4ff", class: "bg-neon-cyan" },
+  { id: "purple", hex: "#bc13fe", class: "bg-neon-purple" },
+  { id: "green", hex: "#00ffb4", class: "bg-neon-green" },
+  { id: "orange", hex: "#ff6b35", class: "bg-neon-orange" },
+  { id: "gold", hex: "#ffcc00", class: "bg-neon-yellow" },
+];
 
 // Small toggle-button group for unit selection
 function UnitGroup({ options, value, onChange }) {
@@ -43,6 +51,7 @@ export default function ProjectSettings({ isOpen, onClose }) {
   const [displacement, setDisplacement] = useState("");
   const [cylinders, setCylinders] = useState("");
   const [engineType, setEngineType] = useState("");
+  const [projectColor, setProjectColor] = useState("cyan");
   const [tempUnit, setTempUnit] = useState(DEFAULT_PROJECT_UNITS.temperature);
   const [pressUnit, setPressUnit] = useState(DEFAULT_PROJECT_UNITS.pressure);
   const [speedUnit, setSpeedUnit] = useState(DEFAULT_PROJECT_UNITS.speed);
@@ -51,6 +60,7 @@ export default function ProjectSettings({ isOpen, onClose }) {
     if (isOpen && currentProject) {
       setProjectName(currentProject.projectName ?? "");
       setDescription(currentProject.description ?? "");
+      setProjectColor(currentProject.color ?? "cyan");
       setDisplacement(currentProject.engine?.displacement ?? "");
       setCylinders(currentProject.engine?.cylinders ?? "");
       setEngineType(currentProject.engine?.type ?? "");
@@ -67,6 +77,7 @@ export default function ProjectSettings({ isOpen, onClose }) {
   const handleSave = () => {
     updateProjectField("projectName", projectName.trim() || "Unnamed Project");
     updateProjectField("description", description);
+    updateProjectField("color", projectColor);
     updateProjectField(
       "engine.displacement",
       displacement ? Number(displacement) : null,
@@ -80,6 +91,16 @@ export default function ProjectSettings({ isOpen, onClose }) {
     updateProjectField("units.pressure", pressUnit);
     updateProjectField("units.speed", speedUnit);
     onClose();
+  };
+
+  const handlePickIni = async () => {
+    const path = await window.projects.pickIni();
+    if (!path) return;
+    const { updateIni } = useStore.getState();
+    const result = await updateIni(path);
+    if (!result.ok) {
+      alert(`Failed to update INI: ${result.error}`);
+    }
   };
 
   if (!isOpen) return null;
@@ -151,13 +172,33 @@ export default function ProjectSettings({ isOpen, onClose }) {
                   <label className="text-[10px] text-gray-500 uppercase tracking-widest block ml-1">
                     Description
                   </label>
-                  <input
-                    type="text"
+                  <textarea
+                    rows={2}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="e.g. Stage 2 tune, track setup"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:border-neon-cyan outline-none transition-all"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:border-neon-cyan outline-none transition-all resize-none shadow-inner"
                   />
+                </div>
+                
+                {/* Color Picker Addition */}
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-500 uppercase tracking-widest block ml-1">
+                    Project Identity Color
+                  </label>
+                  <div className="flex gap-4 ml-1">
+                    {COLORS.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => setProjectColor(c.id)}
+                        className={`w-8 h-8 rounded-full border-2 transition-all ${
+                          projectColor === c.id
+                            ? "border-white scale-110 shadow-[0_0_15px_rgba(255,255,255,0.3)]"
+                            : "border-transparent opacity-50 hover:opacity-100"
+                        } ${c.class}`}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -280,40 +321,49 @@ export default function ProjectSettings({ isOpen, onClose }) {
                 <div className="flex items-center gap-2 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest opacity-60">
                   <Database size={12} /> Firmware
                 </div>
-                <div className="p-4 glass border border-white/5 rounded-2xl space-y-2">
-                  {ini.signature && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] text-gray-500 uppercase tracking-widest">
-                        Signature
-                      </span>
-                      <span className="text-[11px] text-neon-cyan font-mono">
-                        {ini.signature}
-                      </span>
-                    </div>
-                  )}
-                  {ini.version && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] text-gray-500 uppercase tracking-widest">
-                        MT Version
-                      </span>
-                      <span className="text-[11px] text-white font-mono">
-                        {ini.version}
-                      </span>
-                    </div>
-                  )}
-                  {ini.path && (
-                    <div className="flex justify-between items-start gap-4">
-                      <span className="text-[10px] text-gray-500 uppercase tracking-widest shrink-0">
-                        INI Path
-                      </span>
-                      <span
-                        className="text-[9px] text-gray-400 font-mono text-right truncate max-w-[280px]"
-                        title={ini.path}
-                      >
-                        {ini.path}
-                      </span>
-                    </div>
-                  )}
+                <div className="p-4 glass border border-white/5 rounded-2xl space-y-4">
+                  <div className="space-y-2">
+                    {ini.signature && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-widest">
+                          Signature
+                        </span>
+                        <span className="text-[11px] text-neon-cyan font-mono">
+                          {ini.signature}
+                        </span>
+                      </div>
+                    )}
+                    {ini.version && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-widest">
+                          MT Version
+                        </span>
+                        <span className="text-[11px] text-white font-mono">
+                          {ini.version}
+                        </span>
+                      </div>
+                    )}
+                    {ini.path && (
+                      <div className="flex justify-between items-start gap-4">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-widest shrink-0">
+                          INI Path
+                        </span>
+                        <span
+                          className="text-[9px] text-gray-400 font-mono text-right break-all max-w-[280px]"
+                          title={ini.path}
+                        >
+                          {ini.path}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <button
+                    onClick={handlePickIni}
+                    className="w-full py-2 bg-neon-cyan/10 hover:bg-neon-cyan/20 border border-neon-cyan/30 rounded-xl text-[10px] font-bold text-neon-cyan uppercase tracking-widest transition-all"
+                  >
+                    Change INI File
+                  </button>
                 </div>
               </div>
             )}

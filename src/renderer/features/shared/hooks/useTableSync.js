@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useCallback } from "react";
-import { useStore } from "../../../core/store";
-import { getTableMetadata, getVarMetadata } from "../../../../shared/ini-parser";
+import { useStore } from "../../../core/store.js";
+import { getTableMetadata, getVarMetadata } from "../../../../shared/ini-parser.js";
+import { getDecodedPage } from "../utils/projectConstants.js";
 
 /**
  * useTableSync Hook
@@ -22,8 +23,11 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
   
   const updateTable = useStore((s) => s.updateTable);
   const updateConstants = useStore((s) => s.updateConstants);
+  const writePagesToRAM = useStore((s) => s.writePagesToRAM);
+  const burnPendingPages = useStore((s) => s.burnPendingPages);
   const saveProject = useStore((s) => s.saveProject);
   const notify = useStore((s) => s.notify);
+  const connection = useStore((s) => s.connection);
 
   const meta = useMemo(() => getTableMetadata(parsedIni, iniTableId), [parsedIni, iniTableId]);
 
@@ -42,7 +46,7 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
   useEffect(() => {
     if (!meta || !constants) return;
 
-    const pageData = constants.pages?.[meta.page] || constants.pages?.[String(meta.page)];
+    const pageData = getDecodedPage(constants, meta.page);
     if (!pageData) return;
 
     const zData = pageData[meta.zBinsVar];
@@ -89,30 +93,50 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
         return Math.round((v - scaling.offset) / scaling.scale);
     });
 
-    const pageData = constants.pages?.[meta.page] || {};
+    const pageData = getDecodedPage(constants, meta.page);
 
-    updateConstants({
-      pages: {
-        ...(constants?.pages || {}),
-        [meta.page]: {
-          ...pageData,
-          [meta.zBinsVar]: rawValues,
-        },
+    await updateConstants({
+      [meta.page]: {
+        ...pageData,
+        [meta.zBinsVar]: rawValues,
       },
     });
 
+    if (connection.status === "connected") {
+      const ramResult = await writePagesToRAM([meta.page]);
+      if (!ramResult.ok) {
+        notify(`ECU RAM Sync Failed: ${ramResult.errors?.[0]?.error || "Unknown error"}`, "error");
+        return { ok: false, error: ramResult.errors?.[0]?.error || "ECU RAM sync failed" };
+      }
+
+      if (isBurn) {
+        const burnResult = await burnPendingPages([meta.page]);
+        if (!burnResult.ok) {
+          notify(`ECU Burn Failed: ${burnResult.errors?.[0]?.error || "Unknown error"}`, "error");
+          return { ok: false, error: burnResult.errors?.[0]?.error || "ECU burn failed" };
+        }
+      }
+    }
+
     const result = await saveProject();
     if (result.ok) {
-      notify(isBurn ? "Burn & Save Successful" : "Local Save Successful", "success");
+      notify(
+        isBurn
+          ? "RAM write, burn, and project save successful"
+          : connection.status === "connected"
+            ? "RAM write and project save successful"
+            : "Project save successful",
+        "success",
+      );
     } else {
       notify(`Save Failed: ${result.error}`, "error");
     }
     return result;
-  }, [meta, tableState?.values, scaling, constants, updateConstants, saveProject, notify, options.transform?.toRaw]);
+  }, [meta, tableState?.values, scaling, constants, updateConstants, writePagesToRAM, burnPendingPages, saveProject, notify, options.transform?.toRaw, connection.status]);
 
   const isDirty = useMemo(() => {
     if (!meta || !constants) return false;
-    const original = constants.pages?.[meta.page]?.[meta.zBinsVar];
+    const original = getDecodedPage(constants, meta.page)?.[meta.zBinsVar];
     if (!original) return false;
     const currentRaw = tableState.values.flat().map(v => {
         if (options.transform?.toRaw) return options.transform.toRaw(v, scaling);

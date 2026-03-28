@@ -21,9 +21,11 @@ export const SelectField = ({
   // Handle mapping from INI metadata
   // info.meta.options or info.meta.labels are standard for bitfields
   const availableOptions = info?.meta?.options || info?.meta?.labels || [];
+
+  // CRITICAL: Preserve original indices! Don't re-index after filtering
   const filteredOptions = availableOptions
-    .map((opt, i) => ({ label: opt, value: i }))
-    .filter((o) => o.label && o.label.toUpperCase() !== "INVALID");
+    .map((opt, i) => ({ label: opt, value: i })) // Map FIRST with original index
+    .filter((o) => o.label && o.label.toUpperCase() !== "INVALID"); // Then filter
 
   return (
     <div

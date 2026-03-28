@@ -4,6 +4,7 @@ import TuningGrid from "../shared/TuningGrid/TuningGrid.jsx";
 import { getTableMetadata, getConstant } from "../../../shared/ini-parser";
 import TuningHeader from "../shared/components/TuningHeader";
 import { Fuel } from "lucide-react";
+import { getDecodedPage } from "../shared/utils/projectConstants";
 
 export default function VETable2() {
   const parsedIni = useStore((s) => s.parsedIni);
@@ -14,6 +15,7 @@ export default function VETable2() {
   const secondaryValues = useStore((s) => s.tables.ve.values);
   const updateTable = useStore((s) => s.updateTable);
   const updateConstants = useStore((s) => s.updateConstants);
+  const syncPagesToECU = useStore((s) => s.syncPagesToECU);
   const saveProject = useStore((s) => s.saveProject);
   const notify = useStore((s) => s.notify);
 
@@ -29,8 +31,7 @@ export default function VETable2() {
   // Determine actual Y-Axis label based on active Secondary Control Algorithm (Page 10)
   const algorithmId = useMemo(() => {
     if (!constants) return 0;
-    const pages = constants.pages || {};
-    const p10 = pages[10] || pages["10"];
+    const p10 = getDecodedPage(constants, 10);
     return p10?.fuel2Algorithm ?? 0;
   }, [constants]);
 
@@ -54,8 +55,7 @@ export default function VETable2() {
   useEffect(() => {
     if (!meta || !constants) return;
 
-    const pageData =
-      constants.pages?.[meta.page] || constants.pages?.[String(meta.page)];
+    const pageData = getDecodedPage(constants, meta.page);
     if (!pageData) return;
 
     const rpmData = pageData[meta.xBinsVar];
@@ -86,20 +86,21 @@ export default function VETable2() {
 
     try {
       const flatValues = values.flat();
-      const pageData =
-        constants.pages?.[meta.page] ||
-        constants.pages?.[String(meta.page)] ||
-        {};
+      const pageData = getDecodedPage(constants, meta.page);
 
-      updateConstants({
-        pages: {
-          ...(constants?.pages || {}),
-          [meta.page]: {
-            ...pageData,
-            [meta.zBinsVar]: flatValues,
-          },
+      await updateConstants({
+        [meta.page]: {
+          ...pageData,
+          [meta.zBinsVar]: flatValues,
         },
       });
+
+      if (connection.status === "connected") {
+        const syncResult = await syncPagesToECU([meta.page], { burn: isBurn });
+        if (!syncResult.ok) {
+          throw new Error(syncResult.errors?.[0]?.error || "ECU sync failed");
+        }
+      }
 
       const result = await saveProject();
       if (result.ok) {
@@ -123,7 +124,7 @@ export default function VETable2() {
 
   const isDirty = useMemo(() => {
     if (!meta || !constants) return false;
-    const original = constants.pages?.[meta.page]?.[meta.zBinsVar];
+    const original = getDecodedPage(constants, meta.page)?.[meta.zBinsVar];
     if (!original) return false;
     const current = values.flat();
     return JSON.stringify(current) !== JSON.stringify(original);

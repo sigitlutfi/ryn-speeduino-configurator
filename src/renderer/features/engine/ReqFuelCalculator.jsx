@@ -13,6 +13,25 @@ const FUEL_TYPES = {
   methanol: { label: 'Methanol', stoich: 6.45  },
 };
 
+const STOICH_MATCH_TOLERANCE = 0.05;
+
+function resolveFuelPreset(stoich) {
+  const numericStoich = parseFloat(stoich);
+  if (!Number.isFinite(numericStoich) || numericStoich <= 0) {
+    return { fuelKey: 'gasoline', customStoich: FUEL_TYPES.gasoline.stoich };
+  }
+
+  const matched = Object.entries(FUEL_TYPES).find(([, fuel]) => {
+    return Math.abs(fuel.stoich - numericStoich) <= STOICH_MATCH_TOLERANCE;
+  });
+
+  if (matched) {
+    return { fuelKey: matched[0], customStoich: numericStoich };
+  }
+
+  return { fuelKey: 'custom', customStoich: numericStoich };
+}
+
 /**
  * Calculates Required Fuel in milliseconds for Speeduino.
  */
@@ -50,25 +69,64 @@ const UnitToggle = ({ value, onChange, options }) => (
   </div>
 );
 
-export default function ReqFuelCalculator({ isOpen, onClose, onApply, initialCylinders = 4, initialSquirts = 2 }) {
+export default function ReqFuelCalculator({
+  isOpen,
+  onClose,
+  onApply,
+  currentReqFuel = 0,
+  initialDisplacement = 2000,
+  initialDisplacementUnit = 'cc',
+  initialCylinders = 4,
+  initialInjectorFlow = 440,
+  initialInjectorUnit = 'ccmin',
+  initialSquirts = 2,
+  initialStoich = 14.7,
+}) {
+  const initialFuelState = useMemo(
+    () => resolveFuelPreset(initialStoich),
+    [initialStoich],
+  );
+
   // Use non-zero fallbacks for initialization
-  const [dispValue, setDispValue]   = useState('2000');
-  const [dispUnit, setDispUnit]     = useState('cc');
+  const [dispValue, setDispValue]   = useState((initialDisplacement || 2000).toString());
+  const [dispUnit, setDispUnit]     = useState(initialDisplacementUnit || 'cc');
   const [cylinders, setCylinders]   = useState((initialCylinders || 4).toString());
-  const [injValue, setInjValue]     = useState('440');
-  const [injUnit, setInjUnit]       = useState('ccmin');
+  const [injValue, setInjValue]     = useState((initialInjectorFlow || 440).toString());
+  const [injUnit, setInjUnit]       = useState(initialInjectorUnit || 'ccmin');
   const [squirts, setSquirts]       = useState((initialSquirts || 2).toString());
-  const [fuelKey, setFuelKey]       = useState('gasoline');
+  const [fuelKey, setFuelKey]       = useState(initialFuelState.fuelKey);
+  const [customStoich, setCustomStoich] = useState(
+    initialFuelState.customStoich.toString(),
+  );
 
   // Re-sync if modal re-opens and ensure we don't start with "0"
   useEffect(() => {
     if (isOpen) {
+      setDispValue((initialDisplacement || 2000).toString());
+      setDispUnit(initialDisplacementUnit || 'cc');
       setCylinders((initialCylinders || 4).toString());
+      setInjValue((initialInjectorFlow || 440).toString());
+      setInjUnit(initialInjectorUnit || 'ccmin');
       setSquirts((initialSquirts || 2).toString());
+      const nextFuelState = resolveFuelPreset(initialStoich);
+      setFuelKey(nextFuelState.fuelKey);
+      setCustomStoich(nextFuelState.customStoich.toString());
     }
-  }, [isOpen, initialCylinders, initialSquirts]);
+  }, [
+    isOpen,
+    initialDisplacement,
+    initialDisplacementUnit,
+    initialCylinders,
+    initialInjectorFlow,
+    initialInjectorUnit,
+    initialSquirts,
+    initialStoich,
+  ]);
 
-  const selectedFuel = FUEL_TYPES[fuelKey];
+  const selectedStoich =
+    fuelKey === 'custom'
+      ? parseFloat(customStoich)
+      : FUEL_TYPES[fuelKey]?.stoich;
 
   // Convert inputs
   const dispCc  = dispUnit  === 'cid'  ? parseFloat(dispValue)  * CID_TO_CC    : parseFloat(dispValue);
@@ -77,17 +135,29 @@ export default function ReqFuelCalculator({ isOpen, onClose, onApply, initialCyl
   const div      = parseInt(squirts);
 
   const reqFuel = useMemo(
-    () => calcReqFuel(dispCc, cyl, injCcMin, div, selectedFuel.stoich),
-    [dispCc, cyl, injCcMin, div, fuelKey, selectedFuel.stoich]
+    () => calcReqFuel(dispCc, cyl, injCcMin, div, selectedStoich),
+    [dispCc, cyl, injCcMin, div, selectedStoich]
   );
+
+  const currentReqFuelValue = Number.isFinite(parseFloat(currentReqFuel))
+    ? parseFloat(currentReqFuel)
+    : null;
+  const reqFuelDelta =
+    currentReqFuelValue !== null && reqFuel !== null
+      ? reqFuel - currentReqFuelValue
+      : null;
 
   const handleApply = () => {
     if (reqFuel !== null && !isNaN(reqFuel)) {
       onApply({
         reqFuel: Math.round(reqFuel * 10) / 10,
+        displacement: parseFloat(dispValue),
+        displacementUnit: dispUnit,
         cylinders: cyl,
+        injectorFlow: parseFloat(injValue),
+        injectorUnit: injUnit,
         squirts: div,
-        stoich: selectedFuel.stoich // Return the stoich ratio for two-way sync
+        stoich: selectedStoich,
       });
       onClose();
     }
@@ -185,10 +255,26 @@ export default function ReqFuelCalculator({ isOpen, onClose, onApply, initialCyl
                       {Object.entries(FUEL_TYPES).map(([key, { label, stoich }]) => (
                         <option key={key} value={key}>{label} ({stoich} AFR)</option>
                       ))}
+                      <option value="custom">Custom</option>
                     </select>
                     <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
                   </div>
                 </div>
+
+                {fuelKey === 'custom' && (
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest pl-1">
+                      Custom Stoich
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={customStoich}
+                      onChange={e => setCustomStoich(e.target.value)}
+                      className={`w-full bg-black/60 border rounded-xl px-3 py-2.5 text-xs text-gray-200 focus:border-neon-cyan transition-all ${isInvalid(customStoich) ? 'border-red-500/30' : 'border-white/10'}`}
+                    />
+                  </div>
+                )}
 
                 <div className={`p-4 rounded-2xl border transition-all relative overflow-hidden ${
                   reqFuel !== null ? 'bg-neon-cyan/5 border-neon-cyan/20' : 'bg-red-500/5 border-red-500/10'
@@ -208,6 +294,16 @@ export default function ReqFuelCalculator({ isOpen, onClose, onApply, initialCyl
                       All fields must be greater than zero
                     </div>
                   )}
+                  {currentReqFuelValue !== null && (
+                    <div className="mt-3 text-[8px] font-bold uppercase tracking-[0.12em] text-gray-500">
+                      Current {currentReqFuelValue.toFixed(1)} ms
+                      {reqFuelDelta !== null && (
+                        <span className={`${reqFuelDelta === 0 ? 'text-gray-400' : reqFuelDelta > 0 ? 'text-neon-orange' : 'text-neon-cyan'} ml-2`}>
+                          {reqFuelDelta > 0 ? '+' : ''}{reqFuelDelta.toFixed(1)} ms
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -218,7 +314,7 @@ export default function ReqFuelCalculator({ isOpen, onClose, onApply, initialCyl
                   className={`flex-1 py-3 rounded-xl text-[10px] font-orbitron font-bold uppercase tracking-[0.2em] transition-all ${
                     reqFuel === null 
                       ? 'bg-gray-800 text-gray-500 cursor-not-allowed opacity-50' 
-                      : 'bg-neon-cyan text-bg-deep hover:bg-cyan-400 active:scale-95 box-glow-cyan'
+                      : 'bg-neon-cyan text-bg-deep hover:opacity-90 active:scale-95 box-glow-cyan'
                   }`}
                 >
                   Apply Result

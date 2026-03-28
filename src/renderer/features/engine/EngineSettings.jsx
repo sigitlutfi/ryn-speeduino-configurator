@@ -11,6 +11,7 @@ import {
   Flame,
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
+import { useStore } from "../../core/store.js";
 import TuningHeader from "../shared/components/TuningHeader";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 import ReqFuelCalculator from "./ReqFuelCalculator.jsx";
@@ -35,10 +36,12 @@ const ENGINE_FIELDS = [
 
 const EngineSettings = () => {
   const [showReqFuelCalc, setShowReqFuelCalc] = useState(false);
+  const { currentProject, updateProjectField } = useStore();
 
   const {
     getFieldValue,
     setFieldValue,
+    setLocalPage,
     getFieldInfo,
     handleSave,
     discardChanges,
@@ -59,6 +62,8 @@ const EngineSettings = () => {
     const info = getFieldInfo(name);
     setFieldValue(name, toRaw(val, info?.meta));
   };
+
+  const reqFuelCalcPrefs = currentProject?.engine?.reqFuelCalc || {};
 
   const GroupHeader = ({
     title,
@@ -318,14 +323,54 @@ const EngineSettings = () => {
           isOpen={true}
           onClose={() => setShowReqFuelCalc(false)}
           currentReqFuel={getValue("reqFuel")}
+          initialDisplacement={
+            reqFuelCalcPrefs.displacement ??
+            currentProject?.engine?.displacement ??
+            2000
+          }
+          initialDisplacementUnit={reqFuelCalcPrefs.displacementUnit ?? "cc"}
           initialCylinders={getValue("nCylinders")}
+          initialInjectorFlow={reqFuelCalcPrefs.injectorFlow ?? 440}
+          initialInjectorUnit={reqFuelCalcPrefs.injectorUnit ?? "ccmin"}
           initialSquirts={getValue("divider")}
+          initialStoich={getValue("stoich")}
           onApply={(data) => {
-            // Apply all relevant fields from calculator
-            updateValue("reqFuel", data.reqFuel);
-            updateValue("nCylinders", data.cylinders);
-            updateValue("divider", data.squirts);
-            updateValue("stoich", data.stoich);
+            const reqFuelInfo = getFieldInfo("reqFuel");
+            const nCylInfo = getFieldInfo("nCylinders");
+            const dividerInfo = getFieldInfo("divider");
+            const stoichInfo = getFieldInfo("stoich");
+
+            updateProjectField("engine.reqFuelCalc", {
+              displacement: data.displacement,
+              displacementUnit: data.displacementUnit,
+              injectorFlow: data.injectorFlow,
+              injectorUnit: data.injectorUnit,
+              stoich: data.stoich,
+            });
+
+            if (
+              reqFuelInfo &&
+              nCylInfo &&
+              dividerInfo &&
+              stoichInfo &&
+              reqFuelInfo.pageId === nCylInfo.pageId &&
+              reqFuelInfo.pageId === dividerInfo.pageId &&
+              reqFuelInfo.pageId === stoichInfo.pageId
+            ) {
+              setLocalPage(reqFuelInfo.pageId, {
+                [reqFuelInfo.key]: toRaw(data.reqFuel, reqFuelInfo.meta),
+                [nCylInfo.key]: toRaw(data.cylinders, nCylInfo.meta),
+                [dividerInfo.key]: toRaw(data.squirts, dividerInfo.meta),
+                [stoichInfo.key]: toRaw(data.stoich, stoichInfo.meta),
+              });
+            } else {
+              // Fallback if INI mappings ever diverge across pages.
+              updateValue("reqFuel", data.reqFuel);
+              updateValue("nCylinders", data.cylinders);
+              updateValue("divider", data.squirts);
+              updateValue("stoich", data.stoich);
+            }
+
             setShowReqFuelCalc(false);
           }}
         />

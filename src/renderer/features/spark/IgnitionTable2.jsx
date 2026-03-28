@@ -3,7 +3,8 @@ import { useStore } from "../../core/store.js";
 import TuningGrid from "../shared/TuningGrid/TuningGrid.jsx";
 import { getTableMetadata, getConstant } from "../../../shared/ini-parser";
 import TuningHeader from "../shared/components/TuningHeader";
-import { Activity } from "lucide-react";
+import { Activity, Flame } from "lucide-react";
+import { getDecodedPage } from "../shared/utils/projectConstants";
 
 export default function IgnitionTable2() {
   const parsedIni = useStore((s) => s.parsedIni);
@@ -14,6 +15,7 @@ export default function IgnitionTable2() {
   const secondaryValues = useStore((s) => s.tables.ign.values);
   const updateTable = useStore((s) => s.updateTable);
   const updateConstants = useStore((s) => s.updateConstants);
+  const syncPagesToECU = useStore((s) => s.syncPagesToECU);
   const saveProject = useStore((s) => s.saveProject);
   const notify = useStore((s) => s.notify);
 
@@ -29,8 +31,7 @@ export default function IgnitionTable2() {
   // Determine actual Y-Axis label based on active Secondary Ignition Algorithm (Page 10)
   const algorithmId = useMemo(() => {
     if (!constants) return 0;
-    const pages = constants.pages || {};
-    const p10 = pages[10] || pages["10"];
+    const p10 = getDecodedPage(constants, 10);
     return p10?.spark2Algorithm ?? 0;
   }, [constants]);
 
@@ -52,8 +53,7 @@ export default function IgnitionTable2() {
   useEffect(() => {
     if (!meta || !constants) return;
 
-    const pageData =
-      constants.pages?.[meta.page] || constants.pages?.[String(meta.page)];
+    const pageData = getDecodedPage(constants, meta.page);
     if (!pageData) return;
 
     const rpmData = pageData[meta.xBinsVar];
@@ -84,20 +84,21 @@ export default function IgnitionTable2() {
 
     try {
       const flatValues = values.flat();
-      const pageData =
-        constants.pages?.[meta.page] ||
-        constants.pages?.[String(meta.page)] ||
-        {};
+      const pageData = getDecodedPage(constants, meta.page);
 
-      updateConstants({
-        pages: {
-          ...(constants?.pages || {}),
-          [meta.page]: {
-            ...pageData,
-            [meta.zBinsVar]: flatValues,
-          },
+      await updateConstants({
+        [meta.page]: {
+          ...pageData,
+          [meta.zBinsVar]: flatValues,
         },
       });
+
+      if (connection.status === "connected") {
+        const syncResult = await syncPagesToECU([meta.page], { burn: isBurn });
+        if (!syncResult.ok) {
+          throw new Error(syncResult.errors?.[0]?.error || "ECU sync failed");
+        }
+      }
 
       const result = await saveProject();
       if (result.ok) {
@@ -121,7 +122,7 @@ export default function IgnitionTable2() {
 
   const isDirty = useMemo(() => {
     if (!meta || !constants) return false;
-    const original = constants.pages?.[meta.page]?.[meta.zBinsVar];
+    const original = getDecodedPage(constants, meta.page)?.[meta.zBinsVar];
     if (!original) return false;
     const current = values.flat();
     return JSON.stringify(current) !== JSON.stringify(original);
@@ -150,9 +151,10 @@ export default function IgnitionTable2() {
   return (
     <div className="p-0 h-full flex flex-col gap-0 overflow-hidden bg-transparent rounded-3xl">
       <TuningHeader
-        title={meta.title}
-        icon={Activity}
-        description={`Secondary Ignition Table — ${meta.xLabel} vs ${dynamicYLabel}`}
+        title="Secondary Ignition Table"
+        description="Dual-fuel or switchable ignition advance"
+        icon={Flame}
+        themeColor="orange"
         isSaving={isSaving}
         saveStatus={saveStatus}
         isConnected={connection.status === "connected"}
@@ -160,7 +162,6 @@ export default function IgnitionTable2() {
         onSave={() => handleSave(false)}
         onBurn={() => handleSave(true)}
         onDiscard={() => window.location.reload()}
-        themeColor="purple"
       />
 
       <div className="flex-1 p-6 flex flex-col min-h-0 bg-[#0a0b10] overflow-y-auto custom-scrollbar">
@@ -173,7 +174,7 @@ export default function IgnitionTable2() {
             onUpdate={(newValues) => updateTable("ign2", newValues)}
             minVal={tableMin}
             maxVal={tableMax}
-            theme="purple"
+            theme="orange"
             xAxisLabel={meta.xLabel}
             yAxisLabel={dynamicYLabel}
             unitLabel={meta.unitLabel || "DEG"}

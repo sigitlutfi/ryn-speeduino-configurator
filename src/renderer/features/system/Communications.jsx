@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useStore } from "../../core/store.js";
 import { BAUD_RATES } from "../../../shared/protocol/ts-commands.js";
-import { parseRealtime } from "../../../shared/protocol/realtime.js";
 import {
   Radio,
   RefreshCcw,
@@ -21,7 +20,6 @@ export default function Communications() {
     setConnectionStatus,
     setConnectionPort,
     setConnectionBaud,
-    setRealtime,
   } = useStore();
 
   useEffect(() => {

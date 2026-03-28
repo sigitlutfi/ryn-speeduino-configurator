@@ -1,8 +1,10 @@
 import React, { useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
+import { Buffer } from "buffer";
 import { useStore } from "./core/store.js";
 import { ROUTES } from "./routes.js";
 import { parseRealtime } from "../shared/protocol/realtime.js";
+import { serialService } from "./core/services/serialService.js";
 import Communications from "./features/system/Communications.jsx";
 import Dashboard from "./features/dashboard/Dashboard.jsx";
 import VETable from "./features/fuel/VETable.jsx";
@@ -46,8 +48,8 @@ import RumbleIdle from "./features/racing/RumbleIdle.jsx";
 import AntiLag from "./features/racing/AntiLag.jsx";
 
 import IndicatorTray from "./features/shared/components/IndicatorTray.jsx";
-
-// Analytics Placeholder moved to features/dashboard/Analysis.jsx
+import SyncDialog from "./ui/SyncDialog.jsx";
+import { getAccent } from "./core/theme.js";
 
 const TerminalPlaceholder = () => (
   <div className="flex flex-col items-center justify-center h-full text-gray-700 font-orbitron text-xs tracking-[0.3em] uppercase opacity-40">
@@ -59,45 +61,131 @@ export default function App() {
   const [, navigate] = useLocation();
   const {
     currentProject,
-    closeProject,
     init,
     settings,
+    parsedIni,
+    connection,
     setConnectionStatus,
     setRealtime,
+    notify,
+    syncDialogOpen,
+    syncDialogResults,
+    closeSyncDialog,
   } = useStore();
+
+  const accent = getAccent(settings.accentColor);
 
   useEffect(() => {
     init();
 
-    // Global Serial Listeners
-    window.serial.onData((bytes) => {
-      if (bytes.length === 138 || bytes.length === 144) {
-        const data = parseRealtime(bytes);
-        if (data) setRealtime(data);
-      }
-    });
+    const handleRealtime = (payload) => {
+      const data =
+        Buffer.isBuffer(payload) || payload instanceof Uint8Array
+          ? parseRealtime(payload)
+          : payload;
+      if (data) setRealtime(data);
+    };
+    serialService.onRealtime(handleRealtime);
 
-    window.serial.onStatus((status) => {
-      if (status === "connected") setConnectionStatus("connected");
-      else if (status === "disconnected") setConnectionStatus("disconnected");
-      else if (status.startsWith("error:"))
+    // Connection status handler with handshake sequence
+    window.serial.onStatus(async (status) => {
+      if (status === "connected") {
+        // Perform handshake before marking as fully connected
+        try {
+          console.log('[App] Serial connected, performing handshake...');
+          const handshakeInfo = await serialService.handshake();
+          setConnectionStatus("connected");
+          notify("ECU connected", "success", 2000);
+
+          const { currentProject, compareWithECU, updateECUConnectionInfo, parsedIni } = useStore.getState();
+          updateECUConnectionInfo(handshakeInfo);
+
+          if (
+            currentProject?.ini?.signature &&
+            handshakeInfo?.signature &&
+            currentProject.ini.signature.trim() !== handshakeInfo.signature.trim()
+          ) {
+            console.warn("[App] INI signature mismatch detected", {
+              projectName: currentProject.projectName,
+              projectSignature: currentProject.ini.signature,
+              ecuSignature: handshakeInfo.signature,
+              iniPath: currentProject.ini.path || "(embedded only)",
+            });
+            notify(
+              `INI mismatch: project=${currentProject.ini.signature}, ecu=${handshakeInfo.signature}. Check loaded project/INI.`,
+              "warning",
+              7000,
+            );
+          }
+
+          if (currentProject?.ini?.content) {
+            try {
+              const results = await compareWithECU();
+              if (!results?.error) {
+                const matched = results.matching?.length || 0;
+                const different = results.different?.length || 0;
+                const missing = results.missing?.length || 0;
+                const errors = results.errors?.length || 0;
+                notify(
+                  `CRC sync check: ${matched} match, ${different} different, ${missing} missing local`,
+                  different > 0 ? "warning" : "info",
+                  3500,
+                );
+
+                if (different > 0 || missing > 0 || errors > 0) {
+                  console.warn("[App] Opening sync dialog after connect", {
+                    matching: matched,
+                    different,
+                    missing,
+                    errors,
+                  });
+                  useStore.getState().openSyncDialog(results);
+                }
+              }
+            } catch (syncErr) {
+              console.warn("[App] Initial CRC sync check failed:", syncErr);
+            }
+          }
+
+          if (parsedIni?.outputChannels?.ochGetCommand) {
+            serialService.startOutputChannelsPolling(parsedIni);
+          }
+        } catch (err) {
+          console.error('[App] Handshake failed:', err);
+          setConnectionStatus("error", "Handshake failed");
+          notify("ECU handshake failed", "error");
+          // Disconnect if handshake fails
+          window.serial.disconnect();
+        }
+      } else if (status === "disconnected") {
+        serialService.reset();
+        setConnectionStatus("disconnected");
+      } else if (status.startsWith("error:")) {
         setConnectionStatus("error", status.slice(6));
+      }
     });
 
-    return () => window.serial.offAll();
-  }, [init, setConnectionStatus, setRealtime]);
+    return () => {
+      window.serial.offAll();
+      serialService.offRealtime(handleRealtime);
+      serialService.destroy();
+    };
+  }, [init, setConnectionStatus, setRealtime, notify]);
 
-  const bgStyle = settings.backgroundImage
-    ? {
-        backgroundImage: `url("atom:///${settings.backgroundImage.replace(/\\/g, "/")}")`,
-        filter: `blur(${settings.backgroundBlur || 0}px) brightness(${(settings.backgroundOpacity || 40) / 100})`,
-        transform: "scale(1.1)", // Prevent blur edges from showing black
+  useEffect(() => {
+    if (connection.status !== "connected" || !parsedIni?.outputChannels?.ochGetCommand) {
+      serialService.stopOutputChannelsPolling();
+    }
+
+    return () => {
+      if (connection.status !== "connected") {
+        serialService.stopOutputChannelsPolling();
       }
-    : {};
+    };
+  }, [connection.status, parsedIni]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Ignore shortcuts if user is typing in an input
       const activeTag = document.activeElement.tagName.toLowerCase();
       const isInput = ["input", "select", "textarea"].includes(activeTag);
       const { notify, closeProject, saveProject, setProject } =
@@ -151,117 +239,147 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [navigate]);
 
-  if (!currentProject) {
-    return (
-      <div className="flex flex-col h-screen overflow-hidden relative">
-        {settings.backgroundImage && (
-          <div
-            className="absolute inset-0 bg-cover bg-center z-0 transition-all duration-1000"
-            style={bgStyle}
-          />
-        )}
-        <div className="relative z-10 flex flex-col h-full bg-black/40">
-          <NotificationTray />
-          <AppToolbar />
-          <IndicatorTray />
-          <GettingStarted />
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col h-screen bg-bg-deep text-white overflow-hidden font-inter relative">
+    <div
+      className="flex flex-col h-screen overflow-hidden relative bg-[#0a0b10] text-[#eeeff5] font-inter"
+      style={{
+        "--accent-color": accent.main,
+        "--accent-glow": accent.glow,
+      }}
+    >
+      {/* Background image is only visible in GettingStarted or via low opacity */}
       {settings.backgroundImage && (
         <div
-          className="absolute inset-0 bg-cover bg-center z-0 transition-all duration-1000"
-          style={bgStyle}
+          className="absolute inset-0 bg-cover bg-center z-0 transition-opacity duration-1000 opacity-20 pointer-events-none"
+          style={{
+            backgroundImage: `url("atom:///${settings.backgroundImage.replace(/\\/g, "/")}")`,
+          }}
         />
       )}
-      <NotificationTray />
-      <div className="neon-grid pointer-events-none" />
-      <AppToolbar />
-      <IndicatorTray />
 
-      <div className="flex flex-1 overflow-hidden relative z-10">
-        <Sidebar />
+      <div className="relative z-10 flex flex-col h-full overflow-hidden">
+        <NotificationTray />
+        <AppToolbar />
+        <SyncDialog
+          isOpen={syncDialogOpen}
+          onClose={closeSyncDialog}
+          diffResults={syncDialogResults}
+        />
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-          {/* Main Workspace Area */}
-          <main className="flex-1 overflow-hidden relative bg-black/20">
-            <Switch>
-              {/* Specific routes should come before the root path in wouter Switch */}
-              <Route path={ROUTES.ANALYSIS} component={Analysis} />
-              <Route path={ROUTES.TUNING_VE} component={VETable} />
-              <Route path={ROUTES.TUNING_VE2} component={VETable2} />
-              <Route path={ROUTES.TUNING_IGNITION} component={IgnitionTable} />
-              <Route
-                path={ROUTES.TUNING_IGNITION2}
-                component={IgnitionTable2}
-              />
-              <Route path={ROUTES.TUNING_AFR} component={AFRTable} />
-              <Route path={ROUTES.TUNING_LAMBDA} component={LambdaTable} />
-              <Route path={ROUTES.SETTINGS_ENGINE} component={EngineSettings} />
-              <Route path={ROUTES.SETTINGS_TRIGGER} component={TriggerSetup} />
-              <Route path={ROUTES.SETTINGS_IAT} component={IATCorrection} />
-              <Route
-                path={ROUTES.SETTINGS_INJECTOR}
-                component={InjectorCharacteristics}
-              />
-              <Route
-                path={ROUTES.SETTINGS_PROGRAMMABLE}
-                component={ProgrammableOutputs}
-              />
-              <Route path={ROUTES.SETTINGS_SPARK} component={SparkSetup} />
-              <Route path={ROUTES.SETTINGS_AFR} component={AFRO2Settings} />
-              <Route path={ROUTES.SETTINGS_FLEX} component={FlexFuelSettings} />
-              <Route
-                path={ROUTES.SETTINGS_PROTECTION}
-                component={EngineProtection}
-              />
-              <Route
-                path={ROUTES.STARTUP_CRANKING}
-                component={CrankingSettings}
-              />
-              <Route path={ROUTES.STARTUP_CURVES} component={StartupCurves} />
-              <Route path={ROUTES.STARTUP_IDLE} component={IdleControl} />
-              <Route path={ROUTES.RACING_LAUNCH} component={LaunchControl} />
-              <Route path={ROUTES.RACING_FLATSHIFT} component={FlatShift} />
-              <Route path={ROUTES.RACING_PITLIMITER} component={PitLimiter} />
-              <Route path={ROUTES.RACING_RUMBLEIDLE} component={RumbleIdle} />
-              <Route path={ROUTES.RACING_ANTILAG} component={AntiLag} />
-              <Route path={ROUTES.RACING_NITROUS} component={Nitrous} />
-              <Route path={ROUTES.ADDON_FUELPUMP} component={FuelPump} />
-              <Route path={ROUTES.SETTINGS_FAN} component={FanSettings} />
-              <Route path={ROUTES.SETTINGS_WMI} component={WMI} />
-              <Route path={ROUTES.SETTINGS_VVT} component={VVTControl} />
-              <Route path={ROUTES.SETTINGS_BOOST} component={BoostControl} />
-              <Route
-                path={ROUTES.SETTINGS_STAGED}
-                component={StagedInjection}
-              />
-              <Route
-                path={ROUTES.SETTINGS_CALIBRATION}
-                component={SensorCalibration}
-              />
-              <Route
-                path={ROUTES.TOOLS_DIAGNOSTICS}
-                component={ProtocolStats}
-              />
-              <Route path={ROUTES.SETTINGS_TACHO} component={TachoOutput} />
-              <Route path={ROUTES.COMM} component={Communications} />
-              <Route path={ROUTES.TERMINAL} component={TerminalPlaceholder} />
-              <Route
-                path={ROUTES.APP_SETTINGS}
-                component={AppearanceSettings}
-              />
-              <Route path={ROUTES.DASHBOARD} component={Dashboard} />
-              <Route>
-                <Dashboard />
-              </Route>
-            </Switch>
-          </main>
-        </div>
+        {!currentProject ? (
+          <div className="flex-1 overflow-hidden relative">
+            <GettingStarted />
+          </div>
+        ) : (
+          <div className="flex flex-1 overflow-hidden relative">
+            <Sidebar />
+            <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+              <IndicatorTray />
+              <main className="flex-1 overflow-hidden relative bg-[#0a0b10]">
+                <Switch>
+                  <Route path={ROUTES.ANALYSIS} component={Analysis} />
+                  <Route path={ROUTES.TUNING_VE} component={VETable} />
+                  <Route path={ROUTES.TUNING_VE2} component={VETable2} />
+                  <Route
+                    path={ROUTES.TUNING_IGNITION}
+                    component={IgnitionTable}
+                  />
+                  <Route
+                    path={ROUTES.TUNING_IGNITION2}
+                    component={IgnitionTable2}
+                  />
+                  <Route path={ROUTES.TUNING_AFR} component={AFRTable} />
+                  <Route path={ROUTES.TUNING_LAMBDA} component={LambdaTable} />
+                  <Route
+                    path={ROUTES.SETTINGS_ENGINE}
+                    component={EngineSettings}
+                  />
+                  <Route
+                    path={ROUTES.SETTINGS_TRIGGER}
+                    component={TriggerSetup}
+                  />
+                  <Route path={ROUTES.SETTINGS_IAT} component={IATCorrection} />
+                  <Route
+                    path={ROUTES.SETTINGS_INJECTOR}
+                    component={InjectorCharacteristics}
+                  />
+                  <Route
+                    path={ROUTES.SETTINGS_PROGRAMMABLE}
+                    component={ProgrammableOutputs}
+                  />
+                  <Route path={ROUTES.SETTINGS_SPARK} component={SparkSetup} />
+                  <Route path={ROUTES.SETTINGS_AFR} component={AFRO2Settings} />
+                  <Route
+                    path={ROUTES.SETTINGS_FLEX}
+                    component={FlexFuelSettings}
+                  />
+                  <Route
+                    path={ROUTES.SETTINGS_PROTECTION}
+                    component={EngineProtection}
+                  />
+                  <Route
+                    path={ROUTES.STARTUP_CRANKING}
+                    component={CrankingSettings}
+                  />
+                  <Route
+                    path={ROUTES.STARTUP_CURVES}
+                    component={StartupCurves}
+                  />
+                  <Route path={ROUTES.STARTUP_IDLE} component={IdleControl} />
+                  <Route
+                    path={ROUTES.RACING_LAUNCH}
+                    component={LaunchControl}
+                  />
+                  <Route path={ROUTES.RACING_FLATSHIFT} component={FlatShift} />
+                  <Route
+                    path={ROUTES.RACING_PITLIMITER}
+                    component={PitLimiter}
+                  />
+                  <Route
+                    path={ROUTES.RACING_RUMBLEIDLE}
+                    component={RumbleIdle}
+                  />
+                  <Route path={ROUTES.RACING_ANTILAG} component={AntiLag} />
+                  <Route path={ROUTES.RACING_NITROUS} component={Nitrous} />
+                  <Route path={ROUTES.ADDON_FUELPUMP} component={FuelPump} />
+                  <Route path={ROUTES.SETTINGS_FAN} component={FanSettings} />
+                  <Route path={ROUTES.SETTINGS_WMI} component={WMI} />
+                  <Route path={ROUTES.SETTINGS_VVT} component={VVTControl} />
+                  <Route
+                    path={ROUTES.SETTINGS_BOOST}
+                    component={BoostControl}
+                  />
+                  <Route
+                    path={ROUTES.SETTINGS_STAGED}
+                    component={StagedInjection}
+                  />
+                  <Route
+                    path={ROUTES.SETTINGS_CALIBRATION}
+                    component={SensorCalibration}
+                  />
+                  <Route
+                    path={ROUTES.TOOLS_DIAGNOSTICS}
+                    component={ProtocolStats}
+                  />
+                  <Route path={ROUTES.SETTINGS_TACHO} component={TachoOutput} />
+                  <Route path={ROUTES.COMM} component={Communications} />
+                  <Route
+                    path={ROUTES.TERMINAL}
+                    component={TerminalPlaceholder}
+                  />
+                  <Route
+                    path={ROUTES.APP_SETTINGS}
+                    component={AppearanceSettings}
+                  />
+                  <Route path={ROUTES.DASHBOARD} component={Dashboard} />
+                  <Route>
+                    <Dashboard />
+                  </Route>
+                </Switch>
+              </main>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

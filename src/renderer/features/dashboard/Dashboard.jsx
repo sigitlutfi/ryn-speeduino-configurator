@@ -1,244 +1,345 @@
-import React, { useCallback } from "react";
+import React, { useMemo, useState } from "react";
 import { useStore } from "../../core/store.js";
-import Gauge from "../../ui/Gauge/Index.jsx";
-import RealtimeChart from "../../ui/Layout/RealtimeChart.jsx";
+import { getAccent } from "../../core/theme.js";
+import {
+  normalizeRealtimeDashboard,
+} from "./widgets/widgetPresets.js";
+import { createRealtimeChannelRegistry, getChannelOptions } from "./widgets/channelRegistry.js";
+import WidgetTile from "./widgets/WidgetTile.jsx";
+import { Plus, Pencil, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 
-function StatRow({ label, value, unit }) {
+const WIDGET_TYPES = ["gauge", "digital", "status", "trace"];
+
+function DashboardToolbar({ activePreset, presets, onPresetChange, editing, onToggleEditing }) {
   return (
-    <div className="flex justify-between items-center py-1.5 border-b border-white/5 text-sm group transition-all">
-      <span className="text-gray-500 font-medium group-hover:text-gray-300 transition-colors">
-        {label}
-      </span>
-      <span className="font-mono text-white flex items-baseline">
-        {value}
-        <span className="text-gray-600 text-[10px] ml-1 uppercase font-inter">
-          {unit}
-        </span>
-      </span>
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h1 className="text-sm font-orbitron font-bold uppercase tracking-[0.28em] text-white">
+          Realtime Dashboard
+        </h1>
+        <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">
+          Dynamic telemetry widgets
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-2xl border border-white/5 bg-white/5 p-1">
+        {presets.map((preset) => {
+          const isActive = preset.id === activePreset?.id;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => onPresetChange(preset.id)}
+              className={`rounded-xl px-3 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] transition-all ${
+                isActive
+                  ? "bg-neon-cyan/15 text-neon-cyan border border-neon-cyan/30"
+                  : "text-white/35 border border-transparent hover:text-white hover:bg-white/5"
+              }`}
+            >
+              {preset.name}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onToggleEditing}
+          className={`ml-2 rounded-xl px-3 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] transition-all ${
+            editing
+              ? "bg-neon-cyan/15 text-neon-cyan border border-neon-cyan/30"
+              : "text-white/40 hover:text-white hover:bg-white/5 border border-transparent"
+          }`}
+        >
+          {editing ? "Done" : "Edit Layout"}
+        </button>
+      </div>
     </div>
   );
 }
 
 export default function Dashboard() {
-  const rt = useStore((s) => s.realtime);
-  const isConnected = useStore((s) => s.connection.status === "connected");
+  const {
+    currentProject,
+    realtime,
+    settings,
+    connection,
+    updateRealtimeDashboard,
+    convertTemp,
+    convertPress,
+    convertSpeed,
+    tempUnit,
+    pressUnit,
+    speedUnit,
+  } = useStore();
+  const [editing, setEditing] = useState(false);
 
-  const getRpm = useCallback(() => useStore.getState().realtime.rpm, []);
-  const getMap = useCallback(() => useStore.getState().realtime.map, []);
-  const getAfr = useCallback(() => useStore.getState().realtime.afr * 10, []);
+  const accent = getAccent(settings?.accentColor);
+  const isConnected = connection.status === "connected";
 
-  const convertTemp = useStore((s) => s.convertTemp);
-  const convertPress = useStore((s) => s.convertPress);
-  const convertSpeed = useStore((s) => s.convertSpeed);
-  const tempUnit = useStore((s) => s.tempUnit);
-  const pressUnit = useStore((s) => s.pressUnit);
-  const speedUnit = useStore((s) => s.speedUnit);
+  const dashboardConfig = useMemo(
+    () => normalizeRealtimeDashboard(settings?.realtimeDashboard),
+    [settings?.realtimeDashboard],
+  );
 
-  if (!isConnected) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-4">
-        <div className="w-16 h-16 rounded-full border border-white/5 flex items-center justify-center bg-white/5 animate-pulse">
-          <svg
-            className="w-8 h-8 text-gray-600"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
-        </div>
-        <p className="font-orbitron text-xs tracking-[0.2em] uppercase opacity-60">
-          Waiting for connection
-        </p>
-      </div>
-    );
-  }
+  const activePreset = dashboardConfig.presets.find(
+    (preset) => preset.id === dashboardConfig.activePresetId,
+  ) || dashboardConfig.presets[0];
+
+  const registry = useMemo(
+    () =>
+      createRealtimeChannelRegistry({
+        convertTemp,
+        convertPress,
+        convertSpeed,
+        tempUnit,
+        pressUnit,
+        speedUnit,
+      }),
+    [convertTemp, convertPress, convertSpeed, tempUnit, pressUnit, speedUnit],
+  );
+
+  const getRealtimeValue = (channelKey) => {
+    const entry = registry[channelKey];
+    return entry?.getDisplay(realtime)?.value ?? 0;
+  };
+
+  const handlePresetChange = (presetId) => {
+    updateRealtimeDashboard((current) => ({
+      ...current,
+      activePresetId: presetId,
+    }));
+  };
+
+  const channelOptions = useMemo(() => getChannelOptions(registry), [registry]);
+
+  const updateActivePreset = (updater) => {
+    if (!activePreset) return;
+    updateRealtimeDashboard((current) => ({
+      ...current,
+      presets: current.presets.map((preset) => {
+        if (preset.id !== activePreset.id) return preset;
+        return updater(preset);
+      }),
+    }));
+  };
+
+  const moveWidget = (widgetId, direction) => {
+    updateActivePreset((preset) => {
+      const widgets = [...preset.widgets];
+      const index = widgets.findIndex((widget) => widget.id === widgetId);
+      if (index === -1) return preset;
+      const nextIndex = direction === "left" ? index - 1 : index + 1;
+      if (nextIndex < 0 || nextIndex >= widgets.length) return preset;
+      [widgets[index], widgets[nextIndex]] = [widgets[nextIndex], widgets[index]];
+      return { ...preset, widgets };
+    });
+  };
+
+  const removeWidget = (widgetId) => {
+    updateActivePreset((preset) => ({
+      ...preset,
+      widgets: preset.widgets.filter((widget) => widget.id !== widgetId),
+    }));
+  };
+
+  const updateWidget = (widgetId, patch) => {
+    updateActivePreset((preset) => ({
+      ...preset,
+      widgets: preset.widgets.map((widget) =>
+        widget.id === widgetId ? { ...widget, ...patch } : widget,
+      ),
+    }));
+  };
+
+  const addWidget = () => {
+    const defaultChannel = channelOptions[0];
+    if (!defaultChannel) return;
+    updateActivePreset((preset) => ({
+      ...preset,
+      widgets: [
+        ...preset.widgets,
+        {
+          id: `${preset.id}-widget-${Date.now()}`,
+          type: defaultChannel.defaultWidget,
+          channelKey: defaultChannel.key,
+          color: "cyan",
+          enabled: true,
+        },
+      ],
+    }));
+  };
+
+  if (!currentProject) return null;
+
+  const widgets = (activePreset?.widgets || []).filter((widget) => widget.enabled !== false);
 
   return (
-    <div className="p-6 grid grid-cols-1 gap-6 overflow-y-auto h-full custom-scrollbar">
-      {/* Engine status badge */}
-      <div className="flex gap-2 flex-wrap items-center">
-        <span className="text-[10px] font-orbitron font-bold text-gray-600 uppercase tracking-widest mr-2">
-          Status:
-        </span>
-        {rt.engine?.running && (
-          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-neon-green/10  text-neon-green  border border-neon-green/20  box-glow-green">
-            RUNNING
-          </span>
-        )}
-        {rt.engine?.cranking && (
-          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-neon-yellow/10 text-neon-yellow border border-neon-yellow/20">
-            CRANKING
-          </span>
-        )}
-        {rt.engine?.warmup && (
-          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-neon-cyan/10  text-neon-cyan  border border-neon-cyan/20">
-            WARMUP
-          </span>
-        )}
-        {rt.engine?.ase && (
-          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-neon-purple/10 text-neon-purple border border-neon-purple/20">
-            ASE
-          </span>
-        )}
-        {rt.engine?.accelTPS && (
-          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-neon-orange/10 text-neon-orange border border-neon-orange/20">
-            ACCEL
-          </span>
-        )}
-      </div>
+    <div className="h-full overflow-y-auto custom-scrollbar p-6 space-y-6">
+      <DashboardToolbar
+        activePreset={activePreset}
+        presets={dashboardConfig.presets}
+        onPresetChange={handlePresetChange}
+        editing={editing}
+        onToggleEditing={() => setEditing((value) => !value)}
+      />
 
-      {/* Main gauges */}
-      <div className="flex flex-wrap justify-around gap-8 glass rounded-2xl p-8 border-white/5 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-neon-cyan/5 blur-3xl pointer-events-none" />
-        <Gauge
-          label="RPM"
-          value={rt.rpm}
-          min={0}
-          max={8000}
-          unit="rpm"
-          size={180}
-          warning={6000}
-          danger={7000}
-        />
-        <Gauge
-          label="MAP"
-          value={convertPress(rt.map)}
-          min={convertPress(20)}
-          max={convertPress(110)}
-          unit={pressUnit()}
-          size={140}
-          decimals={pressUnit() === "kPa" ? 0 : 1}
-        />
-        <Gauge
-          label="TPS"
-          value={rt.tps}
-          min={0}
-          max={100}
-          unit="%"
-          size={140}
-        />
-        <Gauge
-          label="AFR"
-          value={rt.afr}
-          min={9}
-          max={20}
-          unit="λ"
-          size={140}
-          decimals={1}
-          warning={16}
-          danger={17}
-        />
-        <Gauge
-          label="Coolant"
-          value={convertTemp(rt.coolant)}
-          min={convertTemp(-20)}
-          max={convertTemp(120)}
-          unit={tempUnit()}
-          size={140}
-          warning={convertTemp(100)}
-          danger={convertTemp(110)}
-        />
-        <Gauge
-          label="IAT"
-          value={convertTemp(rt.iat)}
-          min={convertTemp(-20)}
-          max={convertTemp(80)}
-          unit={tempUnit()}
-          size={140}
-          warning={convertTemp(50)}
-          danger={convertTemp(65)}
-        />
-        <Gauge
-          label="Battery"
-          value={rt.battery}
-          min={8}
-          max={16}
-          unit="V"
-          size={140}
-          decimals={1}
-          warning={11}
-          danger={10}
-        />
-        <Gauge
-          label="Advance"
-          value={rt.advance}
-          min={-10}
-          max={50}
-          unit="°"
-          size={140}
-          decimals={0}
-        />
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <RealtimeChart
-          getValue={getRpm}
-          label="RPM"
-          color="#00ffb4"
-          min={0}
-          max={8000}
-        />
-        <RealtimeChart
-          getValue={getMap}
-          label="MAP"
-          color="#00d4ff"
-          min={20}
-          max={110}
-        />
-        <RealtimeChart
-          getValue={getAfr}
-          label="AFR"
-          color="#ff6b35"
-          min={90}
-          max={180}
-        />
-      </div>
-
-      {/* Stats grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass rounded-xl p-5">
-          <div className="text-[10px] text-neon-cyan mb-4 font-orbitron font-bold uppercase tracking-[0.2em] flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-neon-cyan glow-cyan" />{" "}
-            Fuel
-          </div>
-          <StatRow label="VE" value={rt.ve} unit="%" />
-          <StatRow label="PW1" value={rt.pw1?.toFixed(2)} unit="ms" />
-          <StatRow label="Corrections" value={rt.corrections} unit="%" />
-          <StatRow label="Ethanol" value={rt.ethanolPct} unit="%" />
-        </div>
-        <div className="glass rounded-xl p-5">
-          <div className="text-[10px] text-neon-purple mb-4 font-orbitron font-bold uppercase tracking-[0.2em] flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-neon-purple" />{" "}
-            Ignition
-          </div>
-          <StatRow label="Advance" value={rt.advance} unit="°" />
-          <StatRow label="Dwell" value={rt.dwell?.toFixed(1)} unit="ms" />
-        </div>
-        <div className="glass rounded-xl p-5">
-          <div className="text-[10px] text-neon-orange mb-4 font-orbitron font-bold uppercase tracking-[0.2em] flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-neon-orange" /> Sensors
-          </div>
-          <StatRow
-            label="Baro"
-            value={convertPress(rt.baro)?.toFixed(
-              pressUnit() === "kPa" ? 0 : 2,
-            )}
-            unit={pressUnit()}
+      <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-orbitron font-bold uppercase tracking-[0.22em] text-white/35">
+            {isConnected ? "Live" : "Offline"}
+          </span>
+          <span
+            className={`h-2 w-2 rounded-full ${isConnected ? "animate-pulse" : ""}`}
+            style={{ backgroundColor: isConnected ? accent.main : "rgba(255,255,255,0.22)" }}
           />
-          <StatRow
-            label="VSS"
-            value={convertSpeed(rt.vss)?.toFixed(0)}
-            unit={speedUnit()}
-          />
-          <StatRow label="Gear" value={rt.gear} unit="" />
+          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">
+            {widgets.length} widgets loaded
+          </span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/25">
+            preset: {activePreset?.name || "Tune"}
+          </span>
+          {editing ? (
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-neon-cyan">
+              edit mode
+            </span>
+          ) : null}
         </div>
+      </div>
+
+      {editing ? (
+        <div className="rounded-2xl border border-white/5 bg-white/5 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-[11px] font-orbitron font-bold uppercase tracking-[0.22em] text-white">
+                Layout Editor
+              </h2>
+              <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">
+                Move, change, add, or remove dashboard widgets
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addWidget}
+              className="inline-flex items-center gap-2 rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 px-3 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] text-neon-cyan transition-all hover:bg-neon-cyan hover:text-black"
+            >
+              <Plus size={14} />
+              Add Widget
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="relative">
+        <div className={`${isConnected ? "" : "pointer-events-none opacity-45 saturate-0 brightness-[0.42] transition-all duration-500"}`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 auto-rows-fr">
+            {widgets.map((widget) => {
+              const channel = registry[widget.channelKey];
+              if (!channel) return null;
+              const display = channel.getDisplay(realtime);
+              return (
+                <div key={widget.id} className="h-full flex flex-col gap-2">
+                  {editing ? (
+                    <div className="rounded-2xl border border-white/5 bg-black/30 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="inline-flex items-center gap-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] text-white/55">
+                          <Pencil size={12} />
+                          Widget Controls
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeWidget(widget.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-neon-red/25 bg-neon-red/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-neon-red"
+                        >
+                          <Trash2 size={12} />
+                          Remove
+                        </button>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <label className="space-y-1">
+                          <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/30">
+                            Channel
+                          </span>
+                          <select
+                            value={widget.channelKey}
+                            onChange={(e) => {
+                              const nextChannel = channelOptions.find((option) => option.key === e.target.value);
+                              updateWidget(widget.id, {
+                                channelKey: e.target.value,
+                                type: nextChannel?.supportedWidgets.includes(widget.type)
+                                  ? widget.type
+                                  : nextChannel?.defaultWidget || "digital",
+                              });
+                            }}
+                            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white outline-none"
+                          >
+                            {channelOptions.map((option) => (
+                              <option key={option.key} value={option.key}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="space-y-1">
+                          <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/30">
+                            Widget Type
+                          </span>
+                          <select
+                            value={widget.type}
+                            onChange={(e) => updateWidget(widget.id, { type: e.target.value })}
+                            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white outline-none"
+                          >
+                            {(channel.supportedWidgets || WIDGET_TYPES).map((type) => (
+                              <option key={type} value={type}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => moveWidget(widget.id, "left")}
+                          className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 hover:text-white"
+                        >
+                          <ChevronLeft size={12} />
+                          Left
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveWidget(widget.id, "right")}
+                          className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 hover:text-white"
+                        >
+                          Right
+                          <ChevronRight size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="flex-1 min-h-0">
+                    <WidgetTile
+                      widget={widget}
+                      display={display}
+                      color={accent.main}
+                      getRealtimeValue={getRealtimeValue}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {!isConnected ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="rounded-full border border-white/8 bg-black/35 px-4 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.22em] text-white/45 backdrop-blur-sm">
+              Cluster offline
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

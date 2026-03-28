@@ -42,7 +42,11 @@ ipcMain.handle("serial:connect", async (_event, portPath, baud) => {
 
   try {
     const { SerialPort } = await import("serialport");
-    const port = new SerialPort({ path: portPath, baudRate: baud || 115200 });
+    const port = new SerialPort({
+      path: portPath,
+      baudRate: baud || 115200,
+      autoOpen: false,
+    });
 
     port.on("data", (data) => {
       mainWindow?.webContents.send("serial:data", Array.from(data));
@@ -55,6 +59,13 @@ ipcMain.handle("serial:connect", async (_event, portPath, baud) => {
     port.on("close", () => {
       mainWindow?.webContents.send("serial:status", "disconnected");
       activePort = null;
+    });
+
+    await new Promise((resolve, reject) => {
+      port.open((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
 
     activePort = port;
@@ -81,6 +92,23 @@ ipcMain.handle("serial:sendCommand", async (_event, cmd) => {
     const buf =
       typeof cmd === "string" ? Buffer.from(cmd, "ascii") : Buffer.from(cmd);
     activePort.write(buf);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("serial:flush", async () => {
+  if (!activePort) return { ok: false, error: "Not connected" };
+  try {
+    if (typeof activePort.flush === "function") {
+      await new Promise((resolve, reject) => {
+        activePort.flush((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -121,8 +149,22 @@ ipcMain.handle("project:add-recent", async (event, project) => {
   const recent = config.recentProjects.filter(
     (p) => p.filePath !== project.filePath,
   );
-  recent.unshift({ ...project, lastOpened: new Date().toISOString() });
-  config.recentProjects = recent.slice(0, 5); // Keep last 5
+  // Migrate old data if it doesn't have a color
+  recent.unshift({ 
+    ...project, 
+    lastOpened: new Date().toISOString(),
+    color: project.color || 'cyan' 
+  });
+  config.recentProjects = recent.slice(0, 10); // Keep last 10
+  saveConfig(config);
+  return config.recentProjects;
+});
+
+ipcMain.handle("project:remove-recent", async (event, filePath) => {
+  const config = loadConfig();
+  config.recentProjects = config.recentProjects.filter(
+    (p) => p.filePath !== filePath,
+  );
   saveConfig(config);
   return config.recentProjects;
 });
@@ -157,6 +199,17 @@ ipcMain.handle("project:pick-image", async () => {
     title: "Select Background Image",
     properties: ["openFile"],
     filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] }],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle("project:pick-directory", async () => {
+  const { dialog } = require("electron");
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select Folder for Logs",
+    properties: ["openDirectory", "createDirectory"],
   });
 
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -226,6 +279,9 @@ const createWindow = () => {
       nodeIntegration: false,
     },
   });
+
+  // Open DevTools immediately
+  mainWindow.webContents.openDevTools();
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);

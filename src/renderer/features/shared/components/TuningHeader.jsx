@@ -28,36 +28,58 @@ export default function TuningHeader({
 }) {
   const themes = {
     cyan: {
-      text: "text-neon-cyan",
-      bg: "bg-neon-cyan/10",
-      border: "border-neon-cyan/30",
-      glow: "shadow-[0_0_15px_rgba(0,255,249,0.2)]",
-      btn: "bg-neon-cyan text-black hover:bg-white",
+      text: "#00d4ff",
+      bg: "rgba(0, 212, 255, 0.1)",
+      border: "rgba(0, 212, 255, 0.3)",
+      glow: "shadow-[0_0_15px_rgba(0,212,255,0.2)]",
+      btn: "bg-[#00d4ff] text-black hover:bg-white",
     },
-    purple: {
-      text: "text-neon-purple",
-      bg: "bg-neon-purple/10",
-      border: "border-neon-purple/30",
-      glow: "shadow-[0_0_15px_rgba(168,85,247,0.2)]",
-      btn: "bg-neon-purple text-white hover:bg-white hover:text-black",
+    orange: {
+      text: "#f97316",
+      bg: "rgba(249, 115, 22, 0.1)",
+      border: "rgba(249, 115, 22, 0.3)",
+      glow: "shadow-[0_0_15px_rgba(249,115,22,0.2)]",
+      btn: "bg-[#f97316] text-white hover:bg-white hover:text-black",
     },
-    yellow: {
-      text: "text-yellow-400",
-      bg: "bg-yellow-400/10",
-      border: "border-yellow-400/30",
-      glow: "shadow-[0_0_15px_rgba(250,204,21,0.2)]",
-      btn: "bg-yellow-400 text-black hover:bg-white",
+    red: {
+      text: "#ef4444",
+      bg: "rgba(239, 68, 68, 0.1)",
+      border: "rgba(239, 68, 68, 0.3)",
+      glow: "shadow-[0_0_15px_rgba(239,68,68,0.2)]",
+      btn: "bg-[#ef4444] text-white hover:bg-white hover:text-black",
     },
     green: {
-      text: "text-neon-green",
-      bg: "bg-neon-green/10",
-      border: "border-neon-green/30",
-      glow: "shadow-[0_0_15px_rgba(57,255,20,0.2)]",
-      btn: "bg-neon-green text-black hover:bg-white",
+      text: "#10b981",
+      bg: "rgba(16, 185, 129, 0.1)",
+      border: "rgba(16, 185, 129, 0.3)",
+      glow: "shadow-[0_0_15px_rgba(16,185,129,0.2)]",
+      btn: "bg-[#10b981] text-black hover:bg-white",
     },
   };
 
   const theme = themes[themeColor] || themes.cyan;
+  const isBusy = !!isSaving;
+  const saveLabel = isBusy ? "Saving..." : "Save";
+  const burnLabel = isBusy ? "Working..." : isConnected ? "Burn" : "Offline";
+  const discardLabel = isBusy ? "Locked" : "Discard";
+  const statusTone =
+    saveStatus === "success"
+      ? "text-neon-green"
+      : saveStatus === "error"
+        ? "text-red-500"
+        : isBusy
+          ? "text-neon-cyan"
+          : "text-gray-500";
+  const statusCopy =
+    saveStatus === "success"
+      ? "Synced"
+      : saveStatus === "error"
+        ? "Failed"
+        : isBusy
+          ? "Working"
+          : isDirty
+            ? "Pending"
+            : "Ready";
 
   return (
     <div className="relative mx-8 mb-6 mt-6">
@@ -68,12 +90,16 @@ export default function TuningHeader({
         {/* Title & Description Section */}
         <div className="flex items-center gap-6 w-full lg:w-auto">
           <div
-            className={`p-4 rounded-2xl ${theme.bg} ${theme.border} ${theme.glow} transition-all duration-500`}
+            className={`p-4 rounded-2xl ${theme.border ? "border" : ""} ${theme.glow} transition-all duration-500`}
+            style={{ 
+              backgroundColor: theme.bg,
+              borderColor: theme.border 
+            }}
           >
             {Icon ? (
-              <Icon className={`w-8 h-8 ${theme.text}`} />
+              <Icon className="w-8 h-8" style={{ color: theme.text }} />
             ) : (
-              <Cpu className={`w-8 h-8 ${theme.text}`} />
+              <Cpu className="w-8 h-8" style={{ color: theme.text }} />
             )}
           </div>
 
@@ -127,59 +153,57 @@ export default function TuningHeader({
         {/* Action Buttons Section */}
         <div className="flex items-center gap-3 w-full lg:w-auto justify-end">
           {/* Status Indicators */}
-          <div className="flex items-center transition-all duration-500 overflow-hidden">
-            {saveStatus === "success" && (
-              <div className="flex items-center gap-2 text-neon-green mr-4 animate-in slide-in-from-right-4">
+          <div className="flex items-center transition-all duration-500 overflow-hidden mr-2">
+            <div className={`flex items-center gap-2 ${statusTone}`}>
+              {saveStatus === "success" ? (
                 <CheckCircle2 size={16} />
-                <span className="text-[9px] font-orbitron font-black uppercase tracking-widest">
-                  Synced
-                </span>
-              </div>
-            )}
-            {saveStatus === "error" && (
-              <div className="flex items-center gap-2 text-red-500 mr-4 animate-in slide-in-from-right-4">
+              ) : saveStatus === "error" ? (
                 <AlertCircle size={16} />
-                <span className="text-[9px] font-orbitron font-black uppercase tracking-widest">
-                  Error
-                </span>
-              </div>
-            )}
+              ) : isBusy ? (
+                <Save size={16} className="animate-spin" />
+              ) : (
+                <div className={`w-2 h-2 rounded-full ${isDirty ? "bg-neon-orange animate-pulse" : "bg-white/20"}`} />
+              )}
+              <span className="text-[9px] font-orbitron font-black uppercase tracking-widest">
+                {statusCopy}
+              </span>
+            </div>
           </div>
 
           <button
             onClick={onDiscard}
-            disabled={isSaving || !isDirty}
-            className="group flex items-center gap-2 px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all disabled:opacity-20 active:scale-95"
+            disabled={isBusy || !isDirty}
+            className="group flex items-center gap-2 px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all disabled:opacity-20 disabled:cursor-not-allowed active:scale-95"
           >
             <RotateCcw className="w-4 h-4 group-hover:rotate-[-45deg] transition-transform" />
             <span className="text-[10px] font-orbitron font-black uppercase tracking-widest">
-              Discard
+              {discardLabel}
             </span>
           </button>
 
           <button
             onClick={onSave}
-            disabled={isSaving}
+            disabled={isBusy || !isDirty}
             className={`group flex items-center gap-2 px-5 py-3 rounded-xl border transition-all active:scale-95 ${
-              isDirty
+              !isBusy && isDirty
                 ? "bg-white/10 border-white/20 text-white shadow-xl hover:bg-white/20"
-                : "bg-white/5 border-white/5 text-gray-500 opacity-50"
+                : "bg-white/5 border-white/5 text-gray-500 opacity-50 cursor-not-allowed"
             }`}
           >
             <Save
               size={16}
-              className={isSaving && !isConnected ? "animate-spin" : ""}
+              className={isBusy ? "animate-spin" : ""}
             />
             <span className="text-[10px] font-orbitron font-black uppercase tracking-widest">
-              Save
+              {saveLabel}
             </span>
           </button>
 
           <button
             onClick={onBurn}
-            disabled={isSaving || !isConnected}
+            disabled={isBusy || !isConnected || !isDirty}
             className={`flex items-center gap-3 px-8 py-3 rounded-xl font-orbitron font-black text-[11px] uppercase tracking-[0.2em] transition-all shadow-2xl active:scale-95 border border-white/20 ${
-              isConnected
+              !isBusy && isConnected && isDirty
                 ? `${theme.btn} shadow-${themeColor}-500/20`
                 : "bg-white/5 text-white/20 cursor-not-allowed border-white/5 grayscale"
             }`}
@@ -188,14 +212,14 @@ export default function TuningHeader({
               <>
                 <Zap
                   size={16}
-                  className={`${isConnected ? "fill-current" : ""} ${isSaving ? "animate-pulse" : ""}`}
+                  className={`${isConnected ? "fill-current" : ""} ${isBusy ? "animate-pulse" : ""}`}
                 />
-                Burn
+                {burnLabel}
               </>
             ) : (
               <>
                 <Unplug size={16} />
-                Offline
+                {burnLabel}
               </>
             )}
           </button>

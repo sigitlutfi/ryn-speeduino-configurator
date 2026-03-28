@@ -134,9 +134,10 @@ export default function SparkSettings() {
   return (
     <div className="flex flex-col gap-8 p-4 max-w-7xl mx-auto w-full animate-in fade-in duration-700">
       <TuningHeader
-        title="Ignition Logic"
-        subtitle="Primary timing patterns and spark hardware configuration"
+        title="Ignition / Spark Settings"
+        description="Dwell, Triggering, and Main Ignition Logic"
         icon={Zap}
+        themeColor="orange"
         isDirty={isDirty}
         isSaving={isSaving}
         saveStatus={saveStatus}

@@ -1,6 +1,6 @@
 {
   "name": "ryn-speeduino-configurator",
-  "productName": "ryn-speeduino-configurator",
+  "productName": "RYN CONFIGURATOR",
   "version": "1.0.0",
   "description": "My Electron application description",
   "main": ".vite/build/index.js",
@@ -38,6 +38,7 @@
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "buffer": "^6.0.3",
     "electron-squirrel-startup": "^1.0.1",
     "framer-motion": "^12.4.10",
     "lucide-react": "^0.477.0",

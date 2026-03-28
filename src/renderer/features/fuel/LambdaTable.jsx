@@ -4,6 +4,7 @@ import TuningGrid from "../shared/TuningGrid/TuningGrid.jsx";
 import { useTableSync } from "../shared/hooks/useTableSync.js";
 import TuningHeader from "../shared/components/TuningHeader";
 import { Activity } from "lucide-react";
+import { getDecodedPage } from "../shared/utils/projectConstants";
 
 export default function LambdaTable() {
   const currentProject = useStore((s) => s.currentProject);
@@ -13,8 +14,7 @@ export default function LambdaTable() {
   // Stoich constant from Page 1 settings
   const stoich = useMemo(() => {
     if (!constants) return 14.7;
-    const pages = constants.pages || {};
-    const p1 = pages[1] || pages["1"] || pages[0] || pages["0"];
+    const p1 = getDecodedPage(constants, 1) || getDecodedPage(constants, 0);
     return (p1?.stoich || 147) / 10;
   }, [constants]);
 
@@ -41,8 +41,7 @@ export default function LambdaTable() {
 
   const algorithmId = useMemo(() => {
     if (!constants) return 0;
-    const pages = constants.pages || {};
-    const p1 = pages[1] || pages["1"] || pages[0] || pages["0"];
+    const p1 = getDecodedPage(constants, 1) || getDecodedPage(constants, 0);
     return p1?.algorithm ?? 0;
   }, [constants]);
 

@@ -5,6 +5,7 @@ import { useTableSync } from "../shared/hooks/useTableSync.js";
 import TuningHeader from "../shared/components/TuningHeader";
 import { Fuel } from "lucide-react";
 import FuelSettings from "./FuelSettings";
+import { getDecodedPage } from "../shared/utils/projectConstants";
 
 export default function VETable() {
   const currentProject = useStore((s) => s.currentProject);
@@ -22,8 +23,7 @@ export default function VETable() {
 
   const algorithmId = useMemo(() => {
     if (!constants) return 0;
-    const pages = constants.pages || {};
-    const p1 = pages[1] || pages["1"] || pages[0] || pages["0"];
+    const p1 = getDecodedPage(constants, 1) || getDecodedPage(constants, 0);
     return p1?.algorithm ?? 0;
   }, [constants]);
 

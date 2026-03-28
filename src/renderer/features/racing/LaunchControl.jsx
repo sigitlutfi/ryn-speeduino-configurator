@@ -43,9 +43,9 @@ const LaunchControl = () => {
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden animate-in fade-in duration-700">
       <TuningHeader
-        title="Launch Control"
+        title="Launch Control / 2-Step"
         icon={Flag}
-        description="Drag strip readiness: Initial torque management and rev limiting"
+        description="Static and variable RPM limiting logic"
         isDirty={isDirty} isSaving={isSaving} saveStatus={saveStatus}
         isConnected={isConnected} onSave={() => handleSave(false)}
         onBurn={() => handleSave(true)} onDiscard={discardChanges} themeColor="red"

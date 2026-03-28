@@ -15,6 +15,7 @@ import {
   Save,
   Clock,
 } from "lucide-react";
+import { getAccent } from "../../core/theme.js";
 
 /**
  * High-Performance Analysis View
@@ -28,8 +29,10 @@ const Analysis = () => {
     setLogRecording,
     clearLog,
     connection,
+    settings,
   } = useStore();
 
+  const accent = getAccent(settings?.accentColor);
   const [startTime, setStartTime] = useState(null);
   const [elapsed, setElapsed] = useState("00:00:00");
 
@@ -176,14 +179,14 @@ const Analysis = () => {
                 <RealtimeChart
                   getValue={getTps}
                   label="Throttle Position (TPS %)"
-                  color="#ff6b35"
+                  color={accent.main}
                   min={0}
                   max={100}
                 />
                 <RealtimeChart
                   getValue={getMap}
                   label="Manifold Pressure (MAP kPa)"
-                  color="#00d4ff"
+                  color={accent.main}
                   min={20}
                   max={250}
                 />

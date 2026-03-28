@@ -22,10 +22,16 @@ import {
   Wrench,
   BarChart2,
   Snail,
+  Table,
+  Ratio,
+  FileX,
+  Table2,
+  Fuel,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
 import { ROUTES } from "../routes.js";
+import { useStore } from "../core/store.js";
 
 /**
  * Modern Neon Sidebar Configuration
@@ -69,19 +75,19 @@ const NAV_CONFIG = [
   },
   {
     category: "FUEL TUNING",
-    icon: Database,
-    theme: "cyan",
+    icon: Fuel,
+    theme: "green",
     items: [
-      { path: ROUTES.TUNING_VE, label: "VE Table 1", icon: Database },
+      { path: ROUTES.TUNING_VE, label: "VE Table 1", icon: Table2 },
       {
         path: ROUTES.TUNING_VE2,
         label: "VE Table 2",
-        icon: Database,
+        icon: Table,
         sub: true,
       },
-      { path: ROUTES.TUNING_AFR, label: "AFR Target", icon: Target },
+      { path: ROUTES.TUNING_AFR, label: "AFR Target", icon: Ratio },
       { path: ROUTES.SETTINGS_AFR, label: "O2 Settings", icon: Settings },
-      { path: ROUTES.SETTINGS_FLEX, label: "Flex Fuel", icon: Zap },
+      { path: ROUTES.SETTINGS_FLEX, label: "Flex Fuel", icon: FlaskConical },
       {
         path: ROUTES.SETTINGS_IAT,
         label: "IAT Compensation",
@@ -112,7 +118,7 @@ const NAV_CONFIG = [
   {
     category: "STARTUP & IDLE",
     icon: Clock,
-    theme: "cyan",
+    theme: "yellow",
     items: [
       { path: ROUTES.STARTUP_CRANKING, label: "Cranking Setup", icon: Zap },
       { path: ROUTES.STARTUP_CURVES, label: "ASE/WUE Curves", icon: Droplets },
@@ -160,7 +166,7 @@ const NAV_CONFIG = [
   {
     category: "Add On",
     icon: Plug,
-    theme: "white",
+    theme: "purple",
     items: [
       {
         path: ROUTES.SETTINGS_PROGRAMMABLE,
@@ -206,10 +212,16 @@ const NavItem = ({
   const [_, navigate] = useLocation();
 
   const themeClasses = {
-    cyan: "text-neon-cyan bg-neon-cyan/5 border-neon-cyan/20 box-glow-cyan",
+    cyan: "text-[#00d4ff] bg-[#00d4ff]/5 border-[#00d4ff]/20 shadow-[0_0_15px_rgba(0,212,255,0.1)]",
+    green:
+      "text-[#00ffb4] bg-[#00ffb4]/5 border-[#00ffb4]/20 shadow-[0_0_15px_rgba(0,255,180,0.1)]",
     orange:
-      "text-neon-orange bg-neon-orange/5 border-neon-orange/20 box-glow-orange",
-    red: "text-neon-red bg-neon-red/5 border-neon-red/20 box-glow-red",
+      "text-[#ff6b35] bg-[#ff6b35]/5 border-[#ff6b35]/20 shadow-[0_0_15px_rgba(255,107,53,0.1)]",
+    red: "text-[#f43f5e] bg-[#f43f5e]/5 border-[#f43f5e]/20 shadow-[0_0_15px_rgba(244,63,94,0.1)]",
+    purple:
+      "text-[#a855f7] bg-[#a855f7]/5 border-[#a855f7]/20 shadow-[0_0_15px_rgba(168,85,247,0.1)]",
+    yellow:
+      "text-[#eab308] bg-[#eab308]/5 border-[#eab308]/20 shadow-[0_0_15px_rgba(234,179,8,0.1)]",
     white:
       "text-white bg-white/5 border-white/20 shadow-[0_0_15px_rgba(255,255,255,0.1)]",
   };
@@ -218,19 +230,35 @@ const NavItem = ({
 
   return (
     <motion.button
-      whileHover={{ x: 4 }}
+      whileHover={{ y: -1 }}
       whileTap={{ scale: 0.98 }}
       onClick={() => navigate(path)}
-      className={`w-full flex items-center gap-2.5 ${sub ? "pl-8 pr-2 py-1.5" : "px-3 py-2"} rounded-lg transition-all relative group overflow-hidden ${
+      className={`w-full flex items-center gap-2.5 ${sub ? "pl-8 pr-2 py-1.5" : collapsed ? "justify-center py-2" : "px-3 py-2"} rounded-lg transition-all relative group overflow-hidden ${
         isActive
           ? `${activeTheme} border`
           : "text-gray-500 hover:text-white border border-transparent hover:bg-white/5"
       }`}
     >
-      {isActive && (
+      {isActive && !collapsed && (
         <motion.div
           layoutId="active-nav-line"
-          className={`absolute left-0 w-0.5 h-3/5 rounded-full ${theme === "white" ? "bg-white" : `bg-neon-${theme}`}`}
+          className="absolute left-0 w-0.5 h-3/5 rounded-full"
+          style={{
+            backgroundColor:
+              theme === "white"
+                ? "white"
+                : theme === "cyan"
+                  ? "#00d4ff"
+                  : theme === "green"
+                    ? "#00ffb4"
+                    : theme === "orange"
+                      ? "#ff6b35"
+                      : theme === "purple"
+                        ? "#a855f7"
+                        : theme === "yellow"
+                          ? "#eab308"
+                          : "#f43f5e", // red
+          }}
         />
       )}
 
@@ -252,7 +280,7 @@ const NavItem = ({
 };
 
 export default function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  const { sidebarCollapsed: collapsed, toggleSidebar } = useStore();
   const [location] = useLocation();
   const [openSections, setOpenSections] = useState({
     "MONITOR & LOGS": true,
@@ -268,31 +296,31 @@ export default function Sidebar() {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
   return (
-    <motion.div
+    <motion.aside
       initial={false}
-      animate={{ width: collapsed ? 80 : 250 }}
-      transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="h-full bg-bg-deep/80 border-r border-white/5 backdrop-blur-2xl flex flex-col relative z-30 shadow-2xl"
+      animate={{ width: collapsed ? 80 : 280 }}
+      className="h-full glass-sidebar glass-noise flex flex-col relative z-20 group"
     >
       {/* Branding Section */}
       <div
-        className={`h-24 flex items-center ${collapsed ? "justify-center" : "px-8"} relative overflow-hidden`}
+        className={`h-16 flex items-center ${collapsed ? "justify-center" : "px-8"} relative overflow-hidden`}
       >
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
         <div className="flex items-center gap-4 relative z-10 transition-all">
-          <div className="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center shadow-inner group">
-            <Cpu
-              size={22}
-              className="text-white group-hover:scale-110 transition-transform"
+          <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shadow-inner group overflow-hidden">
+            <img
+              src={new URL("../assets/logo.png", import.meta.url).href}
+              alt="RYN"
+              className="w-10 h-10 object-contain group-hover:scale-110 transition-transform drop-shadow-[0_0_8px_rgba(0,212,255,0.4)]"
             />
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="text-xs font-orbitron font-black text-white uppercase tracking-[0.2em] leading-none">
-                RYN SPEED
+              <span className="text-[14px] font-orbitron font-black text-white uppercase tracking-[0.2em] leading-none">
+                RYN
               </span>
-              <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest mt-1">
-                Configurator v2.0
+              <span className="text-[8px] font-black text-neon-cyan uppercase tracking-[0.4em] mt-1.5 opacity-80">
+                CONFIGURATOR
               </span>
             </div>
           )}
@@ -369,14 +397,14 @@ export default function Sidebar() {
 
       {/* Collapse Handle (Floating Style) */}
       <button
-        onClick={() => setCollapsed(!collapsed)}
+        onClick={toggleSidebar}
         className="mx-4 my-6 py-3 rounded-2xl bg-white/5 border border-white/5 hover:border-white/20 flex items-center justify-center text-white/40 hover:text-white transition-all group"
       >
         {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
       </button>
 
       {/* Footer / Connection Alert */}
-      {!collapsed && (
+      {/* {!collapsed && (
         <div className="p-6 bg-black/40 border-t border-white/5">
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
@@ -384,18 +412,18 @@ export default function Sidebar() {
                 ECU Status
               </span>
               <div className="flex items-center gap-2 mt-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-neon-cyan animate-pulse shadow-glow-cyan" />
+                <div className="w-1.5 h-1.5 rounded-full bg-neon-cyan animate-pulse shadow-neon-cyan" />
                 <span className="text-[9px] font-black font-orbitron text-white uppercase tracking-widest">
                   Connected
                 </span>
               </div>
             </div>
-            <div className="w-8 h-8 rounded-lg bg-neon-cyan/10 flex items-center justify-center text-neon-cyan">
+            <div className="w-8 h-8 rounded-lg bg-neon-cyan/10 flex items-center justify-center text-neon-cyan shadow-neon-cyan">
               <Radio size={14} className="animate-pulse" />
             </div>
           </div>
         </div>
-      )}
-    </motion.div>
+      )} */}
+    </motion.aside>
   );
 }

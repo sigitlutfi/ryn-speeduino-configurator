@@ -1,136 +1,296 @@
-import React from 'react';
+import React, { useMemo } from "react";
+import { useStore } from "../../core/store";
+import { getAccent } from "../../core/theme.js";
 
-/**
- * Premium Neon Gauge.
- * Props: label, value, min, max, unit, decimals, warning, danger, size
- */
-export default function Gauge({ label, value, min = 0, max = 100, unit = '', decimals = 0, warning, danger, size = 140 }) {
-  const pct = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  const r = 52;
-  const cx = 70;
-  const cy = 70;
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 
-  function polarToXY(angleDeg, radius) {
-    const rad = ((angleDeg - 90) * Math.PI) / 180;
-    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
-  }
+function polarToXY(cx, cy, angleDeg, radius) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+}
 
-  function arcPath(startAngle, endAngle, radius) {
-    const start = polarToXY(startAngle, radius);
-    const end = polarToXY(endAngle, radius);
-    const large = endAngle - startAngle > 180 ? 1 : 0;
-    return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${large} 1 ${end.x} ${end.y}`;
-  }
+function arcPath(cx, cy, startAngle, endAngle, radius) {
+  const start = polarToXY(cx, cy, startAngle, radius);
+  const end = polarToXY(cx, cy, endAngle, radius);
+  const delta = endAngle - startAngle;
+  const large = Math.abs(delta) > 180 ? 1 : 0;
+  const sweep = delta >= 0 ? 1 : 0;
+  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${large} ${sweep} ${end.x} ${end.y}`;
+}
 
-  const trackStart = -135;
-  const trackEnd = 135;
-  const fillEnd = trackStart + pct * 270;
+function angleForValue(value, min, max, startAngle, sweepAngle) {
+  const safeMax = max === min ? min + 1 : max;
+  const pct = clamp((value - min) / (safeMax - min), 0, 1);
+  return startAngle + pct * sweepAngle;
+}
 
-  // Theme colors from ryn-race-timer
-  const colors = {
-    normal: '#00d4ff', // neon-cyan
-    warning: '#eab308', // neon-yellow
-    danger: '#f43f5e', // neon-red
-  };
+function getTickConfig(min, max) {
+  const span = Math.abs(max - min);
+  if (span <= 12) return { majorCount: 4, minorPerMajor: 2 };
+  if (span <= 60) return { majorCount: 5, minorPerMajor: 2 };
+  if (span <= 200) return { majorCount: 4, minorPerMajor: 3 };
+  return { majorCount: 4, minorPerMajor: 4 };
+}
 
-  const color = danger !== undefined && value >= danger ? colors.danger
-    : warning !== undefined && value >= warning ? colors.warning
-    : colors.normal;
+function formatTickValue(value, decimals) {
+  if (!Number.isFinite(value)) return "0";
+  const safeDecimals = decimals > 0 ? Math.min(decimals, 1) : 0;
+  return value.toFixed(safeDecimals);
+}
 
-  const displayVal = value.toFixed(decimals);
+function bandPath(cx, cy, radius, thickness, startAngle, endAngle) {
+  const outerStart = polarToXY(cx, cy, startAngle, radius + thickness / 2);
+  const outerEnd = polarToXY(cx, cy, endAngle, radius + thickness / 2);
+  const innerEnd = polarToXY(cx, cy, endAngle, radius - thickness / 2);
+  const innerStart = polarToXY(cx, cy, startAngle, radius - thickness / 2);
+  const delta = endAngle - startAngle;
+  const large = Math.abs(delta) > 180 ? 1 : 0;
+  const sweep = delta >= 0 ? 1 : 0;
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${radius + thickness / 2} ${radius + thickness / 2} 0 ${large} ${sweep} ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerEnd.x} ${innerEnd.y}`,
+    `A ${radius - thickness / 2} ${radius - thickness / 2} 0 ${large} ${sweep ? 0 : 1} ${innerStart.x} ${innerStart.y}`,
+    "Z",
+  ].join(" ");
+}
 
-  // Generate tick marks
-  const ticks = [];
-  for (let i = 0; i <= 10; i++) {
-    const angle = trackStart + i * (270 / 10);
-    const p1 = polarToXY(angle, r - 5);
-    const p2 = polarToXY(angle, r + 5);
-    ticks.push(<line key={i} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="rgba(255,255,255,0.15)" strokeWidth="1" />);
-  }
+export default function Gauge({
+  label,
+  value,
+  min = 0,
+  max = 100,
+  unit = "",
+  decimals = 0,
+  warning,
+  danger,
+  warningMode = "high",
+  size = 140,
+}) {
+  const { settings } = useStore();
+  const accent = getAccent(settings?.accentColor);
+
+  const safeMax = max === min ? min + 1 : max;
+  const displayValue = Number.isFinite(value) ? value.toFixed(decimals) : "0";
+  const cx = 90;
+  const cy = 90;
+  const outerRadius = 64;
+  const startAngle = 200;
+  const sweepAngle = 280;
+  const endAngle = startAngle + sweepAngle;
+  const warningValue = warning ?? safeMax + 1;
+  const dangerValue = danger ?? safeMax + 1;
+  const fillAngle = angleForValue(value, min, safeMax, startAngle, sweepAngle);
+  const warningAngle = angleForValue(warningValue, min, safeMax, startAngle, sweepAngle);
+  const dangerAngle = angleForValue(dangerValue, min, safeMax, startAngle, sweepAngle);
+  const isLowMode = warningMode === "low";
+  const activeColor = isLowMode
+    ? value <= dangerValue
+      ? "#f43f5e"
+      : value <= warningValue
+        ? "#f59e0b"
+        : accent.main
+    : value >= dangerValue
+      ? "#f43f5e"
+      : value >= warningValue
+        ? "#f59e0b"
+        : accent.main;
+  const tickConfig = useMemo(() => getTickConfig(min, safeMax), [min, safeMax]);
+  const idBase = useMemo(
+    () => `gauge-${String(label ?? unit ?? "metric").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    [label, unit],
+  );
+
+  const ticks = useMemo(() => {
+    const output = [];
+    const totalSegments = tickConfig.majorCount * tickConfig.minorPerMajor;
+    for (let index = 0; index <= totalSegments; index += 1) {
+      const angle = startAngle + index * (sweepAngle / totalSegments);
+      const isMajor = index % tickConfig.minorPerMajor === 0;
+      const outer = polarToXY(cx, cy, angle, outerRadius);
+      const inner = polarToXY(cx, cy, angle, outerRadius - (isMajor ? 9 : 5));
+      output.push(
+        <line
+          key={`tick-${index}`}
+          x1={outer.x}
+          y1={outer.y}
+          x2={inner.x}
+          y2={inner.y}
+          stroke={isMajor ? "rgba(255,255,255,0.32)" : "rgba(255,255,255,0.14)"}
+          strokeWidth={isMajor ? "1.8" : "1"}
+          strokeLinecap="round"
+        />,
+      );
+    }
+    return output;
+  }, [tickConfig, startAngle, sweepAngle]);
+
+  const tickLabels = useMemo(() => {
+    const labels = [];
+    for (let index = 0; index <= tickConfig.majorCount; index += 1) {
+      const ratio = index / tickConfig.majorCount;
+      const angle = startAngle + ratio * sweepAngle;
+      const position = polarToXY(cx, cy, angle, outerRadius + 15);
+      const tickValue = min + ratio * (safeMax - min);
+      labels.push(
+        <text
+          key={`tick-label-${index}`}
+          x={position.x}
+          y={position.y + 2}
+          textAnchor="middle"
+          fontSize="7"
+          fill="rgba(255,255,255,0.28)"
+          className="font-mono font-bold"
+        >
+          {formatTickValue(tickValue, decimals)}
+        </text>,
+      );
+    }
+    return labels;
+  }, [tickConfig, startAngle, sweepAngle, min, safeMax, decimals]);
+
+  const marker = polarToXY(cx, cy, fillAngle, 69);
+  const needleInner = polarToXY(cx, cy, fillAngle, 49);
+  const needleOuter = polarToXY(cx, cy, fillAngle, 63);
 
   return (
-    <div className="flex flex-col items-center group relative" style={{ width: size }}>
-      <svg viewBox="0 0 140 140" width={size} height={size} className="drop-shadow-2xl">
+    <div className="flex h-full w-full items-center justify-center">
+      <svg viewBox="0 0 180 180" width={size} height={size} className="overflow-visible">
         <defs>
-          <filter id={`glow-${label}`} x="-30%" y="-30%" width="160%" height="160%">
-            <feGaussianBlur stdDeviation="4.5" result="blur" />
-            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          <linearGradient id={`${idBase}-progress`} x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.78" />
+            <stop offset="12%" stopColor={accent.main} stopOpacity="0.92" />
+            <stop offset="100%" stopColor={activeColor} stopOpacity="1" />
+          </linearGradient>
+          <filter id={`${idBase}-glow`} x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
           </filter>
         </defs>
 
-        {/* Track */}
+        <circle cx={cx} cy={cy} r="76" fill="rgba(255,255,255,0.015)" />
+        <circle cx={cx} cy={cy} r="71" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+        <circle cx={cx} cy={cy} r="50" fill="rgba(6,8,14,0.88)" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+
         <path
-          d={arcPath(trackStart, trackEnd, r)}
+          d={arcPath(cx, cy, startAngle, endAngle, outerRadius)}
           fill="none"
-          stroke="rgba(255,255,255,0.03)"
-          strokeWidth="10"
+          stroke="rgba(255,255,255,0.07)"
+          strokeWidth="16"
           strokeLinecap="round"
         />
 
-        {/* Outer Ring Glow */}
+        {isLowMode ? (
+          <>
+            {danger !== undefined && dangerAngle > startAngle ? (
+              <path
+                d={bandPath(cx, cy, outerRadius, 14, startAngle, Math.min(dangerAngle, endAngle))}
+                fill="rgba(244,63,94,0.4)"
+              />
+            ) : null}
+            {warning !== undefined && warningAngle > startAngle ? (
+              <path
+                d={bandPath(cx, cy, outerRadius, 14, danger !== undefined ? dangerAngle : startAngle, Math.min(warningAngle, endAngle))}
+                fill="rgba(245,158,11,0.32)"
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
+            {warning !== undefined && warningAngle < endAngle ? (
+              <path
+                d={bandPath(cx, cy, outerRadius, 14, warningAngle, Math.min(dangerAngle, endAngle))}
+                fill="rgba(245,158,11,0.32)"
+              />
+            ) : null}
+
+            {danger !== undefined && dangerAngle < endAngle ? (
+              <path
+                d={bandPath(cx, cy, outerRadius, 14, dangerAngle, endAngle)}
+                fill="rgba(244,63,94,0.4)"
+              />
+            ) : null}
+          </>
+        )}
+
         <path
-          d={arcPath(trackStart, trackEnd, r + 4)}
+          d={arcPath(cx, cy, startAngle, fillAngle, outerRadius)}
           fill="none"
-          stroke="rgba(0,212,255,0.02)"
-          strokeWidth="1"
+          stroke={`url(#${idBase}-progress)`}
+          strokeWidth="10"
+          strokeLinecap="round"
+          filter={`url(#${idBase}-glow)`}
         />
 
-        {/* Ticks */}
+        <path
+          d={arcPath(cx, cy, startAngle, fillAngle, outerRadius - 10)}
+          fill="none"
+          stroke="rgba(255,255,255,0.16)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray="2 6"
+          opacity="0.82"
+        />
+
         {ticks}
+        {tickLabels}
 
-        {/* Glow Layer (Blur) */}
-        {pct > 0 && (
-          <path
-            d={arcPath(trackStart, fillEnd, r)}
-            fill="none"
-            stroke={color}
-            strokeWidth="8"
-            strokeLinecap="round"
-            filter={`url(#glow-${label})`}
-            opacity="0.3"
-          />
-        )}
+        <line
+          x1={needleInner.x}
+          y1={needleInner.y}
+          x2={needleOuter.x}
+          y2={needleOuter.y}
+          stroke="rgba(2,4,10,0.92)"
+          strokeWidth="6"
+          strokeLinecap="round"
+        />
+        <line
+          x1={needleInner.x}
+          y1={needleInner.y}
+          x2={needleOuter.x}
+          y2={needleOuter.y}
+          stroke={activeColor}
+          strokeWidth="2.6"
+          strokeLinecap="round"
+          filter={`url(#${idBase}-glow)`}
+        />
+        <circle cx={marker.x} cy={marker.y} r="5.2" fill="rgba(2,4,10,0.92)" />
+        <circle cx={marker.x} cy={marker.y} r="2.8" fill={activeColor} filter={`url(#${idBase}-glow)`} />
 
-        {/* Fill Layer (Sharp) */}
-        {pct > 0 && (
-          <path
-            d={arcPath(trackStart, fillEnd, r)}
-            fill="none"
-            stroke={color}
-            strokeWidth="8"
-            strokeLinecap="round"
-            className="transition-all duration-700 cubic-bezier(0.34, 1.56, 0.64, 1)"
-          />
-        )}
-
-        {/* Value text */}
         <text
           x={cx}
           y={cy + 5}
           textAnchor="middle"
-          fontSize="26"
+          fontSize="28"
           fill="white"
-          className="font-mono font-bold tracking-tighter drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]"
+          className="font-mono font-black tracking-tight"
+          style={{ textShadow: "0 0 18px rgba(255,255,255,0.14)" }}
         >
-          {displayVal}
+          {displayValue}
         </text>
-
-        {/* Unit */}
         <text
           x={cx}
-          y={cy + 22}
+          y={cy + 21}
           textAnchor="middle"
-          fontSize="9"
-          fill="rgba(255,255,255,0.4)"
-          className="font-orbitron uppercase tracking-[0.2em] font-bold"
+          fontSize="7"
+          fill="rgba(255,255,255,0.36)"
+          className="font-orbitron uppercase tracking-[0.24em] font-bold"
         >
-          {unit}
+          {unit || ""}
         </text>
+        <path
+          d={`M ${cx - 14} ${cy + 29} L ${cx + 14} ${cy + 29}`}
+          stroke={activeColor}
+          strokeOpacity="0.5"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
       </svg>
-      <span className="font-orbitron text-[9px] font-bold text-gray-600 uppercase tracking-[0.3em] mt-[-12px] group-hover:text-neon-cyan transition-colors duration-500">
-        {label}
-      </span>
     </div>
   );
 }
-

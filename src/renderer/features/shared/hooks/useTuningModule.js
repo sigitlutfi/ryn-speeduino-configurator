@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useStore } from "../../../core/store";
+import { useStore } from "../../../core/store.js";
+import { getDecodedPages } from "../utils/projectConstants.js";
 
 /**
  * Professional Tuning Module Hook.
@@ -14,6 +15,8 @@ export function useTuningModule(targets, options = {}) {
     currentProject,
     parsedIni,
     updateConstants,
+    writePagesToRAM,
+    burnPendingPages,
     saveProject,
     connection,
     notify,
@@ -103,7 +106,7 @@ export function useTuningModule(targets, options = {}) {
 
         // Sync targeted pages
         pagesFound.forEach((pId) => {
-          const storeData = currentProject.constants[pId] || {};
+          const storeData = getDecodedPages(currentProject.constants)?.[pId] || {};
           if (JSON.stringify(prev[pId]) !== JSON.stringify(storeData)) {
             next[pId] = storeData;
             hasChanges = true;
@@ -213,14 +216,20 @@ export function useTuningModule(targets, options = {}) {
     setSaveStatus(null);
 
     try {
-      updateConstants(localConstants);
+      // Update project-local decoded/raw state first
+      await updateConstants(localConstants);
 
-      if (isBurn) {
-        const { burnPage } = useStore.getState();
-        for (const pId of pagesFound) {
-          await burnPage(pId);
-          // EEPROM write delay
-          await new Promise((r) => setTimeout(r, 200));
+      if (isConnected && pagesFound.length > 0) {
+        const ramResult = await writePagesToRAM(pagesFound);
+        if (!ramResult.ok) {
+          throw new Error(ramResult.errors?.[0]?.error || "ECU RAM sync failed");
+        }
+
+        if (isBurn) {
+          const burnResult = await burnPendingPages(pagesFound);
+          if (!burnResult.ok) {
+            throw new Error(burnResult.errors?.[0]?.error || "ECU burn failed");
+          }
         }
       }
 
@@ -243,8 +252,8 @@ export function useTuningModule(targets, options = {}) {
   const discardChanges = useCallback(() => {
     const reset = {};
     pagesFound.forEach((pId) => {
-      if (currentProject?.constants?.[pId])
-        reset[pId] = currentProject.constants[pId];
+      const decodedPage = getDecodedPages(currentProject?.constants)?.[pId];
+      if (decodedPage) reset[pId] = decodedPage;
     });
     setLocalConstants(reset);
     notify("Changes discarded", "info");
@@ -253,7 +262,7 @@ export function useTuningModule(targets, options = {}) {
   const isDirty = useMemo(() => {
     for (const pId of pagesFound) {
       const current = localConstants[pId] || {};
-      const store = currentProject?.constants?.[pId] || {};
+      const store = getDecodedPages(currentProject?.constants)?.[pId] || {};
       if (JSON.stringify(current) !== JSON.stringify(store)) return true;
     }
     return false;

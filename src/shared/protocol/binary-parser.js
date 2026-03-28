@@ -42,10 +42,14 @@ export function parseValue(buffer, offset, meta) {
     // Bits are extracted from an underlying integer (usually U08 or U16)
     const raw = parseScalar(buffer, offset, dataType || "U08");
     if (!bitRange) return raw;
-    
+
     const [lo, hi] = bitRange;
     const mask = (1 << (hi - lo + 1)) - 1;
-    return (raw >> lo) & mask;
+    const value = (raw >> lo) & mask;
+
+    // Debug logging removed - now handled in parsePage()
+
+    return value;
   }
 
   // 2. Handle Arrays (Tables/Curves)
@@ -71,7 +75,16 @@ export function parsePage(buffer, pageMeta) {
   for (const [varName, meta] of Object.entries(pageMeta)) {
     if (meta.offset !== undefined && meta.type !== "unknown") {
       try {
-        result[varName] = parseValue(buffer, meta.offset, meta);
+        let value = parseValue(buffer, meta.offset, { ...meta, name: varName });
+
+        // WORKAROUND: Speeduino firmware quirk - pinLayout has +61 offset
+        // This matches TunerStudio's internal handling (undocumented in INI)
+        if (varName === 'pinLayout' && typeof value === 'number' && value > 60) {
+          console.warn(`[BinaryParser] Applying pinLayout firmware quirk: ${value} → ${value - 61}`);
+          value = value - 61;
+        }
+
+        result[varName] = value;
       } catch (e) {
         console.warn(`[BinaryParser] Failed to parse ${varName} at offset ${meta.offset}:`, e);
       }
