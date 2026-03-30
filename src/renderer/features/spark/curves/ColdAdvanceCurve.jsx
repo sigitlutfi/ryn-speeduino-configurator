@@ -1,55 +1,66 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useStore } from "../../../core/store.js";
 import CurveEditor from "../../../ui/CurveEditor";
 import { Thermometer } from "lucide-react";
+import { getDecodedPage } from "../../shared/utils/projectConstants.js";
+import { getVarMetadata } from "../../../../shared/ini-parser.js";
+import { toDisplay, toRaw } from "../../shared/utils/normalization";
+
+function normalizeCurveArray(value, fallback) {
+  if (Array.isArray(value)) return value;
+  return fallback;
+}
 
 export default function ColdAdvanceCurve() {
   const currentProject = useStore((s) => s.currentProject);
+  const parsedIni = useStore((s) => s.parsedIni);
   const updateConstants = useStore((s) => s.updateConstants);
   const constants = currentProject?.constants;
+  const xMeta = useMemo(() => getVarMetadata(parsedIni, "cltAdvBins"), [parsedIni]);
+  const yMeta = useMemo(() => getVarMetadata(parsedIni, "cltAdvValues"), [parsedIni]);
+  const pageId = xMeta?.page ?? yMeta?.page ?? 1;
+  const pData = getDecodedPage(constants, pageId) || {};
 
-  const pages = constants?.pages || {};
-  let pageId = null;
-  let pData = null;
-  if (pages[1]?.cltAdvBins) {
-    pageId = 1;
-    pData = pages[1];
-  } else if (pages[2]?.cltAdvBins) {
-    pageId = 2;
-    pData = pages[2];
-  } else if (pages[4]?.cltAdvBins) {
-    pageId = 4;
-    pData = pages[4];
-  } else {
-    pageId = 1;
-    pData = pages[1] || {};
-  }
+  const rawX = useMemo(
+    () => normalizeCurveArray(
+      pData?.cltAdvBins,
+      toRaw([-20, 0, 20, 40, 60, 80], xMeta),
+    ),
+    [pData?.cltAdvBins, xMeta],
+  );
+  const rawY = useMemo(
+    () => normalizeCurveArray(
+      pData?.cltAdvValues,
+      toRaw([5, 4, 2, 0, 0, 0], yMeta),
+    ),
+    [pData?.cltAdvValues, yMeta],
+  );
+  const displayX = useMemo(() => toDisplay(rawX, xMeta) ?? [], [rawX, xMeta]);
+  const displayY = useMemo(() => toDisplay(rawY, yMeta) ?? [], [rawY, yMeta]);
 
-  const rawX = pData?.cltAdvBins || [-20, 0, 20, 40, 60, 80];
-  const rawY = pData?.cltAdvValues || [5, 4, 2, 0, 0, 0];
-
-  const [xValues, setXValues] = useState(() => [...rawX]);
-  const [yValues, setYValues] = useState(() => [...rawY]);
+  const [xValues, setXValues] = useState(() => displayX);
+  const [yValues, setYValues] = useState(() => displayY);
 
   useEffect(() => {
-    setXValues([...rawX]);
-    setYValues([...rawY]);
-  }, [currentProject]);
+    setXValues(displayX);
+    setYValues(displayY);
+  }, [currentProject, displayX, displayY]);
 
   const [hoverIdx, setHoverIdx] = useState(null);
 
-  // CurveEditor calls onChange(fullXArray, fullYArray)
   const handleCurveChange = (newX, newY) => {
     setXValues(newX);
     setYValues(newY);
+  };
+
+  const handleCurveCommit = (newX, newY) => {
     if (!pageId) return;
     updateConstants({
       pages: {
-        ...(constants?.pages || {}),
         [pageId]: {
           ...pData,
-          cltAdvBins: newX.map((v) => Math.round(v)),
-          cltAdvValues: newY.map((v) => Math.round(v)),
+          cltAdvBins: toRaw(newX, xMeta),
+          cltAdvValues: toRaw(newY, yMeta),
         },
       },
     });
@@ -87,6 +98,7 @@ export default function ColdAdvanceCurve() {
           activeIdx={hoverIdx}
           onHoverPoint={setHoverIdx}
           onChange={handleCurveChange}
+          onCommit={handleCurveCommit}
         />
       </div>
       <div className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-medium text-white/50 leading-relaxed font-inter">

@@ -25,6 +25,19 @@ export function useTuningModule(targets, options = {}) {
   const [saveStatus, setSaveStatus] = useState(null);
   const [isMappingDone, setIsMappingDone] = useState(false);
 
+  const DIRTY_SYNC_STATES = useMemo(
+    () =>
+      new Set([
+        "dirty-local",
+        "write-pending",
+        "burn-pending",
+        "different",
+        "verify-failed",
+        "unknown",
+      ]),
+    [],
+  );
+
   const isConnected = connection.status === "connected";
 
   // 1. IMPROVED MAPPING
@@ -198,6 +211,26 @@ export function useTuningModule(targets, options = {}) {
     }));
   }, []);
 
+  const buildScopedPayload = useCallback(() => {
+    const scopedPages = {};
+
+    if (typeof targets[0] === "number") {
+      pagesFound.forEach((pId) => {
+        scopedPages[pId] = { ...(localConstants[pId] || {}) };
+      });
+      return scopedPages;
+    }
+
+    Object.entries(fieldToPageMap.map).forEach(([fieldName, info]) => {
+      if (!info) return;
+      const pageId = info.pageId;
+      if (!scopedPages[pageId]) scopedPages[pageId] = {};
+      scopedPages[pageId][info.key] = localConstants[pageId]?.[info.key];
+    });
+
+    return scopedPages;
+  }, [targets, pagesFound, localConstants, fieldToPageMap]);
+
   const handleSave = async (isBurn = false) => {
     if (isBurn && !isConnected) {
       notify("Device not connected", "error");
@@ -214,8 +247,10 @@ export function useTuningModule(targets, options = {}) {
     setSaveStatus(null);
 
     try {
+      const scopedPayload = buildScopedPayload();
+
       // Update project-local decoded/raw state first
-      await updateConstants(localConstants);
+      await updateConstants(scopedPayload);
 
       if (isConnected && pagesFound.length > 0) {
         const ramResult = await writePagesToRAM(pagesFound);
@@ -249,22 +284,60 @@ export function useTuningModule(targets, options = {}) {
 
   const discardChanges = useCallback(() => {
     const reset = {};
-    pagesFound.forEach((pId) => {
-      const decodedPage = getDecodedPages(currentProject?.constants)?.[pId];
-      if (decodedPage) reset[pId] = decodedPage;
-    });
+    if (typeof targets[0] === "number") {
+      pagesFound.forEach((pId) => {
+        const decodedPage = getDecodedPages(currentProject?.constants)?.[pId];
+        if (decodedPage) reset[pId] = decodedPage;
+      });
+    } else {
+      Object.values(fieldToPageMap.map).forEach((info) => {
+        if (!info) return;
+        const decodedPage = getDecodedPages(currentProject?.constants)?.[info.pageId];
+        if (!decodedPage) return;
+        if (!reset[info.pageId]) reset[info.pageId] = {};
+        reset[info.pageId][info.key] = decodedPage[info.key];
+      });
+    }
     setLocalConstants(reset);
     notify("Changes discarded", "info");
-  }, [currentProject?.constants, pagesFound]);
+  }, [currentProject?.constants, pagesFound, targets, fieldToPageMap, notify]);
 
   const isDirty = useMemo(() => {
-    for (const pId of pagesFound) {
-      const current = localConstants[pId] || {};
-      const store = getDecodedPages(currentProject?.constants)?.[pId] || {};
-      if (JSON.stringify(current) !== JSON.stringify(store)) return true;
+    if (typeof targets[0] === "number") {
+      for (const pId of pagesFound) {
+        const pageSnapshot =
+          currentProject?.constants?.pages?.[pId] ||
+          currentProject?.constants?.pages?.[String(pId)];
+        if (DIRTY_SYNC_STATES.has(pageSnapshot?.syncState)) return true;
+
+        const current = localConstants[pId] || {};
+        const store = getDecodedPages(currentProject?.constants)?.[pId] || {};
+        if (JSON.stringify(current) !== JSON.stringify(store)) return true;
+      }
+      return false;
     }
+
+    for (const info of Object.values(fieldToPageMap.map)) {
+      if (!info) continue;
+      const pageSnapshot =
+        currentProject?.constants?.pages?.[info.pageId] ||
+        currentProject?.constants?.pages?.[String(info.pageId)];
+      if (DIRTY_SYNC_STATES.has(pageSnapshot?.syncState)) return true;
+
+      const currentValue = localConstants[info.pageId]?.[info.key];
+      const storeValue = getDecodedPages(currentProject?.constants)?.[info.pageId]?.[info.key];
+      if (JSON.stringify(currentValue) !== JSON.stringify(storeValue)) return true;
+    }
+
     return false;
-  }, [localConstants, currentProject?.constants, pagesFound]);
+  }, [
+    localConstants,
+    currentProject?.constants,
+    pagesFound,
+    DIRTY_SYNC_STATES,
+    targets,
+    fieldToPageMap,
+  ]);
 
   return {
     localConstants,
@@ -274,6 +347,7 @@ export function useTuningModule(targets, options = {}) {
     setLocalField,
     getLocalPage,
     getFieldInfo,
+    getSavePayload: buildScopedPayload,
     handleSave,
     discardChanges,
     isSaving,

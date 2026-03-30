@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { ChevronDown, HelpCircle, AlertTriangle } from "lucide-react";
 
 /**
@@ -11,6 +11,7 @@ export const SelectRow = ({
   options = [],
   description,
   icon: Icon,
+  disabled = false,
 }) => {
   // Filter out INVALID options if they are just strings
   const cleanOptions = Array.isArray(options)
@@ -22,7 +23,9 @@ export const SelectRow = ({
     : [];
 
   return (
-    <div className="group relative flex flex-col gap-4 p-5 rounded-[32px] bg-black/20 border border-white/5 hover:border-white/10 transition-all duration-500">
+    <div
+      className={`group relative flex flex-col gap-4 p-5 rounded-[32px] bg-black/20 border border-white/5 hover:border-white/10 transition-all duration-500 ${disabled ? "opacity-40 pointer-events-none" : ""}`}
+    >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5 flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -41,7 +44,8 @@ export const SelectRow = ({
         <div className="relative w-full">
           <select
             value={value ?? 0}
-            onChange={(e) => onChange(parseInt(e.target.value))}
+            disabled={disabled}
+            onChange={(e) => onChange(parseInt(e.target.value, 10))}
             className="w-full bg-black/40 border border-white/10 rounded-2xl pl-5 pr-10 py-3.5 text-[11px] font-orbitron font-black text-neon-cyan outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20 transition-all appearance-none cursor-pointer hover:bg-black/60 shadow-xl"
           >
             {cleanOptions.map((opt) => (
@@ -70,13 +74,27 @@ export const InputField = ({
   label,
   value,
   onChange,
+  onBlur,
+  rawInput = false,
   units,
   description,
   icon: Icon,
   step = 1,
+  disabled = false,
 }) => {
+  const [draft, setDraft] = useState(String(value ?? 0));
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setDraft(String(value ?? 0));
+    }
+  }, [value, isFocused]);
+
   return (
-    <div className="group relative flex flex-col gap-4 p-5 rounded-[32px] bg-black/20 border border-white/5 hover:border-white/10 transition-all duration-500">
+    <div
+      className={`group relative flex flex-col gap-4 p-5 rounded-[32px] bg-black/20 border border-white/5 hover:border-white/10 transition-all duration-500 ${disabled ? "opacity-40 pointer-events-none" : ""}`}
+    >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5 flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -96,8 +114,22 @@ export const InputField = ({
           <input
             type="number"
             step={step}
-            value={value ?? 0}
-            onChange={(e) => onChange(parseFloat(e.target.value))}
+            value={draft}
+            disabled={disabled}
+            onFocus={() => setIsFocused(true)}
+            onChange={(e) => {
+              const nextDraft = e.target.value;
+              setDraft(nextDraft);
+              onChange(
+                rawInput
+                  ? nextDraft
+                  : (nextDraft === "" ? 0 : parseFloat(nextDraft)),
+              );
+            }}
+            onBlur={(e) => {
+              setIsFocused(false);
+              onBlur?.(e);
+            }}
             className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3.5 text-[11px] font-orbitron font-black text-white outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20 transition-all text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none hover:bg-black/60 shadow-xl"
           />
           {units && (

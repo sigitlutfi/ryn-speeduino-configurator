@@ -25,6 +25,7 @@ ipcMain.handle("serial:listPorts", async () => {
 });
 
 ipcMain.handle("serial:connect", async (_event, portPath, baud) => {
+  console.log("[main] serial:connect requested", { portPath, baud });
   if (activePort) {
     try {
       activePort.close();
@@ -33,6 +34,7 @@ ipcMain.handle("serial:connect", async (_event, portPath, baud) => {
   }
 
   if (portPath === "MOCK") {
+    console.log("[main] Opening mock serial transport");
     activePort = createMockSerial((data) => {
       mainWindow?.webContents.send("serial:data", Array.from(data));
     });
@@ -53,10 +55,15 @@ ipcMain.handle("serial:connect", async (_event, portPath, baud) => {
     });
 
     port.on("error", (err) => {
+      console.error("[main] Serial port error", {
+        portPath,
+        message: err.message,
+      });
       mainWindow?.webContents.send("serial:status", "error:" + err.message);
     });
 
     port.on("close", () => {
+      console.log("[main] Serial port closed", { portPath });
       mainWindow?.webContents.send("serial:status", "disconnected");
       activePort = null;
     });
@@ -69,9 +76,15 @@ ipcMain.handle("serial:connect", async (_event, portPath, baud) => {
     });
 
     activePort = port;
+    console.log("[main] Serial port opened", { portPath, baud: baud || 115200 });
     mainWindow?.webContents.send("serial:status", "connected");
     return { ok: true };
   } catch (err) {
+    console.error("[main] serial:connect failed", {
+      portPath,
+      baud,
+      message: err.message,
+    });
     return { ok: false, error: err.message };
   }
 });

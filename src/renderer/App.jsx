@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { Buffer } from "buffer";
 import { useStore } from "./core/store.js";
@@ -13,6 +13,7 @@ import IgnitionTable from "./features/spark/IgnitionTable.jsx";
 import IgnitionTable2 from "./features/spark/IgnitionTable2.jsx";
 import AFRTable from "./features/fuel/AFRTable.jsx";
 import LambdaTable from "./features/fuel/LambdaTable.jsx";
+import FuelSettings from "./features/fuel/FuelSettings.jsx";
 import EngineSettings from "./features/engine/EngineSettings.jsx";
 import TriggerSetup from "./features/engine/TriggerSetup.jsx";
 import AFRO2Settings from "./features/fuel/AFRO2Settings.jsx";
@@ -42,20 +43,17 @@ import WMI from "./features/racing/WMI.jsx";
 import FanSettings from "./features/io/FanSettings.jsx";
 import SensorCalibration from "./features/tools/SensorCalibration.jsx";
 import ProtocolStats from "./features/tools/ProtocolStats.jsx";
+import RawConsole from "./features/tools/RawConsole.jsx";
 import TachoOutput from "./features/io/TachoOutput.jsx";
 import PitLimiter from "./features/racing/PitLimiter.jsx";
 import RumbleIdle from "./features/racing/RumbleIdle.jsx";
 import AntiLag from "./features/racing/AntiLag.jsx";
+import RuntimeProfiles from "./features/dashboard/RuntimeProfiles.jsx";
+import RuntimeProfileEditor from "./features/dashboard/RuntimeProfileEditor.jsx";
 
 import IndicatorTray from "./features/shared/components/IndicatorTray.jsx";
 import SyncDialog from "./ui/SyncDialog.jsx";
 import { getAccent } from "./core/theme.js";
-
-const TerminalPlaceholder = () => (
-  <div className="flex flex-col items-center justify-center h-full text-gray-700 font-orbitron text-xs tracking-[0.3em] uppercase opacity-40">
-    Hardware Terminal Debugger
-  </div>
-);
 
 export default function App() {
   const [, navigate] = useLocation();
@@ -65,11 +63,17 @@ export default function App() {
   const parsedIni = useStore((s) => s.parsedIni);
   const connectionStatus = useStore((s) => s.connection.status);
   const setConnectionStatus = useStore((s) => s.setConnectionStatus);
+  const setConnectionPort = useStore((s) => s.setConnectionPort);
+  const setConnectionBaud = useStore((s) => s.setConnectionBaud);
   const setRealtime = useStore((s) => s.setRealtime);
   const notify = useStore((s) => s.notify);
+  const clearRuntimeProfileSession = useStore(
+    (s) => s.clearRuntimeProfileSession,
+  );
   const syncDialogOpen = useStore((s) => s.syncDialogOpen);
   const syncDialogResults = useStore((s) => s.syncDialogResults);
   const closeSyncDialog = useStore((s) => s.closeSyncDialog);
+  const autoReconnectAttemptRef = useRef(null);
 
   const accent = getAccent(settings.accentColor);
 
@@ -87,6 +91,7 @@ export default function App() {
 
     // Connection status handler with handshake sequence
     window.serial.onStatus(async (status) => {
+      console.log("[App] Serial status event", status);
       if (status === "connected") {
         // Perform handshake before marking as fully connected
         try {
@@ -164,7 +169,9 @@ export default function App() {
       } else if (status === "disconnected") {
         serialService.reset();
         setConnectionStatus("disconnected");
+        clearRuntimeProfileSession({ state: "Disconnected" });
       } else if (status.startsWith("error:")) {
+        console.error("[App] Serial transport error", status.slice(6));
         setConnectionStatus("error", status.slice(6));
       }
     });
@@ -174,7 +181,13 @@ export default function App() {
       serialService.offRealtime(handleRealtime);
       serialService.destroy();
     };
-  }, [init, setConnectionStatus, setRealtime, notify]);
+  }, [
+    init,
+    setConnectionStatus,
+    setRealtime,
+    notify,
+    clearRuntimeProfileSession,
+  ]);
 
   useEffect(() => {
     if (
@@ -192,6 +205,90 @@ export default function App() {
   }, [connectionStatus, parsedIni]);
 
   useEffect(() => {
+    const currentProjectPath = currentProject?.filePath || currentProject?.projectName || null;
+    const autoReconnectKey = [
+      currentProjectPath,
+      settings.autoReconnect ? "on" : "off",
+      settings.lastSerialPort || "",
+      settings.lastSerialBaud || "",
+    ].join("|");
+
+    if (!currentProjectPath) return;
+    if (!settings.autoReconnect) return;
+    if (!settings.lastSerialPort) return;
+    if (connectionStatus !== "disconnected") return;
+    if (autoReconnectAttemptRef.current === autoReconnectKey) return;
+
+    autoReconnectAttemptRef.current = autoReconnectKey;
+
+    let cancelled = false;
+
+    const attemptAutoReconnect = async () => {
+      try {
+        const ports = await window.serial.listPorts();
+        if (cancelled) return;
+
+        const rememberedPort = ports.find(
+          (port) => port.path === settings.lastSerialPort,
+        );
+
+        if (!rememberedPort) {
+          console.warn("[App] Auto reconnect skipped, last port unavailable", {
+            port: settings.lastSerialPort,
+          });
+          return;
+        }
+
+        const baud = Number(settings.lastSerialBaud || 115200);
+        try {
+          await window.serial.disconnect();
+        } catch (disconnectError) {
+          console.warn("[App] Auto reconnect pre-disconnect failed", disconnectError);
+        }
+        if (cancelled) return;
+
+        serialService.reset();
+        setConnectionPort(settings.lastSerialPort);
+        setConnectionBaud(baud);
+        setConnectionStatus("connecting");
+
+        console.log("[App] Auto reconnect attempt", {
+          port: settings.lastSerialPort,
+          baud,
+          project: currentProjectPath,
+        });
+
+        const result = await window.serial.connect(settings.lastSerialPort, baud);
+        if (cancelled) return;
+
+        if (!result?.ok) {
+          console.warn("[App] Auto reconnect failed", result?.error);
+          setConnectionStatus("error", result?.error || "Auto reconnect failed");
+        }
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("[App] Auto reconnect exception", error);
+        setConnectionStatus("error", error?.message || "Auto reconnect failed");
+      }
+    };
+
+    attemptAutoReconnect();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentProject,
+    settings.autoReconnect,
+    settings.lastSerialPort,
+    settings.lastSerialBaud,
+    connectionStatus,
+    setConnectionStatus,
+    setConnectionPort,
+    setConnectionBaud,
+  ]);
+
+  useEffect(() => {
     const handleKeyDown = (e) => {
       const activeTag = document.activeElement.tagName.toLowerCase();
       const isInput = ["input", "select", "textarea"].includes(activeTag);
@@ -201,8 +298,9 @@ export default function App() {
       if (e.ctrlKey) {
         if (e.key === "n") {
           e.preventDefault();
-          closeProject();
-          notify("Project closed", "info", 2000);
+          closeProject().then(() => {
+            notify("Project closed", "info", 2000);
+          });
         }
         if (e.key === "o") {
           e.preventDefault();
@@ -265,7 +363,8 @@ export default function App() {
               Math.min(1, (settings.backgroundOpacity ?? 20) / 100),
             ),
             filter: `blur(${Math.max(0, settings.backgroundBlur ?? 0)}px)`,
-            transform: (settings.backgroundBlur ?? 0) > 0 ? "scale(1.03)" : "none",
+            transform:
+              (settings.backgroundBlur ?? 0) > 0 ? "scale(1.03)" : "none",
           }}
         />
       )}
@@ -303,6 +402,7 @@ export default function App() {
                   />
                   <Route path={ROUTES.TUNING_AFR} component={AFRTable} />
                   <Route path={ROUTES.TUNING_LAMBDA} component={LambdaTable} />
+                  <Route path={ROUTES.SETTINGS_FUEL} component={FuelSettings} />
                   <Route
                     path={ROUTES.SETTINGS_ENGINE}
                     component={EngineSettings}
@@ -353,6 +453,14 @@ export default function App() {
                     component={RumbleIdle}
                   />
                   <Route path={ROUTES.RACING_ANTILAG} component={AntiLag} />
+                  <Route
+                    path={ROUTES.RACING_PROFILES}
+                    component={RuntimeProfiles}
+                  />
+                  <Route
+                    path={ROUTES.RACING_PROFILE_EDITOR}
+                    component={RuntimeProfileEditor}
+                  />
                   <Route path={ROUTES.RACING_NITROUS} component={Nitrous} />
                   <Route path={ROUTES.ADDON_FUELPUMP} component={FuelPump} />
                   <Route path={ROUTES.SETTINGS_FAN} component={FanSettings} />
@@ -376,10 +484,7 @@ export default function App() {
                   />
                   <Route path={ROUTES.SETTINGS_TACHO} component={TachoOutput} />
                   <Route path={ROUTES.COMM} component={Communications} />
-                  <Route
-                    path={ROUTES.TERMINAL}
-                    component={TerminalPlaceholder}
-                  />
+                  <Route path={ROUTES.TERMINAL} component={RawConsole} />
                   <Route
                     path={ROUTES.APP_SETTINGS}
                     component={GlobalPreferencesPage}

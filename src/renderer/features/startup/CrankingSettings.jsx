@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   Zap,
   Flame,
@@ -13,6 +13,7 @@ import {
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
 import { useStore } from "../../core/store";
+import { toDisplay, toRaw } from "../shared/utils/normalization";
 
 const CRANKING_FIELDS = [
   "aseTaperTime",
@@ -73,6 +74,17 @@ export default function CrankingSettings() {
       .filter((opt) => opt.label && opt.label.toUpperCase() !== "INVALID");
   };
 
+  const getValue = (name) => {
+    const info = getFieldInfo(name);
+    const rawVal = getFieldValue(name);
+    return toDisplay(rawVal, info?.meta) ?? rawVal ?? 0;
+  };
+
+  const updateValue = (name, value) => {
+    const info = getFieldInfo(name);
+    setFieldValue(name, toRaw(value, info?.meta));
+  };
+
   const GroupHeader = ({ title, icon: Icon, colorClass = "bg-neon-cyan" }) => (
     <div className="flex items-center gap-3 mb-6">
       <div
@@ -87,7 +99,16 @@ export default function CrankingSettings() {
   );
 
   const InputField = ({ name, label, unit, icon: Icon }) => {
-    const value = getFieldValue(name);
+    const [draft, setDraft] = useState(String(getValue(name) ?? 0));
+    const [isFocused, setIsFocused] = useState(false);
+    const value = getValue(name);
+
+    useEffect(() => {
+      if (!isFocused) {
+        setDraft(String(value ?? 0));
+      }
+    }, [value, isFocused]);
+
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2 px-1">
@@ -100,8 +121,14 @@ export default function CrankingSettings() {
           <input
             type="number"
             step="0.1"
-            value={value ?? 0}
-            onChange={(e) => setFieldValue(name, parseFloat(e.target.value))}
+            value={draft}
+            onFocus={() => setIsFocused(true)}
+            onChange={(e) => {
+              const nextDraft = e.target.value;
+              setDraft(nextDraft);
+              updateValue(name, nextDraft === "" ? 0 : parseFloat(nextDraft));
+            }}
+            onBlur={() => setIsFocused(false)}
             className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20 transition-all group-hover/input:border-white/20"
           />
           {unit && (
@@ -135,8 +162,8 @@ export default function CrankingSettings() {
         </div>
         <div className="min-w-[140px]">
           <select
-            value={value ?? 0}
-            onChange={(e) => setFieldValue(name, parseInt(e.target.value))}
+            value={getValue(name) ?? 0}
+            onChange={(e) => updateValue(name, parseInt(e.target.value, 10))}
             className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs font-black text-neon-cyan outline-none focus:border-neon-cyan/50 transition-all appearance-none cursor-pointer text-center"
           >
             {options.map((opt) => (

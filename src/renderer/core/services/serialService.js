@@ -188,7 +188,7 @@ class SerialService {
         const handleData = (data) => {
           const chunk = Buffer.from(data);
 
-          if (chunk.length === 138 || chunk.length === 144) {
+          if (chunk.length === 145) {
             return;
           }
 
@@ -294,7 +294,7 @@ class SerialService {
         const handleData = (bytes) => {
           const chunk = Buffer.from(bytes);
 
-          if (chunk.length === 138 || chunk.length === 144) {
+          if (chunk.length === 145) {
             return;
           }
 
@@ -506,7 +506,7 @@ class SerialService {
         const handleData = (bytes) => {
           const chunk = Buffer.from(bytes);
 
-          if (chunk.length === 138 || chunk.length === 144) {
+          if (chunk.length === 145) {
             return;
           }
 
@@ -594,7 +594,7 @@ class SerialService {
       const handleData = (bytes) => {
         const chunk = Buffer.from(bytes);
 
-        if (chunk.length === 138 || chunk.length === 144) {
+        if (chunk.length === 145) {
           return;
         }
 

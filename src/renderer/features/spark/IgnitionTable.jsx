@@ -13,9 +13,8 @@ export default function IgnitionTable() {
   const secondaryValues = useStore((s) => s.tables.ign2?.values);
 
   // useTableSync makes the component incredibly clean
-  const { 
-    values, rpmAxis, loadAxis, meta, update, handleSave, isDirty 
-  } = useTableSync("ign", "sparkTbl");
+  const { values, rpmAxis, loadAxis, meta, update, handleSave, isDirty } =
+    useTableSync("ign", "sparkTbl");
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
@@ -29,10 +28,14 @@ export default function IgnitionTable() {
   const dynamicYLabel = useMemo(() => {
     if (!meta) return "Ignition Load";
     switch (ignAlgorithmId) {
-      case 0: return "IgnLoad (MAP kPa)";
-      case 1: return "IgnLoad (TPS %)";
-      case 2: return "IgnLoad (IMAP/EMAP %)";
-      default: return meta.yLabel;
+      case 0:
+        return "IgnLoad (MAP kPa)";
+      case 1:
+        return "IgnLoad (TPS %)";
+      case 2:
+        return "IgnLoad (IMAP/EMAP %)";
+      default:
+        return meta.yLabel;
     }
   }, [meta, ignAlgorithmId]);
 
@@ -58,7 +61,12 @@ export default function IgnitionTable() {
     return { tableMin: Math.floor(min), tableMax: Math.ceil(max) };
   }, [values]);
 
-  if (!meta) return <div className="p-8 text-white/40 font-orbitron text-center mt-20 italic">Loading Ignition Metadata...</div>;
+  if (!meta)
+    return (
+      <div className="p-8 text-white/40 font-orbitron text-center mt-20 italic">
+        Loading Ignition Metadata...
+      </div>
+    );
 
   return (
     <div className="p-0 h-full flex flex-col gap-0 overflow-hidden bg-transparent rounded-3xl">
@@ -91,16 +99,6 @@ export default function IgnitionTable() {
             unitLabel="DEG"
             activePoint={null}
           />
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-4 px-2">
-            <div className="flex items-center gap-2">
-                <span className="text-[10px] text-white/30 font-black uppercase font-orbitron">Hotkeys:</span>
-                <kbd className="px-2 py-0.5 bg-black border border-white/20 rounded text-[9px] text-neon-purple font-black">Shift + &</kbd>
-                <span className="text-[9px] text-white/40 uppercase">Inc/Dec 10%</span>
-                <kbd className="px-2 py-0.5 bg-black border border-white/20 rounded text-[9px] text-neon-purple font-black">I</kbd>
-                <span className="text-[9px] text-white/40 uppercase">Interpolate</span>
-            </div>
         </div>
       </div>
     </div>

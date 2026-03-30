@@ -107,13 +107,19 @@ export function serializeValue(buffer, offset, value, meta) {
   }
 
   // 2. Handle Arrays
-  if (shape && shape.length > 0) {
-    const totalElements = shape.reduce((a, b) => a * b, 1);
+  if (type === "array" || Array.isArray(value) || (shape && shape.length > 0)) {
+    const totalElements =
+      shape && shape.length > 0
+        ? shape.reduce((a, b) => a * b, 1)
+        : Array.isArray(value)
+          ? value.flat(Infinity).length
+          : 0;
     const elementSize = getDataTypeSize(dataType);
 
     if (Array.isArray(value)) {
-      for (let i = 0; i < Math.min(totalElements, value.length); i++) {
-        const elementValue = Array.isArray(value[i]) ? value[i][0] : value[i];
+      const flatValues = value.flat(Infinity);
+      for (let i = 0; i < Math.min(totalElements, flatValues.length); i++) {
+        const elementValue = flatValues[i];
         writeScalar(buffer, offset + i * elementSize, elementValue, dataType);
       }
     }

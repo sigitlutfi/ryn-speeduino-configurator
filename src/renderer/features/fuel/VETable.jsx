@@ -4,7 +4,6 @@ import TuningGrid from "../shared/TuningGrid/TuningGrid.jsx";
 import { useTableSync } from "../shared/hooks/useTableSync.js";
 import TuningHeader from "../shared/components/TuningHeader";
 import { Fuel } from "lucide-react";
-import FuelSettings from "./FuelSettings";
 import { getDecodedPage } from "../shared/utils/projectConstants";
 
 export default function VETable() {
@@ -14,9 +13,8 @@ export default function VETable() {
   const secondaryValues = useStore((s) => s.tables.ve2.values);
 
   // useTableSync handles all the metadata, constants sync and normalization
-  const { 
-    values, rpmAxis, loadAxis, meta, update, handleSave, isDirty 
-  } = useTableSync("ve", "veTable1Tbl");
+  const { values, rpmAxis, loadAxis, meta, update, handleSave, isDirty } =
+    useTableSync("ve", "veTable1Tbl");
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
@@ -30,11 +28,16 @@ export default function VETable() {
   const dynamicYLabel = useMemo(() => {
     if (!meta) return "Load";
     switch (algorithmId) {
-      case 0: return "Fuel Load (MAP kPa)";
-      case 1: return "Fuel Load (TPS %)";
-      case 2: return "Fuel Load (MAP/BARO %)";
-      case 3: return "Fuel Load (IMAP/EMAP %)";
-      default: return meta.yLabel;
+      case 0:
+        return "Fuel Load (MAP kPa)";
+      case 1:
+        return "Fuel Load (TPS %)";
+      case 2:
+        return "Fuel Load (MAP/BARO %)";
+      case 3:
+        return "Fuel Load (IMAP/EMAP %)";
+      default:
+        return meta.yLabel;
     }
   }, [meta, algorithmId]);
 
@@ -60,7 +63,12 @@ export default function VETable() {
     return { tableMin: Math.floor(min), tableMax: Math.ceil(max) };
   }, [values]);
 
-  if (!meta) return <div className="p-8 text-white/40 font-orbitron text-center mt-20 italic">Loading Table Metadata...</div>;
+  if (!meta)
+    return (
+      <div className="p-8 text-white/40 font-orbitron text-center mt-20 italic">
+        Loading Table Metadata...
+      </div>
+    );
 
   return (
     <div className="p-0 h-full flex flex-col gap-0 overflow-hidden bg-transparent rounded-3xl">
@@ -76,7 +84,7 @@ export default function VETable() {
         onBurn={() => onSaveAction(true)}
       />
 
-      <div className="flex-1 p-6 flex flex-col min-h-0 bg-[#0a0b10] overflow-y-auto custom-scrollbar">
+      <div className="flex-1 p-6 flex flex-col min-h-0  overflow-y-auto custom-scrollbar">
         <div className="min-h-[500px] flex-shrink-0">
           <TuningGrid
             values={values}
@@ -92,20 +100,6 @@ export default function VETable() {
             unitLabel="VE"
             activePoint={null}
           />
-        </div>
-
-        <FuelSettings />
-
-        <div className="mt-4 flex flex-wrap gap-4 px-2">
-            <div className="flex items-center gap-2">
-                <span className="text-[10px] text-white/30 font-black uppercase font-orbitron">Hotkeys:</span>
-                <kbd className="px-2 py-0.5 bg-black border border-white/20 rounded text-[9px] text-neon-cyan font-black">Shift + &</kbd>
-                <span className="text-[9px] text-white/40 uppercase">Inc/Dec 10%</span>
-                <kbd className="px-2 py-0.5 bg-black border border-white/20 rounded text-[9px] text-neon-cyan font-black">I</kbd>
-                <span className="text-[9px] text-white/40 uppercase">Interpolate</span>
-                <kbd className="px-2 py-0.5 bg-black border border-white/20 rounded text-[9px] text-neon-cyan font-black">S</kbd>
-                <span className="text-[9px] text-white/40 uppercase">Smooth</span>
-            </div>
         </div>
       </div>
     </div>

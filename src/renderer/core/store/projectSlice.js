@@ -4,6 +4,7 @@ import {
   formatReadCommand,
 } from "../../../shared/protocol/ecu-commands.js";
 import { parsePage } from "../../../shared/protocol/binary-parser.js";
+import { serializeValue } from "../../../shared/protocol/binary-serializer.js";
 import {
   createPageSnapshot,
   decodePageSnapshot,
@@ -12,11 +13,25 @@ import {
   isPageSnapshot,
   serializeDecodedPage,
 } from "../../../shared/protocol/page-cache.js";
+import {
+  buildRuntimeFieldWrite,
+  readRuntimeFieldFromBuffer,
+  resolveRuntimeField,
+  runtimeFieldValuesEqual,
+} from "../../../shared/protocol/runtime-fields.js";
+import {
+  RUNTIME_PROFILE_TABLE_DEFS,
+  buildRuntimeTableOverlay,
+  readRuntimeTableFromDecodedPage,
+  resolveRuntimeTable,
+  runtimeTablesEqual,
+  summarizeRuntimeTableDiff,
+} from "../../../shared/protocol/runtime-tables.js";
 import { serialService } from "../services/serialService.js";
 import { INITIAL_CONNECTION } from "./connectionSlice.js";
 import { INITIAL_TABLES } from "./tableSlice.js";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const DEFAULT_PROJECT_UNITS = {
   temperature: "celsius",
@@ -24,13 +39,222 @@ export const DEFAULT_PROJECT_UNITS = {
   speed: "kmh",
 };
 
-const DEFAULT_ACTIVE_PAGES = [1, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+export const DEFAULT_RUNTIME_PROFILE_FIELDS = [
+  "fuel2Mode",
+  "fuel2SwitchVariable",
+  "fuel2SwitchValue",
+  "spark2Mode",
+  "spark2SwitchVariable",
+  "spark2SwitchValue",
+  "rumbleIdleEnabled",
+  "alsEnabled",
+  "alsMaxDuration",
+];
+
+export const DEFAULT_RUNTIME_PROFILE_GUARDS = {
+  max_tps_pct: 5,
+  max_rpm: 1500,
+  engine_not_cranking: true,
+};
+
+const DEFAULT_ACTIVE_PAGES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
 function nowIso() {
   return new Date().toISOString();
 }
 
+function createEmptyRuntimeProfileSession(raw = {}) {
+  return {
+    state: raw.state ?? "Disconnected",
+    activeProfile: raw.activeProfile ?? null,
+    baseline: raw.baseline ?? {},
+    baselineTables: raw.baselineTables ?? {},
+    currentValues: raw.currentValues ?? {},
+    currentTables: raw.currentTables ?? {},
+    history: raw.history ?? [],
+    fields: Array.isArray(raw.fields) && raw.fields.length > 0
+      ? Array.from(new Set(raw.fields))
+      : [...DEFAULT_RUNTIME_PROFILE_FIELDS],
+    tables: Array.isArray(raw.tables) && raw.tables.length > 0
+      ? Array.from(new Set(raw.tables))
+      : [],
+    capturedAt: raw.capturedAt ?? null,
+    lastResult: raw.lastResult ?? null,
+  };
+}
+
+function mergeRuntimeProfileSession(session, patch = {}) {
+  const base = createEmptyRuntimeProfileSession(session);
+  return createEmptyRuntimeProfileSession({
+    ...base,
+    ...patch,
+    baseline: {
+      ...(base.baseline || {}),
+      ...(patch.baseline || {}),
+    },
+    baselineTables: {
+      ...(base.baselineTables || {}),
+      ...(patch.baselineTables || {}),
+    },
+    currentValues: {
+      ...(base.currentValues || {}),
+      ...(patch.currentValues || {}),
+    },
+    currentTables: {
+      ...(base.currentTables || {}),
+      ...(patch.currentTables || {}),
+    },
+    fields: Array.from(
+      new Set([...(base.fields || []), ...(patch.fields || [])].filter(Boolean)),
+    ),
+    tables: Array.from(
+      new Set([...(base.tables || []), ...(patch.tables || [])].filter(Boolean)),
+    ),
+  });
+}
+
+function evaluateRuntimeProfileGuards(realtime, requirements = {}) {
+  const reasons = [];
+  const rpm = realtime?.rpm ?? 0;
+  const tps = realtime?.tps ?? 0;
+  const cranking = !!realtime?.engine?.cranking;
+
+  if (requirements.engine_not_cranking !== false && cranking) {
+    reasons.push("Engine is cranking");
+  }
+
+  if (
+    Number.isFinite(requirements.max_tps_pct) &&
+    tps > requirements.max_tps_pct
+  ) {
+    reasons.push(`TPS ${tps}% exceeds ${requirements.max_tps_pct}%`);
+  }
+
+  if (
+    Number.isFinite(requirements.max_rpm) &&
+    rpm > requirements.max_rpm
+  ) {
+    reasons.push(`RPM ${rpm} exceeds ${requirements.max_rpm}`);
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    snapshot: {
+      rpm,
+      tps,
+      cranking,
+    },
+  };
+}
+
+function appendRuntimeProfileHistory(session, entry) {
+  const history = [...(session?.history || [])];
+  const logEntry = {
+    at: nowIso(),
+    ...entry,
+  };
+  history.push(logEntry);
+
+  try {
+    console.log("[runtime-profile]", logEntry);
+  } catch {}
+
+  return history.slice(-200);
+}
+
+function summarizeExpectedActualTableDiff(expectedTable, actualTable) {
+  const expectedValues = Array.from(expectedTable?.rawValues || []);
+  const actualValues = Array.from(actualTable?.rawValues || []);
+  const expectedRpm = Array.from(expectedTable?.rawRpmAxis || []);
+  const actualRpm = Array.from(actualTable?.rawRpmAxis || []);
+  const expectedLoad = Array.from(expectedTable?.rawLoadAxis || []);
+  const actualLoad = Array.from(actualTable?.rawLoadAxis || []);
+
+  let firstValueMismatch = -1;
+  const valueSize = Math.max(expectedValues.length, actualValues.length);
+  for (let index = 0; index < valueSize; index += 1) {
+    if (expectedValues[index] !== actualValues[index]) {
+      firstValueMismatch = index;
+      break;
+    }
+  }
+
+  let firstRpmMismatch = -1;
+  const rpmSize = Math.max(expectedRpm.length, actualRpm.length);
+  for (let index = 0; index < rpmSize; index += 1) {
+    if (expectedRpm[index] !== actualRpm[index]) {
+      firstRpmMismatch = index;
+      break;
+    }
+  }
+
+  let firstLoadMismatch = -1;
+  const loadSize = Math.max(expectedLoad.length, actualLoad.length);
+  for (let index = 0; index < loadSize; index += 1) {
+    if (expectedLoad[index] !== actualLoad[index]) {
+      firstLoadMismatch = index;
+      break;
+    }
+  }
+
+  return {
+    expectedLengths: {
+      values: expectedValues.length,
+      rpm: expectedRpm.length,
+      load: expectedLoad.length,
+    },
+    actualLengths: {
+      values: actualValues.length,
+      rpm: actualRpm.length,
+      load: actualLoad.length,
+    },
+    firstValueMismatch,
+    firstRpmMismatch,
+    firstLoadMismatch,
+    expectedAtMismatch:
+      firstValueMismatch >= 0 ? expectedValues[firstValueMismatch] : null,
+    actualAtMismatch:
+      firstValueMismatch >= 0 ? actualValues[firstValueMismatch] : null,
+  };
+}
+
+function buildDisplayTablesFromDecodedPages(
+  parsedIni,
+  decodedPages = {},
+  baseTables = INITIAL_TABLES,
+) {
+  const nextTables = { ...INITIAL_TABLES, ...(baseTables || {}) };
+  if (!parsedIni || !decodedPages) return nextTables;
+
+  for (const definition of Object.values(RUNTIME_PROFILE_TABLE_DEFS)) {
+    try {
+      const tableDef = resolveRuntimeTable(parsedIni, definition.key);
+      const decodedPage = decodedPages?.[tableDef.page];
+      if (!decodedPage) continue;
+
+      const runtimeTable = readRuntimeTableFromDecodedPage(decodedPage, tableDef);
+      nextTables[definition.storeKey] = {
+        values: runtimeTable.displayValues,
+        rpmAxis: runtimeTable.displayRpmAxis,
+        loadAxis: runtimeTable.displayLoadAxis,
+      };
+    } catch (error) {
+      console.warn(
+        `[project] Failed to build display table '${definition.key}' from ECU data:`,
+        error,
+      );
+    }
+  }
+
+  return nextTables;
+}
+
 function createEmptyEcuState(raw = {}) {
+  const mergedActivePages = Array.from(
+    new Set([...(raw.sync?.activePages ?? []), ...DEFAULT_ACTIVE_PAGES]),
+  ).sort((a, b) => a - b);
+
   return {
     signature: raw.signature ?? null,
     product: raw.product ?? null,
@@ -41,10 +265,61 @@ function createEmptyEcuState(raw = {}) {
     },
     sync: {
       state: raw.sync?.state ?? "needs-initial-sync",
-      activePages: raw.sync?.activePages ?? DEFAULT_ACTIVE_PAGES,
+      activePages: mergedActivePages,
       lastConnectedAt: raw.sync?.lastConnectedAt ?? null,
       lastSyncAt: raw.sync?.lastSyncAt ?? null,
     },
+  };
+}
+
+function matrixFromFlatValues(flatValues = [], rows = 16, cols = 16) {
+  const matrix = [];
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    matrix.push(flatValues.slice(rowIndex * cols, (rowIndex + 1) * cols));
+  }
+  return matrix;
+}
+
+function createNeutralRuntimeTablePreset(tableDef, baselineTable = null, fillValue = 100) {
+  const totalCells = Math.max(1, (tableDef?.rows || 16) * (tableDef?.cols || 16));
+  const rawValues = Array(totalCells).fill(fillValue);
+
+  return {
+    key: tableDef.logicalName,
+    label: tableDef.label,
+    tableId: tableDef.tableId,
+    page: tableDef.page,
+    xBinsVar: tableDef.xBinsVar,
+    yBinsVar: tableDef.yBinsVar,
+    zBinsVar: tableDef.zBinsVar,
+    rows: tableDef.rows,
+    cols: tableDef.cols,
+    operation: "fill",
+    source: "ve2-base",
+    value: fillValue,
+    rawValues,
+    rawRpmAxis: Array.from(baselineTable?.rawRpmAxis || []),
+    rawLoadAxis: Array.from(baselineTable?.rawLoadAxis || []),
+    displayValues: matrixFromFlatValues(rawValues, tableDef.rows, tableDef.cols),
+    displayRpmAxis: Array.from(baselineTable?.displayRpmAxis || []),
+    displayLoadAxis: Array.from(baselineTable?.displayLoadAxis || []),
+  };
+}
+
+function summarizeAppliedRuntimeTable(table) {
+  const rawValues = Array.from(table?.rawValues || []);
+  const uniqueValues = Array.from(new Set(rawValues));
+
+  return {
+    key: table.key,
+    operation: table.operation,
+    source: table.source,
+    changedCells: table.changedCells ?? rawValues.length,
+    axesChanged: !!table.axesChanged,
+    summary:
+      uniqueValues.length === 1 && rawValues.length > 0
+        ? `flat ${uniqueValues[0]}`
+        : `${rawValues.length} cells`,
   };
 }
 
@@ -93,6 +368,151 @@ function deriveProjectSyncState(constants, activePages = DEFAULT_ACTIVE_PAGES) {
   if (relevant === 0) return "needs-initial-sync";
   if (verified === relevant) return "fully-verified";
   return "partially-synced";
+}
+
+function createDefaultRuntimeProfilePreset(parsedIni, decodedPages, name, fillValue = 100) {
+  const preset = {
+    name,
+    tablePresets: {},
+    options: {
+      fuel2Mode: 1,
+    },
+  };
+
+  if (!parsedIni) return preset;
+
+  try {
+    const ve2Def = resolveRuntimeTable(parsedIni, "ve2");
+    const ve2DecodedPage =
+      decodedPages?.[ve2Def.page] || decodedPages?.[String(ve2Def.page)];
+    const ve2BaseTable = ve2DecodedPage
+      ? readRuntimeTableFromDecodedPage(ve2DecodedPage, ve2Def)
+      : null;
+
+    preset.tablePresets.ve2 = buildRuntimeTableOverlay(
+      null,
+      ve2Def,
+      { target: "ve2", operation: "fill", value: fillValue },
+      ve2BaseTable,
+    );
+
+    if (!preset.tablePresets.ve2?.rawValues?.length) {
+      preset.tablePresets.ve2 = createNeutralRuntimeTablePreset(
+        ve2Def,
+        ve2BaseTable,
+        fillValue,
+      );
+    }
+
+    const afr1Def = resolveRuntimeTable(parsedIni, "afr1");
+    const afr1DecodedPage =
+      decodedPages?.[afr1Def.page] || decodedPages?.[String(afr1Def.page)];
+    const afr1BaseTable = afr1DecodedPage
+      ? readRuntimeTableFromDecodedPage(afr1DecodedPage, afr1Def)
+      : null;
+
+    preset.tablePresets.afr1 = buildRuntimeTableOverlay(
+      null,
+      afr1Def,
+      { target: "afr1", operation: "fill", value: 14.7 },
+      afr1BaseTable,
+    );
+  } catch (error) {
+    console.warn(`[project] Failed to seed runtime profile preset '${name}':`, error);
+    if (parsedIni) {
+      try {
+        const ve2Def = resolveRuntimeTable(parsedIni, "ve2");
+        const decodedPage =
+          decodedPages?.[ve2Def.page] || decodedPages?.[String(ve2Def.page)];
+        const baseTable = decodedPage
+          ? readRuntimeTableFromDecodedPage(decodedPage, ve2Def)
+          : null;
+        preset.tablePresets.ve2 = createNeutralRuntimeTablePreset(
+          ve2Def,
+          baseTable,
+          fillValue,
+        );
+      } catch (fallbackError) {
+        console.warn(
+          `[project] Failed to create neutral runtime profile preset '${name}':`,
+          fallbackError,
+        );
+      }
+    }
+  }
+
+  return preset;
+}
+
+function normalizeRuntimeProfiles(rawRuntimeProfiles = {}, parsedIni = null, decodedPages = {}) {
+  const defaults = {
+    eco: createDefaultRuntimeProfilePreset(parsedIni, decodedPages, "ECO", 100),
+    racing: createDefaultRuntimeProfilePreset(parsedIni, decodedPages, "RACING", 100),
+    extreme: createDefaultRuntimeProfilePreset(parsedIni, decodedPages, "EXTREME", 100),
+  };
+
+  const withFallbackTablePreset = (profileKey) => {
+    const rawPreset = rawRuntimeProfiles?.[profileKey] || {};
+    const merged = {
+      ...defaults[profileKey],
+      ...rawPreset,
+      tablePresets: {
+        ...(defaults[profileKey]?.tablePresets || {}),
+        ...(rawPreset?.tablePresets || {}),
+      },
+      options: {
+        ...(defaults[profileKey]?.options || {}),
+        ...(rawPreset?.options || {}),
+      },
+    };
+
+    if (!merged.tablePresets?.ve2 && defaults[profileKey]?.tablePresets?.ve2) {
+      merged.tablePresets = {
+        ...(merged.tablePresets || {}),
+        ve2: defaults[profileKey].tablePresets.ve2,
+      };
+    }
+
+    return merged;
+  };
+
+  return {
+    eco: withFallbackTablePreset("eco"),
+    racing: withFallbackTablePreset("racing"),
+    extreme: withFallbackTablePreset("extreme"),
+  };
+}
+
+function ensureProjectRuntimeProfiles(project, parsedIniOverride = null) {
+  if (!project) return project;
+
+  const parsedIni = parsedIniOverride || parseIniFromProject(project);
+  const decodedPages = project.constants?.decodedPages || {};
+
+  return {
+    ...project,
+    runtimeProfiles: normalizeRuntimeProfiles(
+      project.runtimeProfiles,
+      parsedIni,
+      decodedPages,
+    ),
+  };
+}
+
+function parseIniFromProject(project) {
+  const iniContent = project?.ini?.content;
+  if (!iniContent) return null;
+
+  try {
+    const symbols = {
+      CELSIUS: project?.units?.temperature === "celsius",
+      FAHRENHEIT: project?.units?.temperature === "fahrenheit",
+    };
+    return parseIni(iniContent, symbols);
+  } catch (error) {
+    console.warn("[project] Failed to parse embedded INI for runtime profile defaults:", error);
+    return null;
+  }
 }
 
 function normalizeProjectV3(raw, parsedIni = null) {
@@ -155,6 +575,11 @@ function normalizeProjectV3(raw, parsedIni = null) {
       pages: pageSnapshots,
       decodedPages,
     },
+    runtimeProfiles: normalizeRuntimeProfiles(
+      raw.runtimeProfiles,
+      parsedIni,
+      decodedPages,
+    ),
     tables: raw.tables ?? null,
     ui: {
       accentColor: raw.ui?.accentColor ?? raw.color ?? "cyan",
@@ -166,11 +591,14 @@ function normalizeProjectV3(raw, parsedIni = null) {
 }
 
 function serializeProjectForSave(project, tables) {
+  const normalizedProject = ensureProjectRuntimeProfiles(project);
+
   return {
-    ...project,
+    ...normalizedProject,
     constants: {
-      pages: project.constants?.pages || {},
+      pages: normalizedProject.constants?.pages || {},
     },
+    runtimeProfiles: normalizedProject.runtimeProfiles || {},
     tables,
     updatedAt: nowIso(),
   };
@@ -178,6 +606,20 @@ function serializeProjectForSave(project, tables) {
 
 function getDecodedPages(constants) {
   return constants?.decodedPages || {};
+}
+
+function readRuntimeFieldFromProjectPages(currentProject, field) {
+  const decodedPages = getDecodedPages(currentProject?.constants);
+  const decodedPage = decodedPages?.[field.page] || decodedPages?.[String(field.page)];
+
+  if (!decodedPage) {
+    throw new Error(`Project page ${field.page} is unavailable`);
+  }
+
+  if (decodedPage[field.name] !== undefined) return decodedPage[field.name];
+  if (decodedPage[field.key] !== undefined) return decodedPage[field.key];
+
+  throw new Error(`Project field '${field.name || field.key}' is unavailable`);
 }
 
 function getActiveProjectPages(currentProject) {
@@ -217,6 +659,7 @@ export const createProjectSlice = (set, get) => ({
   currentProject: null,
   parsedIni: null,
   recentProjects: [],
+  runtimeProfileSession: createEmptyRuntimeProfileSession(),
 
   setProject: async (raw) => {
     try {
@@ -261,12 +704,30 @@ export const createProjectSlice = (set, get) => ({
         if (parsedIni.info.mtVersion) project.ini.version = parsedIni.info.mtVersion;
       }
 
-      if (project.tables) {
-        set({ tables: { ...INITIAL_TABLES, ...project.tables } });
-      }
+      project = ensureProjectRuntimeProfiles(project, parsedIni);
+
+      const hydratedTables =
+        project.tables &&
+        Object.keys(project.tables).length > 0
+          ? { ...INITIAL_TABLES, ...project.tables }
+          : buildDisplayTablesFromDecodedPages(
+              parsedIni,
+              project.constants?.decodedPages,
+              INITIAL_TABLES,
+            );
+
+      set({ tables: hydratedTables });
+      project.tables = hydratedTables;
 
       const recent = await window.projects.addRecent(project);
-      set({ currentProject: project, parsedIni, recentProjects: recent });
+      set({
+        currentProject: project,
+        parsedIni,
+        recentProjects: recent,
+        runtimeProfileSession: createEmptyRuntimeProfileSession({
+          state: "Disconnected",
+        }),
+      });
     } catch (err) {
       console.error("[project] setProject failed:", err);
     }
@@ -298,12 +759,13 @@ export const createProjectSlice = (set, get) => ({
       }
 
       console.log("[project] Save successful!");
-      const recent = await window.projects.addRecent(projectData);
+      const normalizedSavedProject = ensureProjectRuntimeProfiles(projectData);
+      const recent = await window.projects.addRecent(normalizedSavedProject);
       set((s) => ({
         currentProject: {
-          ...projectData,
+          ...normalizedSavedProject,
           constants: {
-            ...(projectData.constants || {}),
+            ...(normalizedSavedProject.constants || {}),
             decodedPages: s.currentProject?.constants?.decodedPages || {},
           },
         },
@@ -329,11 +791,11 @@ export const createProjectSlice = (set, get) => ({
         return { ok: false, error: "Save cancelled" };
       }
 
-      const newProject = {
+      const newProject = ensureProjectRuntimeProfiles({
         ...(currentProject || {}),
         filePath,
         updatedAt: nowIso(),
-      };
+      });
 
       console.log("[project] Saving new file to:", filePath);
       const savePayload = serializeProjectForSave(newProject, tables);
@@ -347,7 +809,7 @@ export const createProjectSlice = (set, get) => ({
       console.log("[project] Save As successful!");
       const recent = await window.projects.addRecent(savePayload);
       set({
-        currentProject: newProject,
+        currentProject: ensureProjectRuntimeProfiles(newProject),
         recentProjects: recent,
       });
       return { ok: true };
@@ -357,13 +819,23 @@ export const createProjectSlice = (set, get) => ({
     }
   },
 
-  closeProject: () =>
+  closeProject: async () => {
+    try {
+      await window.serial.disconnect();
+    } catch (error) {
+      console.warn("[project] closeProject disconnect failed:", error);
+    }
+
     set({
       currentProject: null,
       parsedIni: null,
       connection: { ...INITIAL_CONNECTION },
       tables: INITIAL_TABLES,
-    }),
+      runtimeProfileSession: createEmptyRuntimeProfileSession(),
+    });
+
+    return { ok: true };
+  },
 
   removeRecentProject: async (filePath) => {
     try {
@@ -387,6 +859,37 @@ export const createProjectSlice = (set, get) => ({
         proj[parts[0]] = { ...(proj[parts[0]] ?? {}), [parts[1]]: value };
       }
       return { currentProject: proj };
+    });
+  },
+
+  updateRuntimeProfilePreset: (profileKey, patch = {}) => {
+    set((s) => {
+      if (!s.currentProject) return {};
+
+      const existingProfiles = s.currentProject.runtimeProfiles || {};
+      const existingPreset = existingProfiles[profileKey] || {};
+      const nextProject = ensureProjectRuntimeProfiles({
+        ...s.currentProject,
+        runtimeProfiles: {
+          ...existingProfiles,
+          [profileKey]: {
+            ...existingPreset,
+            ...patch,
+            tablePresets: {
+              ...(existingPreset.tablePresets || {}),
+              ...(patch.tablePresets || {}),
+            },
+            options: {
+              ...(existingPreset.options || {}),
+              ...(patch.options || {}),
+            },
+          },
+        },
+      });
+
+      return {
+        currentProject: nextProject,
+      };
     });
   },
 
@@ -499,7 +1002,16 @@ export const createProjectSlice = (set, get) => ({
   },
 
   syncPagesToECU: async (pageIds = [], options = {}) => {
-    const { connection, currentProject, notify, readPageFromECU, burnPage } = get();
+    const {
+      connection,
+      currentProject,
+      notify,
+      readPageFromECU,
+      burnPage,
+      setOperation,
+      updateOperation,
+      clearOperation,
+    } = get();
     if (connection.status !== "connected") {
       return { ok: false, error: "Not connected" };
     }
@@ -512,7 +1024,17 @@ export const createProjectSlice = (set, get) => ({
 
     serialService.suspendOutputChannelsPolling();
     try {
-      for (const pageId of targetPages) {
+      setOperation({
+        type: options.burn ? "upload" : "write",
+        stage: "read",
+        label: options.burn ? "Preparing ECU upload" : "Preparing RAM sync",
+        current: 0,
+        total: targetPages.length,
+        scope: "sync",
+      });
+
+      for (let index = 0; index < targetPages.length; index += 1) {
+        const pageId = targetPages[index];
         try {
           const localSnapshot =
             currentProject?.constants?.pages?.[pageId] ||
@@ -520,8 +1042,21 @@ export const createProjectSlice = (set, get) => ({
           if (!localSnapshot) {
             results.ok = false;
             results.errors.push({ pageId, error: "Missing local snapshot" });
+            updateOperation({
+              stage: "error",
+              label: `Missing local snapshot for page ${pageId}`,
+              current: index + 1,
+              total: targetPages.length,
+            });
             continue;
           }
+
+          updateOperation({
+            stage: "read",
+            label: `Reading ECU page ${pageId}`,
+            current: index,
+            total: targetPages.length,
+          });
 
           set((s) => {
             if (!s.currentProject) return {};
@@ -544,6 +1079,12 @@ export const createProjectSlice = (set, get) => ({
           const dirtyRegion = findDirtyRegion(ecuPage.buffer, localBuffer);
 
           if (dirtyRegion) {
+            updateOperation({
+              stage: "write",
+              label: `Writing page ${pageId}`,
+              current: index,
+              total: targetPages.length,
+            });
             await serialService.writePage(
               pageId,
               dirtyRegion.offset,
@@ -554,14 +1095,32 @@ export const createProjectSlice = (set, get) => ({
           }
 
           if (options.burn) {
+            updateOperation({
+              stage: "burn",
+              label: `Burning page ${pageId}`,
+              current: index,
+              total: targetPages.length,
+            });
             const burnResult = await burnPage(pageId);
             if (!burnResult.ok) {
               results.ok = false;
               results.errors.push({ pageId, error: burnResult.error || "Burn failed" });
+              updateOperation({
+                stage: "error",
+                label: `Burn failed on page ${pageId}`,
+                current: index + 1,
+                total: targetPages.length,
+              });
               continue;
             }
             results.pages[pageId] = { dirtyRegion, verified: true, burned: true };
           } else {
+            updateOperation({
+              stage: "verify",
+              label: `Verifying page ${pageId}`,
+              current: index,
+              total: targetPages.length,
+            });
             const verifyPage = await readPageFromECU(pageId);
             const verified =
               Buffer.compare(Buffer.from(verifyPage.buffer), Buffer.from(localBuffer)) === 0;
@@ -605,16 +1164,34 @@ export const createProjectSlice = (set, get) => ({
             if (!verified) {
               results.ok = false;
               results.errors.push({ pageId, error: "RAM verify mismatch" });
+              updateOperation({
+                stage: "error",
+                label: `Verify mismatch on page ${pageId}`,
+                current: index + 1,
+                total: targetPages.length,
+              });
             }
             results.pages[pageId] = { dirtyRegion, verified, burned: false, syncState: verified ? "burn-pending" : "different" };
           }
         } catch (error) {
           results.ok = false;
           results.errors.push({ pageId, error: error.message });
+          updateOperation({
+            stage: "error",
+            label: `Failed on page ${pageId}`,
+            current: index + 1,
+            total: targetPages.length,
+          });
         }
+
+        updateOperation({
+          current: index + 1,
+          total: targetPages.length,
+        });
       }
     } finally {
       serialService.resumeOutputChannelsPolling();
+      clearOperation();
     }
 
     if (results.errors.length > 0) {
@@ -674,6 +1251,1132 @@ export const createProjectSlice = (set, get) => ({
     } catch (e) {
       console.error(`[ECU] Sync failed for ${name}:`, e);
     }
+  },
+
+  readRuntimeField: async (fieldName) => {
+    const { parsedIni, connection, readPageFromECU } = get();
+    if (connection.status !== "connected") {
+      throw new Error("Not connected");
+    }
+    if (!parsedIni) {
+      throw new Error("No INI loaded");
+    }
+
+    const field = resolveRuntimeField(parsedIni, fieldName);
+
+    serialService.suspendOutputChannelsPolling();
+    try {
+      const page = await readPageFromECU(field.page);
+      return {
+        field,
+        value: readRuntimeFieldFromBuffer(page.buffer, field),
+        pageBuffer: page.buffer,
+      };
+    } finally {
+      serialService.resumeOutputChannelsPolling();
+    }
+  },
+
+  writeRuntimeField: async (fieldName, nextValue, options = {}) => {
+    const { parsedIni, connection, readPageFromECU } = get();
+    if (connection.status !== "connected") {
+      throw new Error("Not connected");
+    }
+    if (!parsedIni) {
+      throw new Error("No INI loaded");
+    }
+
+    const field = resolveRuntimeField(parsedIni, fieldName);
+
+    serialService.suspendOutputChannelsPolling();
+    try {
+      const page = options.pageBuffer
+        ? { buffer: Buffer.from(options.pageBuffer) }
+        : await readPageFromECU(field.page);
+      const currentValue = readRuntimeFieldFromBuffer(page.buffer, field);
+      const write = buildRuntimeFieldWrite(page.buffer, field, nextValue);
+
+      if (!write.changed) {
+        return {
+          field,
+          changed: false,
+          currentValue,
+          writtenValue: nextValue,
+        };
+      }
+
+      await serialService.writePage(
+        field.page,
+        write.offset,
+        write.length,
+        Array.from(write.after),
+      );
+
+      return {
+        field,
+        changed: true,
+        currentValue,
+        writtenValue: nextValue,
+        write,
+      };
+    } finally {
+      serialService.resumeOutputChannelsPolling();
+    }
+  },
+
+  verifyRuntimeField: async (fieldName, expectedValue) => {
+    const result = await get().readRuntimeField(fieldName);
+    return {
+      ...result,
+      expectedValue,
+      matches: runtimeFieldValuesEqual(result.value, expectedValue),
+    };
+  },
+
+  readRuntimeTable: async (tableName, options = {}) => {
+    const { parsedIni, connection, currentProject, readPageFromECU } = get();
+    const source = options.source || "ecu";
+
+    if (!parsedIni) {
+      throw new Error("No INI loaded");
+    }
+
+    const tableDef = resolveRuntimeTable(parsedIni, tableName);
+
+    if (source === "project") {
+      const decodedPages = getDecodedPages(currentProject?.constants);
+      const decodedPage =
+        decodedPages?.[tableDef.page] || decodedPages?.[String(tableDef.page)];
+
+      if (!decodedPage) {
+        throw new Error(`Project page ${tableDef.page} is unavailable`);
+      }
+
+      return {
+        table: tableDef,
+        ...readRuntimeTableFromDecodedPage(decodedPage, tableDef),
+      };
+    }
+
+    if (connection.status !== "connected") {
+      throw new Error("Not connected");
+    }
+
+    serialService.suspendOutputChannelsPolling();
+    try {
+      const page = await readPageFromECU(tableDef.page);
+      return {
+        table: tableDef,
+        ...readRuntimeTableFromDecodedPage(page.decoded, tableDef),
+        pageBuffer: page.buffer,
+      };
+    } finally {
+      serialService.resumeOutputChannelsPolling();
+    }
+  },
+
+  writeRuntimeTable: async (tableName, nextTable, options = {}) => {
+    const { parsedIni, connection, readPageFromECU } = get();
+    if (connection.status !== "connected") {
+      throw new Error("Not connected");
+    }
+    if (!parsedIni) {
+      throw new Error("No INI loaded");
+    }
+
+    const tableDef = resolveRuntimeTable(parsedIni, tableName);
+    if (!nextTable) {
+      throw new Error(`No runtime table payload provided for '${tableName}'`);
+    }
+
+    serialService.suspendOutputChannelsPolling();
+    try {
+      const ecuPage = await readPageFromECU(tableDef.page);
+      const nextBuffer = Buffer.from(ecuPage.buffer);
+      const patchTargets = [
+        {
+          varName: tableDef.xBinsVar,
+          values: Array.from(nextTable.rawRpmAxis || []),
+        },
+        {
+          varName: tableDef.yBinsVar,
+          values: Array.from(nextTable.rawLoadAxis || []),
+        },
+        {
+          varName: tableDef.zBinsVar,
+          values: Array.from(nextTable.rawValues || []),
+        },
+      ].filter((target) => target.varName);
+
+      for (const target of patchTargets) {
+        const meta = getVarMetadata(parsedIni, target.varName);
+        if (!meta) {
+          throw new Error(
+            `Missing INI metadata for runtime table variable '${target.varName}'`,
+          );
+        }
+
+        serializeValue(nextBuffer, meta.offset, target.values, meta);
+      }
+
+      const dirtyRegion = findDirtyRegion(ecuPage.buffer, nextBuffer);
+
+      if (dirtyRegion) {
+        const maxChunkLength = options.maxChunkLength ?? 32;
+        for (
+          let chunkOffset = 0;
+          chunkOffset < dirtyRegion.length;
+          chunkOffset += maxChunkLength
+        ) {
+          const chunkLength = Math.min(maxChunkLength, dirtyRegion.length - chunkOffset);
+          const chunkData = dirtyRegion.after.slice(chunkOffset, chunkOffset + chunkLength);
+
+          await serialService.writePage(
+            tableDef.page,
+            dirtyRegion.offset + chunkOffset,
+            chunkLength,
+            Array.from(chunkData),
+          );
+          await delay(options.chunkSettleMs ?? 8);
+        }
+
+        await delay(options.writeSettleMs ?? 40);
+      }
+
+      return {
+        table: tableDef,
+        dirtyRegion,
+        buffer: nextBuffer,
+      };
+    } finally {
+      serialService.resumeOutputChannelsPolling();
+    }
+  },
+
+  verifyRuntimeTable: async (tableName, expectedTable) => {
+    const result = await get().readRuntimeTable(tableName);
+    return {
+      ...result,
+      expectedTable,
+      matches: runtimeTablesEqual(result, expectedTable),
+    };
+  },
+
+  clearRuntimeProfileSession: (overrides = {}) => {
+    set({
+      runtimeProfileSession: createEmptyRuntimeProfileSession(overrides),
+    });
+  },
+
+  exportRuntimeProfileLog: () => {
+    const { runtimeProfileSession } = get();
+    const history = runtimeProfileSession?.history || [];
+
+    return history
+      .map((entry) => {
+        const details = Object.entries(entry)
+          .filter(([key]) => key !== "at")
+          .map(([key, value]) => {
+            if (value && typeof value === "object") {
+              return `${key}=${JSON.stringify(value)}`;
+            }
+            return `${key}=${value}`;
+          })
+          .join(" ");
+
+        return `[${entry.at}] ${details}`.trim();
+      })
+      .join("\n");
+  },
+
+  getRuntimeProfileGuardStatus: (requirements = {}) => {
+    const { realtime, connection } = get();
+    const mergedRequirements = {
+      ...DEFAULT_RUNTIME_PROFILE_GUARDS,
+      ...requirements,
+    };
+
+    return {
+      connected: connection.status === "connected",
+      ...evaluateRuntimeProfileGuards(realtime, mergedRequirements),
+      requirements: mergedRequirements,
+    };
+  },
+
+  captureRuntimeProfileTableBaseline: async (tableNames = []) => {
+    const {
+      parsedIni,
+      readRuntimeTable,
+      runtimeProfileSession,
+      currentProject,
+    } = get();
+
+    if (!parsedIni) {
+      throw new Error("No INI loaded");
+    }
+    if (!currentProject?.constants) {
+      throw new Error("No project base is available");
+    }
+
+    const targetTables = Array.from(new Set((tableNames || []).filter(Boolean)));
+    if (!targetTables.length) {
+      throw new Error("No runtime profile tables selected");
+    }
+
+    const baselineTables = {};
+    const currentTables = {};
+    const missing = [];
+
+    for (const tableName of targetTables) {
+      try {
+        const result = await readRuntimeTable(tableName, { source: "project" });
+        baselineTables[tableName] = result;
+        currentTables[tableName] = result;
+      } catch (error) {
+        missing.push({
+          table: tableName,
+          error: error.message,
+        });
+      }
+    }
+
+    if (missing.length > 0) {
+      const failedAt = nowIso();
+      const nextSession = mergeRuntimeProfileSession(runtimeProfileSession, {
+        state: "Unknown",
+        tables: targetTables,
+        history: appendRuntimeProfileHistory(runtimeProfileSession, {
+          type: "table-baseline-capture-failed",
+          missing,
+        }),
+        lastResult: {
+          ok: false,
+          type: "table-baseline-capture",
+          missing,
+          capturedAt: failedAt,
+        },
+      });
+      set({ runtimeProfileSession: nextSession });
+      throw new Error(`Table baseline capture failed for ${missing.length} runtime table(s)`);
+    }
+
+    const capturedAt = nowIso();
+    const nextSession = mergeRuntimeProfileSession(runtimeProfileSession, {
+      state: "Base",
+      activeProfile: null,
+      baselineTables,
+      currentTables,
+      tables: targetTables,
+      capturedAt,
+      history: appendRuntimeProfileHistory(runtimeProfileSession, {
+        type: "table-baseline-captured",
+        tables: targetTables,
+        source: "project",
+      }),
+      lastResult: {
+        ok: true,
+        type: "table-baseline-capture",
+        tableCount: targetTables.length,
+        capturedAt,
+        source: "project",
+      },
+    });
+
+    set({ runtimeProfileSession: nextSession });
+    return nextSession;
+  },
+
+  captureRuntimeProfileBaseline: async (fields = DEFAULT_RUNTIME_PROFILE_FIELDS) => {
+    const {
+      parsedIni,
+      runtimeProfileSession,
+      currentProject,
+    } = get();
+
+    if (!parsedIni) {
+      throw new Error("No INI loaded");
+    }
+    if (!currentProject?.constants) {
+      throw new Error("No project base is available");
+    }
+
+    const targetFields = Array.from(new Set((fields || []).filter(Boolean)));
+    if (!targetFields.length) {
+      throw new Error("No runtime profile fields selected");
+    }
+
+    const baseline = {};
+    const currentValues = {};
+    const missing = [];
+
+    for (const fieldName of targetFields) {
+      try {
+        const field = resolveRuntimeField(parsedIni, fieldName);
+        const value = readRuntimeFieldFromProjectPages(currentProject, field);
+        baseline[fieldName] = {
+          page: field.page,
+          offset: field.offset,
+          length: field.length,
+          value,
+        };
+        currentValues[fieldName] = value;
+      } catch (error) {
+        missing.push({
+          field: fieldName,
+          error: error.message,
+        });
+      }
+    }
+
+    if (missing.length > 0) {
+      const nextSession = mergeRuntimeProfileSession(runtimeProfileSession, {
+        state: "Unknown",
+        fields: targetFields,
+        history: appendRuntimeProfileHistory(runtimeProfileSession, {
+          type: "baseline-capture-failed",
+          missing,
+        }),
+        lastResult: {
+          ok: false,
+          type: "baseline-capture",
+          missing,
+          capturedAt: nowIso(),
+        },
+      });
+      set({ runtimeProfileSession: nextSession });
+      throw new Error(`Baseline capture failed for ${missing.length} runtime field(s)`);
+    }
+
+    const capturedAt = nowIso();
+    const nextSession = mergeRuntimeProfileSession(runtimeProfileSession, {
+      state: "Base",
+      activeProfile: null,
+      baseline,
+      currentValues,
+      history: appendRuntimeProfileHistory(runtimeProfileSession, {
+        type: "baseline-captured",
+        fields: targetFields,
+        source: "project",
+      }),
+      fields: targetFields,
+      capturedAt,
+      lastResult: {
+        ok: true,
+        type: "baseline-capture",
+        fieldCount: targetFields.length,
+        capturedAt,
+        source: "project",
+      },
+    });
+
+    set({ runtimeProfileSession: nextSession });
+    return nextSession;
+  },
+
+  applyRuntimeProfile: async (profile) => {
+    const {
+      connection,
+      parsedIni,
+      realtime,
+      runtimeProfileSession,
+      captureRuntimeProfileBaseline,
+      captureRuntimeProfileTableBaseline,
+      readRuntimeTable,
+      writeRuntimeTable,
+      verifyRuntimeTable,
+      writeRuntimeField,
+      verifyRuntimeField,
+      rollbackRuntimeProfile,
+      setOperation,
+      updateOperation,
+      clearOperation,
+      notify,
+    } = get();
+
+    if (!profile?.name) {
+      throw new Error("Runtime profile must have a name");
+    }
+    const scalarChanges = Array.isArray(profile.changes) ? profile.changes : [];
+    const tableOverlays = Array.isArray(profile.table_overlays)
+      ? profile.table_overlays
+      : Array.isArray(profile.tableOverlays)
+        ? profile.tableOverlays
+        : [];
+
+    if (scalarChanges.length === 0 && tableOverlays.length === 0) {
+      throw new Error("Runtime profile has no changes");
+    }
+    if (connection.status !== "connected") {
+      throw new Error("Not connected");
+    }
+    if (!parsedIni) {
+      throw new Error("No INI loaded");
+    }
+
+    const requirements = {
+      ...DEFAULT_RUNTIME_PROFILE_GUARDS,
+      ...(profile.apply_requirements || {}),
+    };
+    const guard = evaluateRuntimeProfileGuards(realtime, requirements);
+    if (!guard.ok) {
+      const error = new Error(`Unsafe runtime state: ${guard.reasons.join(", ")}`);
+      error.reasons = guard.reasons;
+      throw error;
+    }
+
+    const requiredFields = Array.from(
+      new Set(scalarChanges.map((change) => change?.key).filter(Boolean)),
+    );
+    const requiredTables = Array.from(
+      new Set(tableOverlays.map((overlay) => overlay?.target).filter(Boolean)),
+    );
+
+    let session = runtimeProfileSession;
+
+    const hasFieldBaseline = requiredFields.every(
+      (fieldName) => runtimeProfileSession?.baseline?.[fieldName],
+    );
+    if (!hasFieldBaseline && requiredFields.length > 0) {
+      session = await captureRuntimeProfileBaseline(requiredFields);
+    }
+
+    const hasTableBaseline = requiredTables.every(
+      (tableName) => session?.baselineTables?.[tableName],
+    );
+    if (!hasTableBaseline && requiredTables.length > 0) {
+      session = await captureRuntimeProfileTableBaseline(requiredTables);
+    }
+
+    set({
+      runtimeProfileSession: {
+        ...session,
+        state: "Applying",
+        activeProfile: null,
+        history: appendRuntimeProfileHistory(session, {
+          type: "apply-started",
+          profile: profile.name,
+          requirements,
+          guard: guard.snapshot,
+        }),
+        lastResult: {
+          ok: true,
+          type: "apply-started",
+          profileName: profile.name,
+          startedAt: nowIso(),
+        },
+      },
+    });
+
+    const totalSteps = tableOverlays.length + scalarChanges.length;
+    let completedSteps = 0;
+    setOperation({
+      type: "runtime-profile",
+      stage: "apply",
+      label: `Applying ${profile.name}`,
+      current: 0,
+      total: totalSteps > 0 ? totalSteps : null,
+      scope: "runtime-profile",
+    });
+
+    const appliedTables = [];
+    const appliedChanges = [];
+    const changedTables = [];
+    const noopTables = [];
+    const changedFields = [];
+    const noopFields = [];
+
+    try {
+      for (const overlay of tableOverlays) {
+        if (!overlay?.target || !overlay?.source) continue;
+
+        const previousTable =
+          get().runtimeProfileSession?.currentTables?.[overlay.target] ||
+          session?.baselineTables?.[overlay.target];
+        const targetTable = resolveRuntimeTable(parsedIni, overlay.target);
+        const sourceTable = overlay.table
+          ? null
+          : await readRuntimeTable(overlay.source, { source: "project" });
+        const nextTable = overlay.table
+          ? {
+              ...overlay.table,
+              key: targetTable.logicalName,
+              label: targetTable.label,
+              tableId: targetTable.tableId,
+              page: targetTable.page,
+              xBinsVar: targetTable.xBinsVar,
+              yBinsVar: targetTable.yBinsVar,
+              zBinsVar: targetTable.zBinsVar,
+              rows: targetTable.rows,
+              cols: targetTable.cols,
+              operation: overlay.operation || overlay.table.operation || "preset",
+              source: overlay.source || overlay.table.source || "preset",
+              value: overlay.value ?? overlay.table.value ?? null,
+              rawValues: Array.from(overlay.table.rawValues || []),
+              rawRpmAxis: Array.from(
+                overlay.table.rawRpmAxis || previousTable?.rawRpmAxis || [],
+              ),
+              rawLoadAxis: Array.from(
+                overlay.table.rawLoadAxis || previousTable?.rawLoadAxis || [],
+              ),
+              displayValues: overlay.table.displayValues || previousTable?.displayValues || [],
+              displayRpmAxis:
+                overlay.table.displayRpmAxis || previousTable?.displayRpmAxis || [],
+              displayLoadAxis:
+                overlay.table.displayLoadAxis || previousTable?.displayLoadAxis || [],
+            }
+          : buildRuntimeTableOverlay(
+              sourceTable,
+              targetTable,
+              overlay,
+              previousTable,
+            );
+        const tableUnchanged = runtimeTablesEqual(previousTable, nextTable);
+
+        if (tableUnchanged) {
+          const diff = summarizeRuntimeTableDiff(previousTable, nextTable);
+          appliedTables.push({
+            ...nextTable,
+            changedCells: diff.changedCells,
+            axesChanged: diff.axesChanged,
+          });
+
+          set({
+            runtimeProfileSession: {
+              ...get().runtimeProfileSession,
+              history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+                type: "table-noop",
+                profile: profile.name,
+                table: overlay.target,
+                source: overlay.source,
+                operation: overlay.operation || "copy",
+                value: overlay.value ?? null,
+                changedCells: diff.changedCells,
+                axesChanged: diff.axesChanged,
+              }),
+            },
+          });
+
+          noopTables.push(overlay.target);
+          completedSteps += 1;
+          updateOperation({
+            stage: `table-noop:${overlay.target}`,
+            label: `${targetTable.label || overlay.target} already matches`,
+            current: completedSteps,
+            total: totalSteps > 0 ? totalSteps : null,
+          });
+          continue;
+        }
+
+        updateOperation({
+          stage: `writing-table:${overlay.target}`,
+          label: `Writing ${targetTable.label || overlay.target}`,
+          current: completedSteps,
+          total: totalSteps > 0 ? totalSteps : null,
+        });
+        await writeRuntimeTable(overlay.target, nextTable);
+        updateOperation({
+          stage: `verifying-table:${overlay.target}`,
+          label: `Verifying ${targetTable.label || overlay.target}`,
+          current: completedSteps,
+          total: totalSteps > 0 ? totalSteps : null,
+        });
+        const verification = await verifyRuntimeTable(overlay.target, nextTable);
+        if (!verification.matches) {
+          const mismatch = summarizeExpectedActualTableDiff(nextTable, verification);
+          set({
+            runtimeProfileSession: {
+              ...get().runtimeProfileSession,
+              history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+                type: "table-mismatch",
+                profile: profile.name,
+                table: overlay.target,
+                expectedSample: Array.from(nextTable.rawValues || []).slice(0, 8),
+                actualSample: Array.from(verification.rawValues || []).slice(0, 8),
+                expectedAxisSample: {
+                  rpm: Array.from(nextTable.rawRpmAxis || []).slice(0, 4),
+                  load: Array.from(nextTable.rawLoadAxis || []).slice(0, 4),
+                },
+                actualAxisSample: {
+                  rpm: Array.from(verification.rawRpmAxis || []).slice(0, 4),
+                  load: Array.from(verification.rawLoadAxis || []).slice(0, 4),
+                },
+                mismatch,
+              }),
+            },
+          });
+          throw new Error(`Readback mismatch for ${overlay.target}`);
+        }
+
+        const diff = summarizeRuntimeTableDiff(previousTable, nextTable);
+        appliedTables.push({
+          ...nextTable,
+          changedCells: diff.changedCells,
+          axesChanged: diff.axesChanged,
+        });
+
+        set({
+          runtimeProfileSession: {
+            ...get().runtimeProfileSession,
+            history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+              type: diff.changed ? "table-changed" : "table-noop",
+              profile: profile.name,
+              table: overlay.target,
+              source: overlay.source,
+              operation: overlay.operation || "copy",
+              changedCells: diff.changedCells,
+              axesChanged: diff.axesChanged,
+              summary:
+                summarizeAppliedRuntimeTable({
+                  ...nextTable,
+                  changedCells: diff.changedCells,
+                  axesChanged: diff.axesChanged,
+                }).summary,
+            }),
+          },
+        });
+
+        if (diff.changed) {
+          changedTables.push(overlay.target);
+        } else {
+          noopTables.push(overlay.target);
+        }
+
+        completedSteps += 1;
+        updateOperation({
+          stage: `table-complete:${overlay.target}`,
+          label: `Applied ${targetTable.label || overlay.target}`,
+          current: completedSteps,
+          total: totalSteps > 0 ? totalSteps : null,
+        });
+      }
+
+      for (const change of scalarChanges) {
+        if (!change?.key) continue;
+
+        const previousValue =
+          get().runtimeProfileSession?.currentValues?.[change.key] ??
+          get().runtimeProfileSession?.baseline?.[change.key]?.value;
+        const changed = !runtimeFieldValuesEqual(previousValue, change.value);
+
+        if (!changed) {
+          set({
+            runtimeProfileSession: {
+              ...get().runtimeProfileSession,
+              history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+                type: "field-noop",
+                profile: profile.name,
+                field: change.key,
+                value: change.value,
+                previous: previousValue,
+              }),
+            },
+          });
+
+          appliedChanges.push({
+            key: change.key,
+            value: change.value,
+          });
+          noopFields.push(change.key);
+          completedSteps += 1;
+          updateOperation({
+            stage: `field-noop:${change.key}`,
+            label: `${change.key} already matches`,
+            current: completedSteps,
+            total: totalSteps > 0 ? totalSteps : null,
+          });
+          continue;
+        }
+
+        updateOperation({
+          stage: `writing-field:${change.key}`,
+          label: `Applying ${change.key}`,
+          current: completedSteps,
+          total: totalSteps > 0 ? totalSteps : null,
+        });
+        await writeRuntimeField(change.key, change.value);
+        updateOperation({
+          stage: `verifying-field:${change.key}`,
+          label: `Verifying ${change.key}`,
+          current: completedSteps,
+          total: totalSteps > 0 ? totalSteps : null,
+        });
+        const verification = await verifyRuntimeField(change.key, change.value);
+        if (!verification.matches) {
+          throw new Error(`Readback mismatch for ${change.key}`);
+        }
+
+        set({
+          runtimeProfileSession: {
+            ...get().runtimeProfileSession,
+            history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+              type: changed ? "field-changed" : "field-noop",
+              profile: profile.name,
+              field: change.key,
+              value: change.value,
+              previous: previousValue,
+            }),
+          },
+        });
+
+        appliedChanges.push({
+          key: change.key,
+          value: change.value,
+        });
+
+        if (changed) {
+          changedFields.push(change.key);
+        } else {
+          noopFields.push(change.key);
+        }
+
+        completedSteps += 1;
+        updateOperation({
+          stage: `field-complete:${change.key}`,
+          label: `Applied ${change.key}`,
+          current: completedSteps,
+          total: totalSteps > 0 ? totalSteps : null,
+        });
+      }
+
+      const completedAt = nowIso();
+      const nextSession = {
+        ...get().runtimeProfileSession,
+        state: "ProfileActive",
+        activeProfile: profile.name,
+        currentTables: {
+          ...(get().runtimeProfileSession?.currentTables || {}),
+          ...Object.fromEntries(appliedTables.map((table) => [table.key, table])),
+        },
+        currentValues: {
+          ...(get().runtimeProfileSession?.currentValues || {}),
+          ...Object.fromEntries(appliedChanges.map((change) => [change.key, change.value])),
+        },
+        history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+          type: "apply-succeeded",
+          profile: profile.name,
+          tables: appliedTables.map((table) => summarizeAppliedRuntimeTable(table)),
+          changes: appliedChanges,
+          changedTables,
+          noopTables,
+          changedFields,
+          noopFields,
+        }),
+        fields: Array.from(new Set([...(session.fields || []), ...requiredFields])),
+        tables: Array.from(new Set([...(session.tables || []), ...requiredTables])),
+        lastResult: {
+          ok: true,
+          type: "apply",
+          profileName: profile.name,
+          appliedTables: appliedTables.map((table) => summarizeAppliedRuntimeTable(table)),
+          appliedChanges,
+          changedTables,
+          noopTables,
+          changedFields,
+          noopFields,
+          completedAt,
+        },
+      };
+
+      set({ runtimeProfileSession: nextSession });
+      clearOperation();
+      notify(`Runtime profile '${profile.name}' applied`, "success", 2500);
+      return nextSession;
+    } catch (error) {
+      let rollbackResult = null;
+      try {
+        rollbackResult = await rollbackRuntimeProfile({
+          tables: appliedTables.map((table) => table.key),
+          fields: appliedChanges.map((change) => change.key),
+          suppressNotify: true,
+        });
+      } catch (rollbackError) {
+        rollbackResult = {
+          ok: false,
+          error: rollbackError.message,
+        };
+      }
+
+      const failedAt = nowIso();
+      set({
+        runtimeProfileSession: {
+          ...get().runtimeProfileSession,
+          state: rollbackResult?.ok ? "Base" : "Unknown",
+          activeProfile: null,
+          history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+            type: "apply-failed",
+            profile: profile.name,
+            tables: appliedTables.map((table) => table.key),
+            changes: appliedChanges,
+            error: error.message,
+            rollback: rollbackResult,
+          }),
+          lastResult: {
+            ok: false,
+            type: "apply",
+            profileName: profile.name,
+            appliedTables: appliedTables.map((table) => table.key),
+            appliedChanges,
+            failedAt,
+            error: error.message,
+            rollback: rollbackResult,
+          },
+        },
+      });
+
+      clearOperation();
+      notify(`Runtime profile '${profile.name}' failed`, "error", 4000);
+      throw error;
+    }
+  },
+
+  rollbackRuntimeProfile: async (options = {}) => {
+    const {
+      connection,
+      runtimeProfileSession,
+      writeRuntimeTable,
+      verifyRuntimeTable,
+      writeRuntimeField,
+      verifyRuntimeField,
+      setOperation,
+      updateOperation,
+      clearOperation,
+      notify,
+    } = get();
+
+    if (connection.status !== "connected") {
+      throw new Error("Not connected");
+    }
+
+    const baseline = runtimeProfileSession?.baseline || {};
+    const baselineTables = runtimeProfileSession?.baselineTables || {};
+    const targetFields = Array.from(
+      new Set(
+        (options.fields?.length ? options.fields : runtimeProfileSession?.fields || [])
+          .filter((fieldName) => baseline[fieldName]),
+      ),
+    );
+    const targetTables = Array.from(
+      new Set(
+        (options.tables?.length ? options.tables : runtimeProfileSession?.tables || [])
+          .filter((tableName) => baselineTables[tableName]),
+      ),
+    );
+
+    if (!targetFields.length && !targetTables.length) {
+      throw new Error("No runtime profile baseline is available");
+    }
+
+    set({
+      runtimeProfileSession: {
+        ...runtimeProfileSession,
+        state: "RollingBack",
+        activeProfile: null,
+        history: appendRuntimeProfileHistory(runtimeProfileSession, {
+          type: "rollback-started",
+          fields: targetFields,
+          tables: targetTables,
+        }),
+        lastResult: {
+          ok: true,
+          type: "rollback-started",
+          startedAt: nowIso(),
+          fieldCount: targetFields.length,
+          tableCount: targetTables.length,
+        },
+      },
+    });
+
+    const totalSteps = targetTables.length + targetFields.length;
+    let completedSteps = 0;
+    setOperation({
+      type: "runtime-profile",
+      stage: "rollback",
+      label: "Returning to base",
+      current: 0,
+      total: totalSteps > 0 ? totalSteps : null,
+      scope: "runtime-profile",
+    });
+
+    const restoredTables = [];
+    for (const tableName of targetTables) {
+      const targetTable = baselineTables[tableName];
+      updateOperation({
+        stage: `restoring-table:${tableName}`,
+        label: `Restoring ${tableName}`,
+        current: completedSteps,
+        total: totalSteps > 0 ? totalSteps : null,
+      });
+      await writeRuntimeTable(tableName, targetTable);
+      updateOperation({
+        stage: `verifying-table:${tableName}`,
+        label: `Verifying ${tableName}`,
+        current: completedSteps,
+        total: totalSteps > 0 ? totalSteps : null,
+      });
+      const verification = await verifyRuntimeTable(tableName, targetTable);
+      if (!verification.matches) {
+        const failedAt = nowIso();
+        set({
+          runtimeProfileSession: {
+            ...get().runtimeProfileSession,
+            state: "Unknown",
+            activeProfile: null,
+            history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+              type: "rollback-failed",
+              table: tableName,
+              restoredTables,
+            }),
+            lastResult: {
+              ok: false,
+              type: "rollback",
+              table: tableName,
+              restoredTables,
+              failedAt,
+              error: `Readback mismatch for ${tableName}`,
+            },
+          },
+        });
+        clearOperation();
+        throw new Error(`Rollback readback mismatch for ${tableName}`);
+      }
+
+      restoredTables.push({
+        key: tableName,
+        changedCells: summarizeRuntimeTableDiff(
+          get().runtimeProfileSession?.currentTables?.[tableName],
+          targetTable,
+        ).changedCells,
+      });
+
+      set({
+        runtimeProfileSession: {
+          ...get().runtimeProfileSession,
+          history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+            type: "table-restored",
+            table: tableName,
+          }),
+        },
+      });
+
+      completedSteps += 1;
+      updateOperation({
+        stage: `table-restored:${tableName}`,
+        label: `Restored ${tableName}`,
+        current: completedSteps,
+        total: totalSteps > 0 ? totalSteps : null,
+      });
+    }
+
+    const restored = [];
+    for (const fieldName of targetFields) {
+      const targetValue = baseline[fieldName]?.value;
+      updateOperation({
+        stage: `restoring-field:${fieldName}`,
+        label: `Restoring ${fieldName}`,
+        current: completedSteps,
+        total: totalSteps > 0 ? totalSteps : null,
+      });
+      await writeRuntimeField(fieldName, targetValue);
+      updateOperation({
+        stage: `verifying-field:${fieldName}`,
+        label: `Verifying ${fieldName}`,
+        current: completedSteps,
+        total: totalSteps > 0 ? totalSteps : null,
+      });
+      const verification = await verifyRuntimeField(fieldName, targetValue);
+      if (!verification.matches) {
+        const failedAt = nowIso();
+        set({
+          runtimeProfileSession: {
+            ...get().runtimeProfileSession,
+            state: "Unknown",
+            activeProfile: null,
+            history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+              type: "rollback-failed",
+              field: fieldName,
+              restored,
+            }),
+            lastResult: {
+              ok: false,
+              type: "rollback",
+              field: fieldName,
+              restored,
+              failedAt,
+              error: `Readback mismatch for ${fieldName}`,
+            },
+          },
+        });
+        clearOperation();
+        throw new Error(`Rollback readback mismatch for ${fieldName}`);
+      }
+
+      restored.push({
+        key: fieldName,
+        value: targetValue,
+      });
+
+      set({
+        runtimeProfileSession: {
+          ...get().runtimeProfileSession,
+          history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+            type: "field-restored",
+            field: fieldName,
+            value: targetValue,
+          }),
+        },
+      });
+
+      completedSteps += 1;
+      updateOperation({
+        stage: `field-restored:${fieldName}`,
+        label: `Restored ${fieldName}`,
+        current: completedSteps,
+        total: totalSteps > 0 ? totalSteps : null,
+      });
+    }
+
+    const completedAt = nowIso();
+    const nextSession = {
+      ...get().runtimeProfileSession,
+      state: "Base",
+      activeProfile: null,
+      currentTables: {
+        ...(get().runtimeProfileSession?.currentTables || {}),
+        ...Object.fromEntries(
+          targetTables.map((tableName) => [tableName, baselineTables[tableName]]),
+        ),
+      },
+      currentValues: Object.fromEntries(
+        Object.entries(get().runtimeProfileSession?.baseline || {}).map(([fieldName, entry]) => [
+          fieldName,
+          entry?.value,
+        ]),
+      ),
+      history: appendRuntimeProfileHistory(get().runtimeProfileSession, {
+        type: "rollback-succeeded",
+        restoredTables,
+        restored,
+      }),
+      lastResult: {
+        ok: true,
+        type: "rollback",
+        restoredTables,
+        restored,
+        completedAt,
+      },
+    };
+    set({ runtimeProfileSession: nextSession });
+    clearOperation();
+
+    if (!options.suppressNotify) {
+      notify("Runtime profile rolled back to base", "success", 2500);
+    }
+
+    return {
+      ok: true,
+      restored,
+      session: nextSession,
+    };
   },
 
   burnPage: async (pageId) => {
@@ -875,6 +2578,7 @@ export const createProjectSlice = (set, get) => ({
       label: "Burning ECU pages",
       current: 0,
       total: pages.length,
+      scope: "sync",
     });
 
     serialService.suspendOutputChannelsPolling();
@@ -1012,6 +2716,7 @@ export const createProjectSlice = (set, get) => ({
       label: "Checking ECU",
       current: 0,
       total: pagesToSync.length,
+      scope: "sync",
     });
 
     serialService.suspendOutputChannelsPolling();
@@ -1201,6 +2906,7 @@ export const createProjectSlice = (set, get) => ({
         label: "Pulling from ECU",
         current: 0,
         total: pagesToSync.length,
+        scope: "sync",
       });
 
       for (let index = 0; index < pagesToSync.length; index += 1) {
@@ -1242,6 +2948,33 @@ export const createProjectSlice = (set, get) => ({
         }
       }
 
+      const refreshedTables = buildDisplayTablesFromDecodedPages(
+        parsedIni,
+        {
+          ...(get().currentProject?.constants?.decodedPages || {}),
+          ...decodedPages,
+        },
+        get().tables,
+      );
+
+      try {
+        const ve2Def = resolveRuntimeTable(parsedIni, "ve2");
+        const ve2Page = decodedPages?.[ve2Def.page];
+        const ve2Table = ve2Page
+          ? readRuntimeTableFromDecodedPage(ve2Page, ve2Def)
+          : null;
+        if (ve2Table) {
+          console.log("[ECU Sync] VE2 snapshot", {
+            rawHead: ve2Table.rawValues.slice(0, 16),
+            rawTail: ve2Table.rawValues.slice(-16),
+            rpmAxis: ve2Table.rawRpmAxis,
+            loadAxis: ve2Table.rawLoadAxis,
+          });
+        }
+      } catch (error) {
+        console.warn("[ECU Sync] Failed to inspect VE2 snapshot", error);
+      }
+
       set((s) => ({
         currentProject: {
           ...s.currentProject,
@@ -1266,7 +2999,9 @@ export const createProjectSlice = (set, get) => ({
               ...decodedPages,
             },
           },
+          tables: refreshedTables,
         },
+        tables: refreshedTables,
       }));
 
       notify("ECU Data Synchronized", "success");

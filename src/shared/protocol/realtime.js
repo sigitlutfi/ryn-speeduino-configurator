@@ -11,6 +11,7 @@
 export function parseRealtime(bytes) {
   if (!bytes || bytes.length < 138) return null;
   const isExtended = bytes.length >= 144;
+  const hasExtendedAlsTimer = bytes.length >= 145;
 
   const b = bytes;
 
@@ -107,7 +108,7 @@ export function parseRealtime(bytes) {
       alsSwitch:        !!(perfByte2 & 0x02),
       alsTimingCorr:    new Int8Array([b[141]])[0],
       alsFuelCorr:      b[142],
-      alsActiveTime:    b[143]
+      alsActiveTime:    hasExtendedAlsTimer ? (b[143] | (b[144] << 8)) : b[143]
     };
   }
 

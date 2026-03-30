@@ -44,6 +44,12 @@ const NAV_CONFIG = [
     theme: "cyan",
     items: [
       { path: ROUTES.DASHBOARD, label: "Realtime View", icon: Activity },
+      {
+        path: ROUTES.RACING_PROFILES,
+        label: "Runtime Profiles",
+        icon: ShieldAlert,
+        theme: "cyan",
+      },
       { path: ROUTES.ANALYSIS, label: "Telemetries", icon: BarChart2 },
     ],
   },
@@ -86,6 +92,11 @@ const NAV_CONFIG = [
         sub: true,
       },
       { path: ROUTES.TUNING_AFR, label: "AFR Target", icon: Ratio },
+      {
+        path: ROUTES.SETTINGS_FUEL,
+        label: "Fuel Strategy",
+        icon: Settings,
+      },
       { path: ROUTES.SETTINGS_AFR, label: "O2 Settings", icon: Settings },
       { path: ROUTES.SETTINGS_FLEX, label: "Flex Fuel", icon: FlaskConical },
       {
@@ -155,6 +166,7 @@ const NAV_CONFIG = [
         icon: Flame,
         theme: "red",
       },
+
       {
         path: ROUTES.RACING_NITROUS,
         label: "Nitrous Oxide",
@@ -347,7 +359,7 @@ export default function Sidebar() {
             <div key={group.category} className="space-y-3">
               <button
                 onClick={() => !collapsed && toggleSection(group.category)}
-                className={`w-full flex items-center rounded-2xl transition-all ${
+                className={`w-full flex items-center rounded-md transition-all ${
                   collapsed
                     ? "justify-center p-2.5"
                     : "justify-between px-2.5 py-2 hover:bg-white/5 active:bg-white/10"

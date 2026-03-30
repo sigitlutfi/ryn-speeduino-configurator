@@ -69,6 +69,7 @@ const CurveEditor = ({
   activeIdx = null,
   onHoverPoint,
   onChange,
+  onCommit,
 }) => {
   const svgRef = useRef(null);
   const [draggingIdx, setDraggingIdx] = useState(null);
@@ -202,7 +203,12 @@ const CurveEditor = ({
     ],
   );
 
-  const handleEndInteraction = () => setDraggingIdx(null);
+  const handleEndInteraction = useCallback(() => {
+    if (draggingIdx !== null && onCommit) {
+      onCommit(curveXValues, curveYValues);
+    }
+    setDraggingIdx(null);
+  }, [draggingIdx, onCommit, curveXValues, curveYValues]);
 
   useEffect(() => {
     const onMouseMove = (e) => handleMove(e.clientX, e.clientY);
@@ -223,7 +229,7 @@ const CurveEditor = ({
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", handleEndInteraction);
     };
-  }, [draggingIdx, handleMove]);
+  }, [draggingIdx, handleMove, handleEndInteraction]);
 
   const renderGrid = () => {
     const lines = [];

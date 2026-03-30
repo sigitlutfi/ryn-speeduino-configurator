@@ -461,6 +461,8 @@ export default function SurfacePlot3D({
   loadAxis = [],
   onSelect = null,
   onUpdateValue = null,
+  onEditStart = null,
+  onEditEnd = null,
 }) {
   const [hoveredPoint, setHoveredPoint] = React.useState(null);
   const [dragInfo, setDragInfo] = React.useState(null);
@@ -624,6 +626,7 @@ export default function SurfacePlot3D({
       );
 
       if (onSelect) onSelect(r, c);
+      if (onEditStart) onEditStart();
 
       setDragInfo({
         r,
@@ -677,6 +680,7 @@ export default function SurfacePlot3D({
     if (dragInfo) {
       e.target.releasePointerCapture(dragInfo.pointerId);
       setDragInfo(null);
+      if (onEditEnd) onEditEnd();
     }
   };
 

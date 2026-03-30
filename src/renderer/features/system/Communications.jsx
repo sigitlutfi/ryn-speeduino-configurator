@@ -6,12 +6,10 @@ import {
   RefreshCcw,
   Cpu,
   Activity,
-  Database,
   CheckCircle,
   AlertCircle,
   Settings,
 } from "lucide-react";
-import { motion } from "framer-motion";
 
 export default function Communications() {
   const [ports, setPorts] = useState([]);
@@ -19,22 +17,66 @@ export default function Communications() {
   const connectionPort = useStore((s) => s.connection.port);
   const connectionBaud = useStore((s) => s.connection.baud);
   const connectionError = useStore((s) => s.connection.errorMsg);
+  const lastSerialPort = useStore((s) => s.settings.lastSerialPort);
+  const lastSerialBaud = useStore((s) => s.settings.lastSerialBaud);
   const setConnectionStatus = useStore((s) => s.setConnectionStatus);
   const setConnectionPort = useStore((s) => s.setConnectionPort);
   const setConnectionBaud = useStore((s) => s.setConnectionBaud);
+  const updateSettings = useStore((s) => s.updateSettings);
+
+  const hydratePorts = async () => {
+    const nextPorts = await window.serial.listPorts();
+    setPorts(nextPorts);
+
+    if (connectionPort || !lastSerialPort) return;
+
+    const rememberedPort = nextPorts.find((port) => port.path === lastSerialPort);
+    if (rememberedPort) {
+      setConnectionPort(lastSerialPort);
+      if (lastSerialBaud) {
+        setConnectionBaud(Number(lastSerialBaud));
+      }
+    }
+  };
 
   useEffect(() => {
-    window.serial.listPorts().then(setPorts);
-  }, []);
+    let alive = true;
+
+    hydratePorts().catch((error) => {
+      if (!alive) return;
+      console.warn("[Communications] Failed to load serial ports", error);
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [connectionPort, lastSerialPort, setConnectionPort]);
 
   const handleConnect = async () => {
     if (!connectionPort) return;
+    console.log("[Communications] Connect requested", {
+      port: connectionPort,
+      baud: connectionBaud,
+    });
     setConnectionStatus("connecting");
     const result = await window.serial.connect(
       connectionPort,
       connectionBaud,
     );
-    if (!result.ok) setConnectionStatus("error", result.error);
+    console.log("[Communications] Connect result", result);
+    if (!result.ok) {
+      setConnectionStatus("error", result.error);
+      return;
+    }
+
+    try {
+      await updateSettings({
+        lastSerialPort: connectionPort,
+        lastSerialBaud: connectionBaud,
+      });
+    } catch (error) {
+      console.warn("[Communications] Failed to persist last serial port", error);
+    }
   };
 
   const handleDisconnect = async () => {
@@ -46,7 +88,7 @@ export default function Communications() {
   const isConnecting = connectionStatus === "connecting";
 
   return (
-    <div className="p-10 max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="h-full overflow-y-auto custom-scrollbar p-10 max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-orbitron font-bold text-white uppercase tracking-[0.2em]">
@@ -96,7 +138,7 @@ export default function Communications() {
                   ))}
                 </select>
                 <button
-                  onClick={() => window.serial.listPorts().then(setPorts)}
+                  onClick={() => hydratePorts()}
                   className="p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-gray-400 transition-all"
                 >
                   <RefreshCcw size={16} />
@@ -207,6 +249,7 @@ export default function Communications() {
           </div>
         </div>
       </div>
+
     </div>
   );
 }

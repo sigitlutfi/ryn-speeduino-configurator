@@ -2,29 +2,27 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../../../core/store.js";
 import CurveEditor from "../../../ui/CurveEditor";
 import { Activity } from "lucide-react";
+import { getDecodedPage } from "../../shared/utils/projectConstants.js";
+import { getVarMetadata } from "../../../../shared/ini-parser.js";
+
+function normalizeCurveArray(value, fallback) {
+  if (Array.isArray(value)) return value;
+  return fallback;
+}
 
 export default function DwellVoltageCurve() {
   const currentProject = useStore((s) => s.currentProject);
+  const parsedIni = useStore((s) => s.parsedIni);
   const updateConstants = useStore((s) => s.updateConstants);
   const constants = currentProject?.constants;
-
-  const pages = constants?.pages || {};
-  let pageId = null;
-  let pData = null;
-  if (pages[1]?.brvBins) {
-    pageId = 1;
-    pData = pages[1];
-  } else if (pages[2]?.brvBins) {
-    pageId = 2;
-    pData = pages[2];
-  } else {
-    pageId = 1;
-    pData = pages[1] || {};
-  }
+  const xPageId = getVarMetadata(parsedIni, "brvBins")?.page ?? 6;
+  const yPageId = getVarMetadata(parsedIni, "dwellRates")?.page ?? 4;
+  const xPageData = getDecodedPage(constants, xPageId) || {};
+  const yPageData = getDecodedPage(constants, yPageId) || {};
 
   // brvBins stored as V*10 (e.g. 60=6.0V), dwellRates as percent (0-255)
-  const rawX = pData?.brvBins || [60, 92, 124, 156, 188, 220];
-  const rawY = pData?.dwellRates || [102, 102, 100, 100, 95, 80];
+  const rawX = normalizeCurveArray(xPageData?.brvBins, [60, 92, 124, 156, 188, 220]);
+  const rawY = normalizeCurveArray(yPageData?.dwellRates, [102, 102, 100, 100, 95, 80]);
 
   // Local display state (scaled for human readability)
   const [xValues, setXValues] = useState(() => rawX.map((v) => v / 10));
@@ -38,17 +36,20 @@ export default function DwellVoltageCurve() {
 
   const [hoverIdx, setHoverIdx] = useState(null);
 
-  // CurveEditor calls onChange(fullXArray, fullYArray) -- NOT (idx, x, y)
   const handleCurveChange = (newX, newY) => {
     setXValues(newX);
     setYValues(newY);
-    if (!pageId) return;
+  };
+
+  const handleCurveCommit = (newX, newY) => {
     updateConstants({
       pages: {
-        ...(constants?.pages || {}),
-        [pageId]: {
-          ...pData,
+        [xPageId]: {
+          ...xPageData,
           brvBins: newX.map((v) => Math.round(v * 10)),
+        },
+        [yPageId]: {
+          ...yPageData,
           dwellRates: newY.map((v) => Math.round(v)),
         },
       },
@@ -86,6 +87,7 @@ export default function DwellVoltageCurve() {
           activeIdx={hoverIdx}
           onHoverPoint={setHoverIdx}
           onChange={handleCurveChange}
+          onCommit={handleCurveCommit}
         />
       </div>
       <div className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-medium text-white/50 leading-relaxed font-inter">

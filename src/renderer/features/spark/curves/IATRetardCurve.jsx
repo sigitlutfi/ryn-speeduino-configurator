@@ -2,31 +2,24 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../../../core/store.js";
 import CurveEditor from "../../../ui/CurveEditor";
 import { Thermometer } from "lucide-react";
+import { getDecodedPage } from "../../shared/utils/projectConstants.js";
+import { getVarMetadata } from "../../../../shared/ini-parser.js";
+
+function normalizeCurveArray(value, fallback) {
+  if (Array.isArray(value)) return value;
+  return fallback;
+}
 
 export default function IATRetardCurve() {
   const currentProject = useStore((s) => s.currentProject);
+  const parsedIni = useStore((s) => s.parsedIni);
   const updateConstants = useStore((s) => s.updateConstants);
   const constants = currentProject?.constants;
+  const pageId = getVarMetadata(parsedIni, "iatRetBins")?.page ?? 1;
+  const pData = getDecodedPage(constants, pageId) || {};
 
-  const pages = constants?.pages || {};
-  let pageId = null;
-  let pData = null;
-  if (pages[1]?.iatRetBins) {
-    pageId = 1;
-    pData = pages[1];
-  } else if (pages[2]?.iatRetBins) {
-    pageId = 2;
-    pData = pages[2];
-  } else if (pages[4]?.iatRetBins) {
-    pageId = 4;
-    pData = pages[4];
-  } else {
-    pageId = 1;
-    pData = pages[1] || {};
-  }
-
-  const rawX = pData?.iatRetBins || [20, 40, 60, 80, 100, 120];
-  const rawY = pData?.iatRetRates || [0, 0, 2, 4, 6, 10];
+  const rawX = normalizeCurveArray(pData?.iatRetBins, [20, 40, 60, 80, 100, 120]);
+  const rawY = normalizeCurveArray(pData?.iatRetRates, [0, 0, 2, 4, 6, 10]);
 
   const [xValues, setXValues] = useState(() => [...rawX]);
   const [yValues, setYValues] = useState(() => [...rawY]);
@@ -38,14 +31,15 @@ export default function IATRetardCurve() {
 
   const [hoverIdx, setHoverIdx] = useState(null);
 
-  // CurveEditor calls onChange(fullXArray, fullYArray)
   const handleCurveChange = (newX, newY) => {
     setXValues(newX);
     setYValues(newY);
+  };
+
+  const handleCurveCommit = (newX, newY) => {
     if (!pageId) return;
     updateConstants({
       pages: {
-        ...(constants?.pages || {}),
         [pageId]: {
           ...pData,
           iatRetBins: newX.map((v) => Math.round(v)),
@@ -87,6 +81,7 @@ export default function IATRetardCurve() {
           activeIdx={hoverIdx}
           onHoverPoint={setHoverIdx}
           onChange={handleCurveChange}
+          onCommit={handleCurveCommit}
         />
       </div>
       <div className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-medium text-white/50 leading-relaxed font-inter">

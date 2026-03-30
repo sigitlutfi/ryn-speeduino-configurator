@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   backgroundImage: null,
   backgroundBlur: 15,
   backgroundOpacity: 40,
+  lastSerialPort: null,
+  lastSerialBaud: 115200,
   autoReconnect: true,
   logDirectory: null,
   soundEnabled: true,

@@ -1,7 +1,26 @@
-import { useEffect, useMemo, useCallback } from "react";
+import { useEffect, useMemo, useCallback, useRef } from "react";
 import { useStore } from "../../../core/store.js";
 import { getTableMetadata, getVarMetadata } from "../../../../shared/ini-parser.js";
 import { getDecodedPage } from "../utils/projectConstants.js";
+import { toDisplay, toRaw } from "../utils/normalization.js";
+
+function arraysEqual(a = [], b = []) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function matricesEqual(a = [], b = []) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (!arraysEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
 
 /**
  * useTableSync Hook
@@ -28,8 +47,34 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
   const saveProject = useStore((s) => s.saveProject);
   const notify = useStore((s) => s.notify);
   const connection = useStore((s) => s.connection);
+  const tableStateRef = useRef(tableState);
+
+  useEffect(() => {
+    tableStateRef.current = tableState;
+  }, [tableState]);
+
+  const DIRTY_SYNC_STATES = useMemo(
+    () =>
+      new Set([
+        "dirty-local",
+        "write-pending",
+        "burn-pending",
+        "different",
+        "verify-failed",
+        "unknown",
+      ]),
+    [],
+  );
 
   const meta = useMemo(() => getTableMetadata(parsedIni, iniTableId), [parsedIni, iniTableId]);
+  const xMeta = useMemo(
+    () => (meta?.xBinsVar ? getVarMetadata(parsedIni, meta.xBinsVar) : null),
+    [parsedIni, meta?.xBinsVar],
+  );
+  const yMeta = useMemo(
+    () => (meta?.yBinsVar ? getVarMetadata(parsedIni, meta.yBinsVar) : null),
+    [parsedIni, meta?.yBinsVar],
+  );
 
   const scaling = useMemo(() => {
     if (!meta) return { scale: 1, offset: 0, digits: 0 };
@@ -41,6 +86,16 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
       shape: zDef?.shape
     };
   }, [meta, parsedIni]);
+
+  const normalizeAxisValues = useCallback((rawValues, axisMeta) => {
+    if (!Array.isArray(rawValues)) return rawValues;
+    return toDisplay(rawValues, axisMeta) ?? rawValues;
+  }, []);
+
+  const denormalizeAxisValues = useCallback((displayValues, axisMeta) => {
+    if (!Array.isArray(displayValues)) return displayValues;
+    return toRaw(displayValues, axisMeta) ?? displayValues;
+  }, []);
 
   // Normalization (Raw -> Display)
   useEffect(() => {
@@ -73,14 +128,25 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
 
       const xData = pageData[meta.xBinsVar];
       const yData = pageData[meta.yBinsVar];
+      const currentTableState = tableStateRef.current || {};
+      const nextRpmAxis = xData ? normalizeAxisValues(xData, xMeta) : currentTableState?.rpmAxis;
+      const nextLoadAxis = yData ? normalizeAxisValues(yData, yMeta) : currentTableState?.loadAxis;
 
-      updateTable(storeKey, { 
-         values: matrix, 
-         rpmAxis: xData || tableState?.rpmAxis, 
-         loadAxis: yData || tableState?.loadAxis 
+      const sameValues = matricesEqual(matrix, currentTableState?.values || []);
+      const sameRpmAxis = arraysEqual(nextRpmAxis, currentTableState?.rpmAxis || []);
+      const sameLoadAxis = arraysEqual(nextLoadAxis, currentTableState?.loadAxis || []);
+
+      if (sameValues && sameRpmAxis && sameLoadAxis) {
+        return;
+      }
+
+      updateTable(storeKey, {
+         values: matrix,
+         rpmAxis: nextRpmAxis,
+         loadAxis: nextLoadAxis,
       });
     }
-  }, [meta, constants, scaling, storeKey, options.transform?.toDisplay]);
+  }, [meta, constants, scaling, storeKey, options.transform?.toDisplay, updateTable, normalizeAxisValues, xMeta, yMeta]);
 
   // Denormalization & Save
   const handleSave = useCallback(async (isBurn = false) => {
@@ -94,10 +160,14 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
     });
 
     const pageData = getDecodedPage(constants, meta.page);
+    const rawRpmAxis = denormalizeAxisValues(tableState?.rpmAxis || [], xMeta);
+    const rawLoadAxis = denormalizeAxisValues(tableState?.loadAxis || [], yMeta);
 
     await updateConstants({
       [meta.page]: {
         ...pageData,
+        [meta.xBinsVar]: rawRpmAxis,
+        [meta.yBinsVar]: rawLoadAxis,
         [meta.zBinsVar]: rawValues,
       },
     });
@@ -132,18 +202,31 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
       notify(`Save Failed: ${result.error}`, "error");
     }
     return result;
-  }, [meta, tableState?.values, scaling, constants, updateConstants, writePagesToRAM, burnPendingPages, saveProject, notify, options.transform?.toRaw, connection.status]);
+  }, [meta, tableState?.values, tableState?.rpmAxis, tableState?.loadAxis, scaling, constants, updateConstants, writePagesToRAM, burnPendingPages, saveProject, notify, options.transform?.toRaw, connection.status, denormalizeAxisValues, xMeta, yMeta]);
 
   const isDirty = useMemo(() => {
     if (!meta || !constants) return false;
+
+    const pageSnapshot =
+      constants?.pages?.[meta.page] || constants?.pages?.[String(meta.page)];
+    if (DIRTY_SYNC_STATES.has(pageSnapshot?.syncState)) return true;
+
     const original = getDecodedPage(constants, meta.page)?.[meta.zBinsVar];
+    const originalRpmAxis = getDecodedPage(constants, meta.page)?.[meta.xBinsVar];
+    const originalLoadAxis = getDecodedPage(constants, meta.page)?.[meta.yBinsVar];
     if (!original) return false;
     const currentRaw = tableState.values.flat().map(v => {
         if (options.transform?.toRaw) return options.transform.toRaw(v, scaling);
         return Math.round((v - scaling.offset) / scaling.scale);
     });
-    return JSON.stringify(currentRaw) !== JSON.stringify(Array.from(original));
-  }, [tableState?.values, constants, meta, scaling, options.transform?.toRaw]);
+    const currentRawRpmAxis = denormalizeAxisValues(tableState?.rpmAxis || [], xMeta);
+    const currentRawLoadAxis = denormalizeAxisValues(tableState?.loadAxis || [], yMeta);
+    return (
+      JSON.stringify(currentRaw) !== JSON.stringify(Array.from(original)) ||
+      JSON.stringify(currentRawRpmAxis) !== JSON.stringify(Array.from(originalRpmAxis || [])) ||
+      JSON.stringify(currentRawLoadAxis) !== JSON.stringify(Array.from(originalLoadAxis || []))
+    );
+  }, [tableState?.values, tableState?.rpmAxis, tableState?.loadAxis, constants, meta, scaling, options.transform?.toRaw, DIRTY_SYNC_STATES, denormalizeAxisValues, xMeta, yMeta]);
 
   return {
     values: tableState?.values || [],

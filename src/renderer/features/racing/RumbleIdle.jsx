@@ -14,7 +14,6 @@ const RUMBLE_IDLE_FIELDS = [
   "rumbleIdleMinRPM",
   "rumbleIdleMaxRPM",
   "rumbleIdleMaxTPS",
-  "rumbleIdleDutyCycle",
   "rumbleIdleFrequency",
   "rumbleIdleMinCLT",
   "rumbleIdlePatternBits",
@@ -217,11 +216,12 @@ export default function RumbleIdle() {
                      onChange={(val) => updateValue("rumbleIdleMinCLT", val)}
                      units="°C"
                   />
-                  <InputField 
-                     label="Min Speed"
+                  <SelectRow
+                     label="Min Speed (km/h, 16-step)"
                      value={getValue("rumbleIdleMinVSS")}
                      onChange={(val) => updateValue("rumbleIdleMinVSS", val)}
-                     units="KM/H"
+                     options={getFieldInfo("rumbleIdleMinVSS")?.meta?.options}
+                     description="Stored in 16 km/h steps to match current firmware behavior"
                   />
                </div>
             </div>

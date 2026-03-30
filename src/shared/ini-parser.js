@@ -86,7 +86,9 @@ function parseBitRange(token) {
  * Returns null if not a shape.
  */
 function parseShape(token) {
-  const m = token.trim().match(/^\[(\d+)(?:x(\d+))?\]$/i);
+  const m = token
+    .trim()
+    .match(/^\[\s*(\d+)\s*(?:x\s*(\d+)\s*)?\]$/i);
   if (!m) return null;
   return m[2] ? [parseInt(m[1], 10), parseInt(m[2], 10)] : [parseInt(m[1], 10)];
 }
@@ -297,9 +299,12 @@ export function parseIni(content, preprocessorSymbols = {}) {
         else if (name === "nPages")
           result.constants.nPages = parseInt(rest, 10);
         else if (name === "pageSize")
-          result.constants.pageSizes = rest
-            .split(",")
-            .map((s) => parseInt(s.trim(), 10));
+          result.constants.pageSizes = [
+            0,
+            ...rest
+              .split(",")
+              .map((s) => parseInt(s.trim(), 10)),
+          ];
         continue;
       }
 

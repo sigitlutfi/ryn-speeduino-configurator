@@ -93,7 +93,7 @@ export class ModernProtocolParser {
   _parseMessages() {
     while (this.buffer.length > 0) {
       // Realtime packets are NOT wrapped (legacy format, broadcast at 10Hz)
-      if (this.buffer.length === 138 || this.buffer.length === 144) {
+      if (this.buffer.length === 145) {
         // This looks like a realtime packet
         const packet = this.buffer.slice(0, this.buffer.length);
         this._emit("realtime", packet);

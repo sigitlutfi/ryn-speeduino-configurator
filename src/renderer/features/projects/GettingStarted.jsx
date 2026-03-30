@@ -248,7 +248,7 @@ export default function GettingStarted() {
         {recentProject && (
           <button
             onClick={() => setProject(recentProject)}
-            className="w-full group relative overflow-hidden p-8 glass border border-neon-green/20 rounded-3xl hover:border-neon-green/40 hover:bg-neon-green/5 transition-all text-left"
+            className="w-full group relative overflow-hidden p-8  rounded-3xl hover:border-neon-green/40 hover:bg-neon-green/15 hover:backdrop-blur-xl backdrop-blur-xl transition-all text-left"
           >
             <div className="flex items-center gap-6">
               <div className="w-14 h-14 rounded-2xl bg-neon-green/10 flex items-center justify-center text-neon-green border border-neon-green/20 group-hover:scale-110 transition-transform">
@@ -341,7 +341,7 @@ export default function GettingStarted() {
                 >
                   <button
                     onClick={() => setProject(p)}
-                    className={`w-full glass border border-white/5 rounded-2xl p-4 hover:bg-white/5 transition-all text-left flex items-center gap-4 ${
+                    className={`w-full glass border border-white/5 rounded-2xl p-4 hover:bg-white/5 hover:backdrop-blur-md transition-all text-left flex items-center gap-4 ${
                       p.color === "cyan"
                         ? "hover:border-neon-cyan/30"
                         : p.color === "purple"

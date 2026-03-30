@@ -32,7 +32,8 @@ export default function AntiLag() {
 
   const { realtime } = useStore();
   const isActive = realtime?.performance?.alsActive;
-  const activeTime = realtime?.performance?.alsActiveTime;
+  const activeTimeMs = realtime?.performance?.alsActiveTime ?? 0;
+  const activeTimeSeconds = activeTimeMs / 1000;
 
   const getValue = (name) => {
     const info = getFieldInfo(name);
@@ -100,7 +101,7 @@ export default function AntiLag() {
                 <div className="flex flex-col gap-1 items-center">
                    <span className="text-[7px] font-black text-white/40 uppercase tracking-widest">Cycle Timer</span>
                    <span className={`text-xs font-orbitron font-black uppercase ${isActive ? 'text-white' : 'text-white/20'}`}>
-                      {activeTime / 10}S <span className="text-[8px] opacity-40">ELAPSED</span>
+                      {activeTimeSeconds.toFixed(activeTimeSeconds < 10 ? 1 : 0)}S <span className="text-[8px] opacity-40">ELAPSED</span>
                    </span>
                 </div>
              </div>

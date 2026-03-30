@@ -13,7 +13,8 @@ import {
   ChevronRight,
   MousePointer2,
   Maximize2,
-  Minimize2,
+  Undo2,
+  Redo2,
   Calculator,
   Grid,
   Activity,
@@ -48,6 +49,9 @@ const TuningGrid = ({
   const [editingAxis, setEditingAxis] = useState(null); // { type: 'rpm'|'load', index }
   const [showContextMenu, setShowContextMenu] = useState(null); // { x, y }
   const [viewMode, setViewMode] = useState("grid"); // 'grid' | '3d'
+  const [setValueInput, setSetValueInput] = useState("");
+  const [addValueInput, setAddValueInput] = useState("1");
+  const [multiplyValueInput, setMultiplyValueInput] = useState("100");
 
   // Undo/Redo state
   const [showSecondary, setShowSecondary] = useState(false);
@@ -55,6 +59,21 @@ const TuningGrid = ({
   const [future, setFuture] = useState([]);
 
   const containerRef = useRef(null);
+  const valuesRef = useRef(values);
+  const rpmAxisRef = useRef(rpmAxis);
+  const loadAxisRef = useRef(loadAxis);
+  const drag3DSessionRef = useRef(false);
+  const contextMenuSizeRef = useRef({ width: 256, height: 260 });
+  const setValueInputRef = useRef(null);
+  const addValueInputRef = useRef(null);
+  const multiplyValueInputRef = useRef(null);
+  const contextMenuRef = useRef(null);
+
+  useEffect(() => {
+    valuesRef.current = values;
+    rpmAxisRef.current = rpmAxis;
+    loadAxisRef.current = loadAxis;
+  }, [values, rpmAxis, loadAxis]);
 
   // Normalize selection bounds (ensure r1 <= r2)
   const normS = useMemo(() => {
@@ -71,6 +90,56 @@ const TuningGrid = ({
     if (!normS) return false;
     return r >= normS.r1 && r <= normS.r2 && c >= normS.c1 && c <= normS.c2;
   };
+
+  const selectionInfo = useMemo(() => {
+    if (!normS) return null;
+
+    const rows = normS.r2 - normS.r1 + 1;
+    const cols = normS.c2 - normS.c1 + 1;
+    const selectedValues = [];
+    for (let r = normS.r1; r <= normS.r2; r += 1) {
+      for (let c = normS.c1; c <= normS.c2; c += 1) {
+        const value = values?.[r]?.[c];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          selectedValues.push(value);
+        }
+      }
+    }
+
+    const sum = selectedValues.reduce((acc, value) => acc + value, 0);
+    return {
+      rows,
+      cols,
+      cells: rows * cols,
+      min: selectedValues.length > 0 ? Math.min(...selectedValues) : null,
+      max: selectedValues.length > 0 ? Math.max(...selectedValues) : null,
+      average: selectedValues.length > 0 ? sum / selectedValues.length : null,
+    };
+  }, [normS, values]);
+
+  const selectionRange = useCallback(() => {
+    if (!normS) return null;
+    return {
+      startRow: normS.r1,
+      startCol: normS.c1,
+      endRow: normS.r2,
+      endCol: normS.c2,
+    };
+  }, [normS]);
+
+  const clearSelection = useCallback(() => {
+    setSelection(null);
+    setShowContextMenu(null);
+  }, []);
+
+  const handleEmptyAreaMouseDown = useCallback(
+    (e) => {
+      if (e.button !== 0) return;
+      if (e.target !== e.currentTarget) return;
+      clearSelection();
+    },
+    [clearSelection],
+  );
 
   const handleMouseDown = (r, c, e) => {
     if (e.button !== 0) return; // Left click only
@@ -93,6 +162,18 @@ const TuningGrid = ({
     window.addEventListener("mouseup", handleMouseUp);
     return () => window.removeEventListener("mouseup", handleMouseUp);
   }, []);
+
+  useEffect(() => {
+    if (!showContextMenu) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (contextMenuRef.current?.contains(event.target)) return;
+      setShowContextMenu(null);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [showContextMenu]);
 
   const heatColor = (val) => {
     if (val === undefined) return "transparent";
@@ -132,45 +213,99 @@ const TuningGrid = ({
   };
 
   const handleInterpolate = () => {
-    if (!normS) return;
-    const newValues = interpolateBlock(values, {
-      startRow: normS.r1,
-      startCol: normS.c1,
-      endRow: normS.r2,
-      endCol: normS.c2,
-    });
+    const range = selectionRange();
+    if (!range) return;
+    const newValues = interpolateBlock(values, range);
     updateWithHistory({ values: newValues });
     setShowContextMenu(null);
   };
 
   const handleMath = (op, amount) => {
-    if (!normS) return;
-    const newValues = applyMathOp(
-      values,
-      {
-        startRow: normS.r1,
-        startCol: normS.c1,
-        endRow: normS.r2,
-        endCol: normS.c2,
-      },
-      op,
-      amount,
-    );
+    const range = selectionRange();
+    if (!range) return;
+    const newValues = applyMathOp(values, range, op, amount);
     updateWithHistory({ values: newValues });
     setShowContextMenu(null);
   };
 
   const handleSmooth = () => {
-    if (!normS) return;
-    const newValues = smoothBlock(values, {
-      startRow: normS.r1,
-      startCol: normS.c1,
-      endRow: normS.r2,
-      endCol: normS.c2,
-    });
+    const range = selectionRange();
+    if (!range) return;
+    const newValues = smoothBlock(values, range);
     updateWithHistory({ values: newValues });
     setShowContextMenu(null);
   };
+
+  const handleSetValue = () => {
+    const range = selectionRange();
+    if (!range) return;
+    const nextValue = Number.parseFloat(setValueInput);
+    if (!Number.isFinite(nextValue)) return;
+    const newValues = values.map((row, ri) =>
+      row.map((cell, ci) =>
+        ri >= range.startRow &&
+        ri <= range.endRow &&
+        ci >= range.startCol &&
+        ci <= range.endCol
+          ? nextValue
+          : cell,
+      ),
+    );
+    updateWithHistory({ values: newValues });
+    setShowContextMenu(null);
+  };
+
+  const openSetValueEditor = useCallback(() => {
+    setShowContextMenu(null);
+    window.requestAnimationFrame(() => {
+      setValueInputRef.current?.focus();
+      setValueInputRef.current?.select?.();
+      setValueInputRef.current?.scrollIntoView?.({
+        block: "nearest",
+        behavior: "smooth",
+      });
+    });
+  }, []);
+
+  const focusSelectionInput = useCallback((target) => {
+    const refMap = {
+      set: setValueInputRef,
+      add: addValueInputRef,
+      multiply: multiplyValueInputRef,
+    };
+
+    setShowContextMenu(null);
+    window.requestAnimationFrame(() => {
+      refMap[target]?.current?.focus();
+      refMap[target]?.current?.select?.();
+      refMap[target]?.current?.scrollIntoView?.({
+        block: "nearest",
+        behavior: "smooth",
+      });
+    });
+  }, []);
+
+  const handleContextSetValue = useCallback(() => {
+    const nextValue = Number.parseFloat(setValueInput);
+    if (Number.isFinite(nextValue)) {
+      handleSetValue();
+      return;
+    }
+    openSetValueEditor();
+  }, [setValueInput, openSetValueEditor]);
+
+  const clampContextMenuPosition = useCallback((x, y) => {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const menuWidth = contextMenuSizeRef.current.width;
+    const menuHeight = contextMenuSizeRef.current.height;
+    const gutter = 12;
+
+    return {
+      x: Math.max(gutter, Math.min(x, viewportWidth - menuWidth - gutter)),
+      y: Math.max(gutter, Math.min(y, viewportHeight - menuHeight - gutter)),
+    };
+  }, []);
 
   // History wrappers
   const updateWithHistory = (newPartial) => {
@@ -179,6 +314,24 @@ const TuningGrid = ({
     setFuture([]);
     onUpdate(newPartial);
   };
+
+  const begin3DChange = useCallback(() => {
+    if (drag3DSessionRef.current) return;
+    drag3DSessionRef.current = true;
+    setHistory((prev) => [
+      {
+        values: valuesRef.current,
+        rpmAxis: rpmAxisRef.current,
+        loadAxis: loadAxisRef.current,
+      },
+      ...prev.slice(0, 49),
+    ]);
+    setFuture([]);
+  }, []);
+
+  const end3DChange = useCallback(() => {
+    drag3DSessionRef.current = false;
+  }, []);
 
   const handleUndo = useCallback(() => {
     if (history.length === 0) return;
@@ -240,8 +393,32 @@ const TuningGrid = ({
         handleRedo();
         return;
       }
+      if (e.altKey && e.key === "1") {
+        e.preventDefault();
+        focusSelectionInput("set");
+        return;
+      }
+      if (e.altKey && e.key === "2") {
+        e.preventDefault();
+        focusSelectionInput("add");
+        return;
+      }
+      if (e.altKey && e.key === "3") {
+        e.preventDefault();
+        focusSelectionInput("multiply");
+        return;
+      }
 
       if (editing) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        clearSelection();
+        setEditing(null);
+        setEditingAxis(null);
+        return;
+      }
+
       if (!normS) return;
 
       // 2. Map Ops
@@ -306,12 +483,22 @@ const TuningGrid = ({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [normS, editing, values, history, future, handleUndo, handleRedo]);
+  }, [
+    normS,
+    editing,
+    values,
+    history,
+    future,
+    handleUndo,
+    handleRedo,
+    clearSelection,
+    focusSelectionInput,
+  ]);
 
   const handleContextMenu = (e) => {
     e.preventDefault();
     if (!normS) return;
-    setShowContextMenu({ x: e.clientX, y: e.clientY });
+    setShowContextMenu(clampContextMenuPosition(e.clientX, e.clientY));
   };
 
   return (
@@ -376,7 +563,10 @@ const TuningGrid = ({
               className="flex-1 flex flex-col min-h-0"
             >
               {/* Axis Label Header */}
-              <div className="flex items-center mb-1 pl-20 pr-4">
+              <div
+                className="flex items-center mb-1 pl-20 pr-4"
+                onMouseDown={handleEmptyAreaMouseDown}
+              >
                 <div className="h-px flex-1 bg-white/5" />
                 <span className="px-4 text-[9px] font-orbitron font-black text-neon-cyan uppercase tracking-[0.3em] opacity-80">
                   {xAxisLabel}
@@ -386,14 +576,20 @@ const TuningGrid = ({
 
               <div className="flex flex-1 min-h-0 overflow-hidden relative">
                 {/* Vertical Axis Label */}
-                <div className="w-6 flex flex-col items-center justify-center sticky left-0 z-40 py-8">
+                <div
+                  className="w-6 flex flex-col items-center justify-center sticky left-0 z-40 py-8"
+                  onMouseDown={handleEmptyAreaMouseDown}
+                >
                   <div className="h-full w-px bg-white/5 absolute left-1/2 -translate-x-1/2" />
                   <span className="text-[9px] font-orbitron font-black text-neon-cyan uppercase tracking-[0.3em] whitespace-nowrap rotate-[-90deg] bg-[#0a0b10] py-2 z-10 opacity-80">
                     {yAxisLabel}
                   </span>
                 </div>
 
-                <div className="flex-1 overflow-auto custom-scrollbar select-none relative">
+                <div
+                  className="flex-1 overflow-auto custom-scrollbar select-none relative"
+                  onMouseDown={handleEmptyAreaMouseDown}
+                >
                   {/* Realtime Cursor Layer */}
                   <AnimatePresence>
                     {activePos && (
@@ -468,7 +664,7 @@ const TuningGrid = ({
                       </thead>
                       <tbody>
                         {values.map((row, ri) => (
-                          <tr key={ri} className="h-8 group/tr">
+                          <tr key={ri} className="h-9 group/tr">
                             <td
                               onDoubleClick={() =>
                                 setEditingAxis({ type: "load", index: ri })
@@ -516,14 +712,10 @@ const TuningGrid = ({
                                     setEditing({ r: ri, c: ci })
                                   }
                                   style={{
-                                    backgroundColor: active
-                                      ? "rgba(6, 182, 212, 1)"
-                                      : heatColor(cell).bg,
-                                    color: active
-                                      ? "#000"
-                                      : heatColor(cell).text,
+                                    backgroundColor: heatColor(cell).bg,
+                                    color: heatColor(cell).text,
                                     boxShadow: active
-                                      ? "0 0 25px rgba(6, 182, 212, 0.4), inset 0 0 20px rgba(255,255,255,0.2)"
+                                      ? "0 0 0 1px rgba(0, 0, 0, 0.58)"
                                       : "none",
                                     borderRadius: "4px",
                                   }}
@@ -534,6 +726,12 @@ const TuningGrid = ({
                                       `}
                                 >
                                   <div className="absolute inset-0 bg-white/0 group-hover/cell:bg-white/10 pointer-events-none transition-colors rounded-[4px]" />
+                                  {active ? (
+                                    <>
+                                      <div className="absolute inset-0 rounded-[4px] bg-black/30 pointer-events-none z-[1]" />
+                                      <div className="absolute inset-[2px] rounded-[3px] border border-dashed border-white pointer-events-none z-[2]" />
+                                    </>
+                                  ) : null}
                                   {isEd ? (
                                     <input
                                       autoFocus
@@ -555,15 +753,17 @@ const TuningGrid = ({
                                       className="absolute inset-0 w-full h-full bg-white text-black font-mono font-black text-[11px] text-center outline-none ring-4 ring-neon-cyan z-50 rounded-sm"
                                     />
                                   ) : (
-                                    <div className="flex items-center justify-center h-full">
+                                    <div className="relative z-[3] flex items-center justify-center h-full">
                                       <span
                                         style={{
                                           textShadow:
                                             "0 1px 3px rgba(0,0,0,0.8)",
                                         }}
-                                        className={`text-[10px] font-mono font-black ${active ? "text-white" : "text-white/90"}`}
+                                        className="text-[10px] font-mono font-black text-white/90"
                                       >
-                                        {typeof cell === "number" ? cell.toFixed(precision) : cell}
+                                        {typeof cell === "number"
+                                          ? cell.toFixed(precision)
+                                          : cell}
                                       </span>
                                     </div>
                                   )}
@@ -613,6 +813,8 @@ const TuningGrid = ({
                   setIsSelecting(false);
                   setSelection({ r1: r, c1: c, r2: r, c2: c });
                 }}
+                onEditStart={begin3DChange}
+                onEditEnd={end3DChange}
                 onUpdateValue={(r, c, val) => {
                   const newValues = values.map((row, ri) =>
                     ri === r
@@ -627,10 +829,159 @@ const TuningGrid = ({
         </AnimatePresence>
       </div>
 
+      <div className="border-t border-white/5 bg-black/30 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+          <div className="flex items-center gap-3">
+            <Maximize2 size={13} className="text-neon-cyan" />
+            <span className="text-[10px] font-black text-white/50 uppercase tracking-widest">
+              Selection Tools
+            </span>
+            <span className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/25">
+              Esc Deselect
+            </span>
+          </div>
+          {selectionInfo ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-black uppercase tracking-widest text-white/35">
+              <span>
+                {selectionInfo.rows} x {selectionInfo.cols}
+              </span>
+              <span>{selectionInfo.cells} cells</span>
+              {selectionInfo.min !== null && (
+                <span>min {selectionInfo.min.toFixed(precision)}</span>
+              )}
+              {selectionInfo.max !== null && (
+                <span>max {selectionInfo.max.toFixed(precision)}</span>
+              )}
+              {selectionInfo.average !== null && (
+                <span>
+                  avg {selectionInfo.average.toFixed(Math.max(precision, 1))}
+                </span>
+              )}
+            </div>
+          ) : (
+            <span className="text-[9px] font-black uppercase tracking-widest text-white/20">
+              Select a block to enable tools
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <SelectionInputCard
+              icon={Calculator}
+              label="Set Value"
+              hotkey="Alt+1"
+              value={setValueInput}
+              setValue={setSetValueInput}
+              placeholder="95"
+              suffix={unitLabel}
+              disabled={!normS}
+              actionLabel="Apply"
+              onAction={handleSetValue}
+              inputRef={setValueInputRef}
+            />
+            <SelectionInputCard
+              icon={Plus}
+              label="Add"
+              hotkey="Alt+2"
+              value={addValueInput}
+              setValue={setAddValueInput}
+              placeholder="1"
+              suffix={unitLabel}
+              disabled={!normS}
+              actionLabel="Apply"
+              onAction={() => {
+                const amount = Number.parseFloat(addValueInput);
+                if (!Number.isFinite(amount)) return;
+                handleMath("add", amount);
+              }}
+              inputRef={addValueInputRef}
+            />
+            <SelectionInputCard
+              icon={Percent}
+              label="Multiply %"
+              hotkey="Alt+3"
+              value={multiplyValueInput}
+              setValue={setMultiplyValueInput}
+              placeholder="100"
+              suffix="%"
+              disabled={!normS}
+              actionLabel="Apply"
+              onAction={() => {
+                const amount = Number.parseFloat(multiplyValueInput);
+                if (!Number.isFinite(amount)) return;
+                handleMath("multiply", amount / 100);
+              }}
+              inputRef={multiplyValueInputRef}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-4 gap-2">
+            <ActionButton
+              icon={Undo2}
+              label="Undo"
+              hotkey="Ctrl+Z"
+              onClick={handleUndo}
+              disabled={history.length === 0}
+            />
+            <ActionButton
+              icon={Redo2}
+              label="Redo"
+              hotkey="Ctrl+Y"
+              onClick={handleRedo}
+              disabled={future.length === 0}
+            />
+            <ActionButton
+              icon={Calculator}
+              label="Interpolate"
+              hotkey="I"
+              onClick={handleInterpolate}
+              disabled={!normS}
+            />
+            <ActionButton
+              icon={Activity}
+              label="Smooth"
+              hotkey="S"
+              onClick={handleSmooth}
+              disabled={!normS}
+            />
+            <ActionButton
+              icon={Plus}
+              label="+10%"
+              hotkey="P"
+              onClick={() => handleMath("multiply", 1.1)}
+              disabled={!normS}
+            />
+            <ActionButton
+              icon={Minus}
+              label="-10%"
+              hotkey="M"
+              onClick={() => handleMath("multiply", 0.9)}
+              disabled={!normS}
+            />
+            <ActionButton
+              icon={Plus}
+              label="+1"
+              hotkey="+"
+              onClick={() => handleMath("add", 1)}
+              disabled={!normS}
+            />
+            <ActionButton
+              icon={Minus}
+              label="-1"
+              hotkey="-"
+              onClick={() => handleMath("add", -1)}
+              disabled={!normS}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Context Menu Portal */}
       <AnimatePresence>
         {showContextMenu && (
           <motion.div
+            ref={contextMenuRef}
             initial={{ opacity: 0, scale: 0.95, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
@@ -652,7 +1003,7 @@ const TuningGrid = ({
             <div className="grid grid-cols-1 gap-1">
               <MenuButton
                 icon={Calculator}
-                label="Interpolate (2D)"
+                label="Interpolate"
                 sub="Key: I"
                 onClick={handleInterpolate}
               />
@@ -661,6 +1012,16 @@ const TuningGrid = ({
                 label="Smooth Selection"
                 sub="Key: S"
                 onClick={handleSmooth}
+              />
+              <MenuButton
+                icon={Maximize2}
+                label="Set Value"
+                sub={
+                  setValueInput
+                    ? `Apply ${setValueInput} ${unitLabel}`
+                    : "Focus editor below"
+                }
+                onClick={handleContextSetValue}
               />
               <div className="h-px bg-white/5 my-1" />
               <div className="grid grid-cols-2 gap-1 px-1">
@@ -696,10 +1057,10 @@ const TuningGrid = ({
 const MenuButton = ({ icon: Icon, label, sub, onClick }) => (
   <button
     onClick={onClick}
-    className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-white/5 text-left transition-all group"
+    className="flex items-center gap-3 w-full p-2.5 rounded-xl hover:bg-white/5 text-left transition-all group"
   >
-    <div className="p-2 rounded-lg bg-white/5 text-neon-cyan group-hover:bg-neon-cyan group-hover:text-black transition-all">
-      {Icon && <Icon size={16} />}
+    <div className="p-1.5 rounded-lg bg-white/5 text-neon-cyan group-hover:bg-neon-cyan group-hover:text-black transition-all">
+      {Icon && <Icon size={14} />}
     </div>
     <div className="flex-1">
       <div className="text-[11px] font-black text-white uppercase tracking-wider">
@@ -714,18 +1075,89 @@ const MenuButton = ({ icon: Icon, label, sub, onClick }) => (
   </button>
 );
 
-const ActionButton = ({ icon: Icon, label, onClick }) => (
+const ActionButton = ({
+  icon: Icon,
+  label,
+  onClick,
+  disabled = false,
+  hotkey = null,
+}) => (
   <button
     onClick={onClick}
-    className="p-2 rounded-lg bg-white/5 border border-white/5 hover:border-neon-cyan/50 hover:bg-neon-cyan/10 transition-all text-center"
+    disabled={disabled}
+    className="px-2 py-2 rounded-lg bg-white/5 border border-white/5 hover:border-neon-cyan/50 hover:bg-neon-cyan/10 transition-all text-center disabled:opacity-30 disabled:hover:border-white/5 disabled:hover:bg-white/5"
   >
     <div className="flex items-center justify-center gap-2">
       {Icon && <Icon size={12} className="text-neon-cyan" />}
-      <span className="text-[9px] font-black text-white/60 uppercase">
-        {label}
-      </span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[9px] font-black text-white/60 uppercase">
+          {label}
+        </span>
+        {hotkey ? (
+          <span className="rounded border border-white/10 bg-black/30 px-1 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/25">
+            {hotkey}
+          </span>
+        ) : null}
+      </div>
     </div>
   </button>
+);
+
+const SelectionInputCard = ({
+  icon: Icon,
+  label,
+  hotkey,
+  value,
+  setValue,
+  placeholder,
+  suffix,
+  disabled,
+  actionLabel,
+  onAction,
+  inputRef,
+}) => (
+  <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+    <div className="flex items-center justify-between gap-2 mb-2">
+      <div className="flex items-center gap-2">
+        {Icon ? <Icon size={13} className="text-neon-cyan" /> : null}
+        <span className="text-[10px] font-black text-white/50 uppercase tracking-widest">
+          {label}
+        </span>
+      </div>
+      {hotkey ? (
+        <span className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/25">
+          {hotkey}
+        </span>
+      ) : null}
+    </div>
+    <div className="flex items-center gap-2">
+      <input
+        ref={inputRef}
+        type="number"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onAction();
+          }
+        }}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-[11px] font-mono font-black text-white outline-none focus:border-neon-cyan disabled:opacity-40"
+      />
+      <span className="text-[9px] font-black uppercase tracking-widest text-white/25 min-w-7 text-center">
+        {suffix}
+      </span>
+      <button
+        onClick={onAction}
+        disabled={disabled}
+        className="rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-2 text-[9px] font-black uppercase tracking-widest text-neon-cyan transition-all hover:bg-neon-cyan hover:text-black disabled:opacity-30 disabled:hover:bg-neon-cyan/10 disabled:hover:text-neon-cyan"
+      >
+        {actionLabel}
+      </button>
+    </div>
+  </div>
 );
 
 export default TuningGrid;

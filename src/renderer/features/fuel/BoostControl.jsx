@@ -13,8 +13,8 @@ import {
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
 import { SelectField } from "../shared/components/SelectField";
-import { useTableSync } from "../shared/hooks/useTableSync";
-import TuningGrid from "../shared/TuningGrid/TuningGrid";
+import { useTableSync } from "../shared/hooks/useTableSync.js";
+import TuningGrid from "../shared/TuningGrid/TuningGrid.jsx";
 import { Table, LayoutGrid } from "lucide-react";
 
 const BOOST_FIELDS = [

@@ -53,8 +53,11 @@ export function parseValue(buffer, offset, meta) {
   }
 
   // 2. Handle Arrays (Tables/Curves)
-  if (shape && shape.length > 0) {
-    const totalElements = shape.reduce((a, b) => a * b, 1);
+  if (type === "array" || (shape && shape.length > 0)) {
+    const totalElements =
+      shape && shape.length > 0
+        ? shape.reduce((a, b) => a * b, 1)
+        : 6;
     const elementSize = getDataTypeSize(dataType);
     const result = [];
     for (let i = 0; i < totalElements; i++) {

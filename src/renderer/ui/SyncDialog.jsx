@@ -4,7 +4,7 @@ import { AlertTriangle, Download, Upload, GitCompare, X } from 'lucide-react';
 import { useStore } from '../core/store.js';
 
 export default function SyncDialog({ isOpen, onClose, diffResults }) {
-  const { syncAllFromECU, uploadToECU, notify } = useStore();
+  const { syncAllFromECU, uploadToECU, notify, operation } = useStore();
   const [loading, setLoading] = useState(false);
 
   if (!isOpen || !diffResults) return null;
@@ -14,7 +14,22 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
   const allPages = Object.keys(pageStates).map(Number).sort((a, b) => a - b);
   const mostlyMissing = missing.length > 0 && different.length <= 1 && missing.length >= matching.length;
   const recommendedAction = mostlyMissing ? "download" : "review";
-  const uploadDisabled = loading || (missing.length > 0 && different.length === 0);
+  const activeOperation = operation?.scope === "sync" ? operation : null;
+  const busy = loading || Boolean(activeOperation);
+  const uploadDisabled = busy || (missing.length > 0 && different.length === 0);
+  const totalSteps = Number.isFinite(activeOperation?.total) ? activeOperation.total : 0;
+  const currentStep = Number.isFinite(activeOperation?.current) ? activeOperation.current : 0;
+  const progressPercent = totalSteps > 0
+    ? Math.max(0, Math.min(100, Math.round((currentStep / totalSteps) * 100)))
+    : null;
+  const stageLabelMap = {
+    compare: "Comparing",
+    read: "Reading",
+    write: "Writing",
+    verify: "Verifying",
+    burn: "Burning",
+    error: "Attention",
+  };
 
   const handleDownload = async () => {
     setLoading(true);
@@ -58,7 +73,7 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-          onClick={onClose}
+          onClick={busy ? undefined : onClose}
         />
 
         {/* Dialog */}
@@ -77,8 +92,9 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
               </h2>
             </div>
             <button
-              onClick={onClose}
-              className="p-2 rounded-lg hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
+              onClick={busy ? undefined : onClose}
+              disabled={busy}
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors text-gray-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <X size={20} />
             </button>
@@ -86,6 +102,50 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
 
           {/* Content */}
           <div className="px-6 py-6 space-y-6">
+            {activeOperation && (
+              <div className="space-y-3 rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 px-4 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-orbitron font-bold uppercase tracking-widest text-neon-cyan/80">
+                      {stageLabelMap[activeOperation.stage] || "Working"}
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-white">
+                      {activeOperation.label}
+                    </div>
+                  </div>
+                  {totalSteps > 0 && (
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-neon-cyan">{progressPercent}%</div>
+                      <div className="text-xs text-gray-400">
+                        {Math.min(currentStep, totalSteps)} / {totalSteps} pages
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {totalSteps > 0 && (
+                  <div className="h-2 overflow-hidden rounded-full bg-black/30">
+                    <motion.div
+                      className="h-full rounded-full bg-gradient-to-r from-neon-cyan to-neon-green"
+                      initial={false}
+                      animate={{ width: `${progressPercent}%` }}
+                      transition={{ type: "spring", stiffness: 120, damping: 20 }}
+                    />
+                  </div>
+                )}
+
+                <div className="text-xs text-gray-300">
+                  {activeOperation.type === "pull"
+                    ? "Project sedang menarik data dari ECU. Tunggu sampai semua halaman selesai dibaca dan diverifikasi."
+                    : activeOperation.type === "upload"
+                      ? "Project sedang mengirim data ke ECU. Popup ini akan tetap terbuka sampai penulisan dan burn selesai."
+                      : activeOperation.type === "write"
+                        ? "Project sedang menulis perubahan ke RAM ECU dan melakukan verifikasi baca balik."
+                        : "Operasi sinkronisasi ECU sedang berjalan."}
+                </div>
+              </div>
+            )}
+
             {hasDifferences ? (
               <>
                 <div className="flex items-start gap-3 p-4 rounded-xl bg-neon-yellow/10 border border-neon-yellow/30">
@@ -208,7 +268,7 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                 <div className="space-y-3 pt-2">
                   <button
                     onClick={handleDownload}
-                    disabled={loading}
+                    disabled={busy}
                     className={`w-full flex items-center justify-between px-5 py-4 rounded-xl transition-all group disabled:opacity-50 disabled:cursor-not-allowed ${
                       recommendedAction === "download"
                         ? "bg-neon-cyan/20 border border-neon-cyan/50 shadow-[0_0_24px_rgba(0,255,255,0.12)]"
@@ -219,7 +279,9 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                       <Download className="text-neon-cyan" size={20} />
                       <div className="text-left">
                         <div className="text-sm font-bold text-neon-cyan">
-                          Download from ECU {recommendedAction === "download" ? "(Recommended)" : ""}
+                          {busy && activeOperation?.type === "pull"
+                            ? "Downloading from ECU..."
+                            : `Download from ECU ${recommendedAction === "download" ? "(Recommended)" : ""}`}
                         </div>
                         <div className="text-xs text-gray-400">
                           Read ECU pages into the project and rebuild local snapshots safely
@@ -236,7 +298,9 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                     <div className="flex items-center gap-3">
                       <Upload className="text-neon-yellow" size={20} />
                       <div className="text-left">
-                        <div className="text-sm font-bold text-neon-yellow">Upload to ECU</div>
+                        <div className="text-sm font-bold text-neon-yellow">
+                          {busy && activeOperation?.type === "upload" ? "Uploading to ECU..." : "Upload to ECU"}
+                        </div>
                         <div className="text-xs text-gray-400">
                           Overwrite ECU RAM with project data. Use only if this project is the intended source.
                         </div>
@@ -246,10 +310,10 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
 
                   <button
                     onClick={onClose}
-                    disabled={loading}
+                    disabled={busy}
                     className="w-full px-5 py-3 rounded-xl border border-gray-600/50 hover:border-gray-500/80 text-gray-400 hover:text-white transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Ignore (Continue Anyway)
+                    {busy ? "Sync In Progress..." : "Ignore (Continue Anyway)"}
                   </button>
                 </div>
               </>

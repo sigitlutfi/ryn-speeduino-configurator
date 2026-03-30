@@ -25,6 +25,7 @@ export function decodeOutputChannels(buffer, parsedIni) {
   const channels = parsePage(raw, parsedIni.outputChannels.channels);
   const channelMeta = parsedIni.outputChannels.channels;
   const scaled = (name) => applyMetaScale(channels[name], channelMeta[name]);
+  const firstDefined = (...values) => values.find((value) => value !== undefined);
 
   const realtime = {
     rpm: channels.rpm ?? 0,
@@ -89,15 +90,15 @@ export function decodeOutputChannels(buffer, parsedIni) {
       ioError: toBool(channels.IOError),
     },
     performance: {
-      pitLimiterActive: toBool(channels.outputsStatus0),
-      pitLimiterSwitch: false,
-      rumbleIdleActive: toBool(channels.outputsStatus1),
-      rumbleIdleBeat: true,
-      alsActive: toBool(channels.outputsStatus2),
-      alsSwitch: false,
-      alsTimingCorr: 0,
-      alsFuelCorr: 100,
-      alsActiveTime: 0,
+      pitLimiterActive: toBool(channels.pitLimiterActive),
+      pitLimiterSwitch: toBool(channels.pitLimiterSwitchState),
+      rumbleIdleActive: toBool(channels.rumbleIdleActive),
+      rumbleIdleBeat: toBool(firstDefined(channels.rumbleIdleBeatState, true)),
+      alsActive: toBool(channels.alsActive),
+      alsSwitch: toBool(channels.alsSwitchState),
+      alsTimingCorr: firstDefined(channels.alsTimingCorrection, 0),
+      alsFuelCorr: firstDefined(channels.alsFuelCorrection, 100),
+      alsActiveTime: firstDefined(channels.alsActiveTime, 0),
     },
     outputChannels: channels,
   };
