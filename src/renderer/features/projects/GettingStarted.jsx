@@ -2,6 +2,10 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../../core/store.js";
 import { parseIni } from "../../../shared/ini-parser.js";
 import {
+  buildProjectInitialization,
+  getBoardLayoutChoices,
+} from "./projectInitialization.js";
+import {
   Plus,
   FolderOpen,
   Clock,
@@ -66,7 +70,15 @@ function getRecentProjectStatus(project) {
 }
 
 export default function GettingStarted() {
-  const { setProject, saveProject, recentProjects, removeRecentProject } =
+  const {
+    setProject,
+    saveProject,
+    updateConstants,
+    updateProjectField,
+    recentProjects,
+    removeRecentProject,
+    notify,
+  } =
     useStore();
   const [view, setView] = useState("home"); // 'home' | 'create'
   const [projectColor, setProjectColor] = useState("cyan");
@@ -77,10 +89,15 @@ export default function GettingStarted() {
   const [isDragging, setIsDragging] = useState(false);
   const [description, setDescription] = useState("");
   const [iniPath, setIniPath] = useState("");
+  const [iniContent, setIniContent] = useState("");
   const [iniSignature, setIniSignature] = useState("");
-  const [displacement, setDisplacement] = useState("");
-  const [cylinders, setCylinders] = useState("");
-  const [engineType, setEngineType] = useState("");
+  const [parsedIniPreview, setParsedIniPreview] = useState(null);
+  const [boardLayoutChoices, setBoardLayoutChoices] = useState([]);
+  const [boardLayoutValue, setBoardLayoutValue] = useState("");
+  const [initBaseTune, setInitBaseTune] = useState(true);
+  const [displacement, setDisplacement] = useState("2000");
+  const [cylinders, setCylinders] = useState("4");
+  const [engineType, setEngineType] = useState("inline");
   const [showEngine, setShowEngine] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pendingRemovePath, setPendingRemovePath] = useState(null);
@@ -90,14 +107,25 @@ export default function GettingStarted() {
     const path = await window.projects.pickIni();
     if (!path) return;
     setIniPath(path);
+    setIniContent("");
     setIniSignature("");
+    setParsedIniPreview(null);
+    setBoardLayoutChoices([]);
+    setBoardLayoutValue("");
     try {
       const content = await window.projects.loadIni(path);
       if (typeof content === "string") {
         const parsed = parseIni(content);
+        setIniContent(content);
         setIniSignature(parsed.info.signature ?? "");
+        setParsedIniPreview(parsed);
+        setBoardLayoutChoices(getBoardLayoutChoices(parsed));
+      } else {
+        notify("Failed to read selected INI", "error");
       }
-    } catch {}
+    } catch (error) {
+      notify(`INI parse failed: ${error.message}`, "error");
+    }
   };
 
   useEffect(() => {
@@ -125,26 +153,106 @@ export default function GettingStarted() {
 
   const handleCreate = async () => {
     if (!projectName || !iniPath) return;
+    if (boardLayoutChoices.length > 0 && boardLayoutValue === "") {
+      notify("Board layout is required for this INI", "warning");
+      return;
+    }
+
     setLoading(true);
-    const savePath = await window.projects.pickSave(projectName);
-    if (savePath) {
-      const raw = {
-        projectName,
-        description,
-        color: projectColor,
-        ini: { path: iniPath, signature: iniSignature, version: "" },
+    try {
+      const savePath = await window.projects.pickSave(projectName);
+      if (!savePath) {
+        setLoading(false);
+        return;
+      }
+
+      const initializationPlan = buildProjectInitialization({
+        parsedIni: parsedIniPreview,
+        selectedBoardLayout: boardLayoutValue,
         engine: {
           displacement: displacement ? Number(displacement) : null,
           cylinders: cylinders ? Number(cylinders) : null,
           type: engineType || null,
         },
+        initBaseTune,
+      });
+
+      const raw = {
+        projectName,
+        description,
+        color: projectColor,
+        ini: {
+          path: iniPath,
+          signature: iniSignature,
+          version: parsedIniPreview?.info?.mtVersion ?? "",
+          content: iniContent || null,
+        },
+        engine: {
+          displacement: displacement ? Number(displacement) : null,
+          cylinders: cylinders ? Number(cylinders) : null,
+          type: engineType || null,
+        },
+        initialization: {
+          iniSignature: iniSignature || parsedIniPreview?.info?.signature || "",
+          boardLayout: initializationPlan.metadata.boardLayout,
+          baseTune: {
+            requested: !!initBaseTune,
+            applied: false,
+            providerId: initializationPlan.metadata.providerId,
+            providerOwner: initializationPlan.metadata.providerOwner,
+            appliedFields: [],
+            warningCount: 0,
+          },
+        },
         filePath: savePath,
         created: new Date().toISOString(),
       };
+
       await setProject(raw);
-      await saveProject();
+      if (Object.keys(initializationPlan.pages).length > 0) {
+        await updateConstants({ pages: initializationPlan.pages });
+      }
+
+      updateProjectField("initialization", {
+        iniSignature: iniSignature || parsedIniPreview?.info?.signature || "",
+        boardLayout: initializationPlan.metadata.boardLayout,
+        baseTune: {
+          requested: !!initBaseTune,
+          applied: initializationPlan.metadata.applied,
+          providerId: initializationPlan.metadata.providerId,
+          providerOwner: initializationPlan.metadata.providerOwner,
+          appliedFields: initializationPlan.metadata.appliedFields,
+          warningCount: initializationPlan.warnings.length,
+        },
+      });
+
+      const saveResult = await saveProject();
+      if (!saveResult?.ok) {
+        throw new Error(saveResult?.error || "Failed to save created project");
+      }
+
+      if (initBaseTune) {
+        notify(
+          `Project created with base tune: ${initializationPlan.metadata.appliedFields.length} field(s) applied`,
+          "success",
+        );
+      } else {
+        notify("Project created successfully", "success");
+      }
+
+      if (initializationPlan.warnings.length > 0) {
+        notify(
+          `Base tune warnings: ${initializationPlan.warnings[0]}`,
+          "warning",
+          4500,
+        );
+      }
     }
-    setLoading(false);
+    catch (error) {
+      notify(`Create project failed: ${error.message}`, "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRemoveRecent = (e, filePath) => {
@@ -524,6 +632,56 @@ export default function GettingStarted() {
           )}
         </div>
 
+        <div className="space-y-2">
+          <label className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest block ml-1">
+            Board Layout
+            {boardLayoutChoices.length > 0 && (
+              <span className="ml-2 text-neon-orange/70">(required)</span>
+            )}
+          </label>
+          <select
+            value={boardLayoutValue}
+            onChange={(e) => setBoardLayoutValue(e.target.value)}
+            disabled={!iniPath || boardLayoutChoices.length === 0}
+            className="w-full bg-[#1a1a2e] border border-white/10 rounded-2xl px-5 py-4 text-white text-xs focus:border-neon-cyan outline-none disabled:opacity-40"
+          >
+            <option value="">
+              {boardLayoutChoices.length > 0
+                ? "Select board layout"
+                : iniPath
+                  ? "No board layout selector in this INI"
+                  : "Pick an INI first"}
+            </option>
+            {boardLayoutChoices.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+          <p className="ml-1 text-[10px] text-white/35">
+            Board layout sets the default pin routing for this project. You can still change it later in Engine
+            Constants.
+          </p>
+        </div>
+
+        <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 cursor-pointer hover:bg-white/[0.05] transition-all">
+          <input
+            type="checkbox"
+            checked={initBaseTune}
+            onChange={(e) => setInitBaseTune(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-white/20 bg-black/40 text-neon-cyan focus:ring-neon-cyan/30"
+          />
+          <div className="min-w-0">
+            <div className="text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
+              Init Base Tune
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-white/40">
+              Applies a minimal functional configuration for the selected firmware and board layout. Unsupported
+              fields are skipped with warnings.
+            </p>
+          </div>
+        </label>
+
         {/* Engine Details (collapsible) */}
         <div>
           <button
@@ -585,6 +743,11 @@ export default function GettingStarted() {
               </div>
             </motion.div>
           )}
+          {!showEngine && (
+            <div className="mt-2 ml-1 text-[10px] text-white/35 uppercase tracking-[0.12em]">
+              Default: 2000cc / 4 cylinders / inline
+            </div>
+          )}
         </div>
       </div>
 
@@ -597,7 +760,12 @@ export default function GettingStarted() {
         </button>
         <button
           onClick={handleCreate}
-          disabled={loading || !projectName || !iniPath}
+          disabled={
+            loading ||
+            !projectName ||
+            !iniPath ||
+            (boardLayoutChoices.length > 0 && boardLayoutValue === "")
+          }
           className="flex-1 py-5 bg-neon-cyan text-bg-deep font-orbitron font-bold rounded-2xl uppercase tracking-[0.3em] shadow-[0_0_30px_rgba(0,212,255,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 disabled:scale-100 flex items-center justify-center gap-3"
         >
           {loading ? (

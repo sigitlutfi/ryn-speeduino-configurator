@@ -10,7 +10,7 @@ import { getDecodedPages } from "../utils/projectConstants.js";
  * - Fast path first + fuzzy search fallback.
  */
 export function useTuningModule(targets, options = {}) {
-  const { onValidate, onSaveSuccess, fallbacks = {} } = options;
+  const { onValidate, onSaveSuccess, fallbacks = {}, page: preferredPage = null } = options;
   const currentProject = useStore((s) => s.currentProject);
   const parsedIni = useStore((s) => s.parsedIni);
   const updateConstants = useStore((s) => s.updateConstants);
@@ -39,6 +39,16 @@ export function useTuningModule(targets, options = {}) {
   );
 
   const isConnected = connection.status === "connected";
+  const targetSignature = useMemo(() => {
+    if (Array.isArray(targets)) return JSON.stringify(targets);
+    return JSON.stringify([targets ?? null]);
+  }, [targets]);
+  const normalizedTargets = useMemo(() => {
+    if (Array.isArray(targets)) return targets;
+    if (targets === undefined || targets === null) return [];
+    return [targets];
+  }, [targetSignature]);
+  const isPageTargetMode = typeof normalizedTargets[0] === "number";
 
   // 1. IMPROVED MAPPING
   const fieldToPageMap = useMemo(() => {
@@ -49,19 +59,26 @@ export function useTuningModule(targets, options = {}) {
     if (!constantsRoot) return { map, pagesFound: [] };
 
     // Numerical targets (Explicit pages)
-    if (typeof targets[0] === "number") {
-      targets.forEach((pId) => pagesFoundSet.add(pId));
+    if (isPageTargetMode) {
+      normalizedTargets.forEach((pId) => pagesFoundSet.add(pId));
       return { map, pagesFound: Array.from(pagesFoundSet) };
     }
 
     // String targets (Variable names)
-    if (targets && targets.length > 0) {
-      targets.forEach((fieldName) => {
+    if (normalizedTargets.length > 0) {
+      normalizedTargets.forEach((fieldName) => {
         const lowerName = fieldName.trim().toLowerCase();
         let found = false;
 
+        const candidateEntries = preferredPage !== null && preferredPage !== undefined
+          ? [
+              [String(preferredPage), constantsRoot?.[preferredPage]],
+              ...Object.entries(constantsRoot).filter(([pId]) => Number(pId) !== Number(preferredPage)),
+            ]
+          : Object.entries(constantsRoot);
+
         // Optimized pId scan
-        for (const [pId, pageData] of Object.entries(constantsRoot)) {
+        for (const [pId, pageData] of candidateEntries) {
           if (!pageData) continue;
 
           // Strategy A: Direct Match (Fast)
@@ -104,7 +121,7 @@ export function useTuningModule(targets, options = {}) {
     }
 
     return { map, pagesFound: Array.from(pagesFoundSet) };
-  }, [parsedIni, JSON.stringify(targets)]);
+  }, [parsedIni, targetSignature, isPageTargetMode, preferredPage]);
 
   const { pagesFound } = fieldToPageMap;
 
@@ -214,7 +231,7 @@ export function useTuningModule(targets, options = {}) {
   const buildScopedPayload = useCallback(() => {
     const scopedPages = {};
 
-    if (typeof targets[0] === "number") {
+    if (isPageTargetMode) {
       pagesFound.forEach((pId) => {
         scopedPages[pId] = { ...(localConstants[pId] || {}) };
       });
@@ -229,7 +246,7 @@ export function useTuningModule(targets, options = {}) {
     });
 
     return scopedPages;
-  }, [targets, pagesFound, localConstants, fieldToPageMap]);
+  }, [isPageTargetMode, pagesFound, localConstants, fieldToPageMap]);
 
   const handleSave = async (isBurn = false) => {
     if (isBurn && !isConnected) {
@@ -269,13 +286,18 @@ export function useTuningModule(targets, options = {}) {
       const result = await saveProject();
       if (result.ok) {
         setSaveStatus("success");
+        if (typeof onSaveSuccess === "function") {
+          onSaveSuccess(result);
+        }
       } else {
         setSaveStatus("error");
+        notify(result.error || "Project save failed", "error");
       }
       return result;
     } catch (e) {
       setSaveStatus("error");
-      return { ok: false };
+      notify(e?.message || "Save failed", "error");
+      return { ok: false, error: e?.message || "Save failed" };
     } finally {
       setIsSaving(false);
       setTimeout(() => setSaveStatus(null), 3000);
@@ -284,7 +306,7 @@ export function useTuningModule(targets, options = {}) {
 
   const discardChanges = useCallback(() => {
     const reset = {};
-    if (typeof targets[0] === "number") {
+    if (isPageTargetMode) {
       pagesFound.forEach((pId) => {
         const decodedPage = getDecodedPages(currentProject?.constants)?.[pId];
         if (decodedPage) reset[pId] = decodedPage;
@@ -300,10 +322,10 @@ export function useTuningModule(targets, options = {}) {
     }
     setLocalConstants(reset);
     notify("Changes discarded", "info");
-  }, [currentProject?.constants, pagesFound, targets, fieldToPageMap, notify]);
+  }, [currentProject?.constants, pagesFound, isPageTargetMode, fieldToPageMap, notify]);
 
   const isDirty = useMemo(() => {
-    if (typeof targets[0] === "number") {
+    if (isPageTargetMode) {
       for (const pId of pagesFound) {
         const pageSnapshot =
           currentProject?.constants?.pages?.[pId] ||
@@ -335,7 +357,7 @@ export function useTuningModule(targets, options = {}) {
     currentProject?.constants,
     pagesFound,
     DIRTY_SYNC_STATES,
-    targets,
+    isPageTargetMode,
     fieldToPageMap,
   ]);
 

@@ -1,22 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, Download, Upload, GitCompare, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Download, Upload, GitCompare, X } from 'lucide-react';
 import { useStore } from '../core/store.js';
 
 export default function SyncDialog({ isOpen, onClose, diffResults }) {
   const { syncAllFromECU, uploadToECU, notify, operation } = useStore();
   const [loading, setLoading] = useState(false);
+  const [expandedDiffPage, setExpandedDiffPage] = useState(null);
 
   if (!isOpen || !diffResults) return null;
 
-  const { different, missing, matching, errors = [], pageStates = {} } = diffResults;
-  const hasDifferences = different.length > 0 || missing.length > 0;
+  const {
+    different,
+    missing,
+    matching,
+    errors = [],
+    pageStates = {},
+    pageDiffs = {},
+  } = diffResults;
+  const hasDifferences = different.length > 0 || missing.length > 0 || errors.length > 0;
   const allPages = Object.keys(pageStates).map(Number).sort((a, b) => a - b);
+  const hasErrors = errors.length > 0;
   const mostlyMissing = missing.length > 0 && different.length <= 1 && missing.length >= matching.length;
-  const recommendedAction = mostlyMissing ? "download" : "review";
+  const recommendedAction = hasErrors
+    ? "review"
+    : mostlyMissing
+      ? "download"
+      : "review";
   const activeOperation = operation?.scope === "sync" ? operation : null;
   const busy = loading || Boolean(activeOperation);
-  const uploadDisabled = busy || (missing.length > 0 && different.length === 0);
+  const uploadDisabled = busy || missing.length > 0;
   const totalSteps = Number.isFinite(activeOperation?.total) ? activeOperation.total : 0;
   const currentStep = Number.isFinite(activeOperation?.current) ? activeOperation.current : 0;
   const progressPercent = totalSteps > 0
@@ -30,11 +43,31 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
     burn: "Burning",
     error: "Attention",
   };
+  const totalStatusCount = allPages.length;
+
+  const toggleDiffPage = (pageId) => {
+    setExpandedDiffPage((current) => (current === pageId ? null : pageId));
+  };
 
   const handleDownload = async () => {
     setLoading(true);
     try {
-      await syncAllFromECU();
+      const beforeOperation = operation;
+      const result = await syncAllFromECU();
+      const stillOpenOperation = useStore.getState().operation;
+      const project = useStore.getState().currentProject;
+      const syncState = project?.ecu?.sync?.state;
+
+      if (
+        result === undefined &&
+        (syncState === 'needs-initial-sync' || syncState === 'partially-synced') &&
+        !stillOpenOperation &&
+        beforeOperation === operation
+      ) {
+        notify('Download did not complete successfully', 'error');
+        return;
+      }
+
       notify("Downloaded data from ECU successfully", "success");
       onClose();
     } catch (err) {
@@ -101,7 +134,7 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
           </div>
 
           {/* Content */}
-          <div className="px-6 py-6 space-y-6">
+          <div className="px-6 py-5 space-y-5">
             {activeOperation && (
               <div className="space-y-3 rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 px-4 py-4">
                 <div className="flex items-start justify-between gap-4">
@@ -153,7 +186,9 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                   <div className="text-sm text-gray-300">
                     <p className="font-semibold text-white mb-1">Data Mismatch Detected</p>
                     <p>
-                      {recommendedAction === "download"
+                      {hasErrors
+                        ? "The sync check hit one or more read/verify errors. Treat this state as unsafe until you pull fresh data from the ECU or re-run the check successfully."
+                        : recommendedAction === "download"
                         ? "This project looks new or incomplete. The safest next step is to pull data from the ECU into the project."
                         : "Your project file differs from ECU memory. Review the direction carefully before overwriting either side."}
                     </p>
@@ -161,88 +196,97 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                 </div>
 
                 {/* Status Summary */}
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="p-4 rounded-xl bg-neon-green/10 border border-neon-green/30 text-center">
-                    <div className="text-2xl font-bold text-neon-green">{matching.length}</div>
-                    <div className="text-xs text-gray-400 uppercase tracking-wider mt-1">Matching</div>
+                <div className={`grid gap-2 ${errors.length > 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+                  <div className="rounded-xl bg-neon-green/10 border border-neon-green/30 px-3 py-2.5 text-center">
+                    <div className="text-xl font-bold text-neon-green">{matching.length}</div>
+                    <div className="mt-0.5 text-[10px] text-gray-400 uppercase tracking-[0.24em]">Matching</div>
                   </div>
-                  <div className="p-4 rounded-xl bg-neon-orange/10 border border-neon-orange/30 text-center">
-                    <div className="text-2xl font-bold text-neon-orange">{different.length}</div>
-                    <div className="text-xs text-gray-400 uppercase tracking-wider mt-1">Different</div>
+                  <div className="rounded-xl bg-neon-orange/10 border border-neon-orange/30 px-3 py-2.5 text-center">
+                    <div className="text-xl font-bold text-neon-orange">{different.length}</div>
+                    <div className="mt-0.5 text-[10px] text-gray-400 uppercase tracking-[0.24em]">Different</div>
                   </div>
-                  <div className="p-4 rounded-xl bg-gray-500/10 border border-gray-500/30 text-center">
-                    <div className="text-2xl font-bold text-gray-400">{missing.length}</div>
-                    <div className="text-xs text-gray-400 uppercase tracking-wider mt-1">Missing</div>
+                  <div className="rounded-xl bg-gray-500/10 border border-gray-500/30 px-3 py-2.5 text-center">
+                    <div className="text-xl font-bold text-gray-400">{missing.length}</div>
+                    <div className="mt-0.5 text-[10px] text-gray-400 uppercase tracking-[0.24em]">Missing</div>
                   </div>
                   {errors.length > 0 && (
-                    <div className="p-4 rounded-xl bg-neon-red/10 border border-neon-red/30 text-center">
-                      <div className="text-2xl font-bold text-neon-red">{errors.length}</div>
-                      <div className="text-xs text-gray-400 uppercase tracking-wider mt-1">Errors</div>
+                    <div className="rounded-xl bg-neon-red/10 border border-neon-red/30 px-3 py-2.5 text-center">
+                      <div className="text-xl font-bold text-neon-red">{errors.length}</div>
+                      <div className="mt-0.5 text-[10px] text-gray-400 uppercase tracking-[0.24em]">Errors</div>
                     </div>
                   )}
                 </div>
 
-                {/* Affected Pages */}
-                {different.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-orbitron font-bold text-gray-500 uppercase tracking-widest">
-                      Different Pages
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {different.map(pageId => (
-                        <span
-                          key={pageId}
-                          className="px-3 py-1 rounded-lg bg-neon-orange/20 border border-neon-orange/40 text-neon-orange text-sm font-mono"
-                        >
-                          Page {pageId}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {missing.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-orbitron font-bold text-gray-500 uppercase tracking-widest">
-                      Missing Local Snapshots
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {missing.map(pageId => (
-                        <span
-                          key={pageId}
-                          className="px-3 py-1 rounded-lg bg-gray-500/20 border border-gray-500/40 text-gray-200 text-sm font-mono"
-                        >
-                          Page {pageId}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {allPages.length > 0 && (
                   <div className="space-y-2">
-                    <div className="text-xs font-orbitron font-bold text-gray-500 uppercase tracking-widest">
-                      Page Status
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs font-orbitron font-bold text-gray-500 uppercase tracking-widest">
+                        Page Status
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        {totalStatusCount} page checks
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5">
                       {allPages.map((pageId) => {
                         const state = pageStates[pageId];
+                        const diff = pageDiffs[pageId];
+                        const isExpanded = expandedDiffPage === pageId;
                         const tone =
                           state === "verified"
-                            ? "bg-neon-green/20 border-neon-green/40 text-neon-green"
+                            ? "bg-neon-green/15 border-neon-green/35 text-neon-green"
                             : state === "different"
-                              ? "bg-neon-orange/20 border-neon-orange/40 text-neon-orange"
+                              ? "bg-neon-orange/15 border-neon-orange/35 text-neon-orange"
                               : state === "missing-local"
-                                ? "bg-gray-500/20 border-gray-500/40 text-gray-300"
-                                : "bg-neon-red/20 border-neon-red/40 text-neon-red";
+                                ? "bg-gray-500/15 border-gray-500/35 text-gray-300"
+                                : "bg-neon-red/15 border-neon-red/35 text-neon-red";
 
                         return (
-                          <span
-                            key={pageId}
-                            className={`px-3 py-1 rounded-lg border text-xs font-mono ${tone}`}
-                          >
-                            P{pageId}: {state}
-                          </span>
+                          <div key={pageId} className="space-y-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`inline-flex items-center rounded-lg border px-2.5 py-1 text-[11px] font-mono ${tone}`}
+                              >
+                                P{pageId} · {state}
+                              </span>
+                              {state === 'different' && diff && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDiffPage(pageId)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                                >
+                                  Diff
+                                  {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                </button>
+                              )}
+                            </div>
+
+                            {state === 'different' && diff && isExpanded && (
+                              <div className="w-full max-w-xl rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-[11px] text-gray-300">
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-400">
+                                  <span>Offset: <span className="font-mono text-white">{diff.offset}</span></span>
+                                  <span>Bytes: <span className="font-mono text-white">{diff.length}</span></span>
+                                  {diff.localCRC && (
+                                    <span>Local CRC: <span className="font-mono text-white">{diff.localCRC}</span></span>
+                                  )}
+                                  {diff.ecuCRC && (
+                                    <span>ECU CRC: <span className="font-mono text-white">{diff.ecuCRC}</span></span>
+                                  )}
+                                </div>
+                                <div className="mt-2 text-gray-400">{diff.summary}</div>
+                                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                                  <div className="rounded-lg border border-white/8 bg-white/5 px-2.5 py-2">
+                                    <div className="mb-1 text-[10px] uppercase tracking-[0.24em] text-gray-500">Local</div>
+                                    <div className="font-mono text-[11px] text-neon-yellow/90">{diff.localHex || '-'}</div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/8 bg-white/5 px-2.5 py-2">
+                                    <div className="mb-1 text-[10px] uppercase tracking-[0.24em] text-gray-500">ECU</div>
+                                    <div className="font-mono text-[11px] text-neon-cyan/90">{diff.ecuHex || '-'}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
@@ -250,7 +294,11 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                 )}
 
                 <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-gray-300">
-                  {recommendedAction === "download" ? (
+                  {hasErrors ? (
+                    <p>
+                      Recommendation: resolve the read/verify errors first. Prefer <span className="text-neon-cyan font-semibold">Download from ECU</span> after the connection is stable, then re-check sync before considering any upload.
+                    </p>
+                  ) : recommendedAction === "download" ? (
                     <p>
                       Recommendation: use <span className="text-neon-cyan font-semibold">Download from ECU</span>.
                       Missing local snapshots mean this project does not yet contain enough raw page data to safely push back.
@@ -302,7 +350,9 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                           {busy && activeOperation?.type === "upload" ? "Uploading to ECU..." : "Upload to ECU"}
                         </div>
                         <div className="text-xs text-gray-400">
-                          Overwrite ECU RAM with project data. Use only if this project is the intended source.
+                          {missing.length > 0
+                            ? "Upload is disabled while local snapshots are missing. Pull from ECU first so the project has a complete base."
+                            : "Overwrite ECU RAM with project data. Use only if this project is the intended source."}
                         </div>
                       </div>
                     </div>

@@ -2,13 +2,8 @@ import React, { useState, useMemo } from "react";
 import { useStore } from "../../core/store";
 import {
   Cpu,
-  Settings2,
   Target,
-  ShieldCheck,
-  Info,
   AlertTriangle,
-  Lightbulb,
-  ChevronDown,
 } from "lucide-react";
 import { programmableOutputsSchema } from "../shared/schemas";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
@@ -16,22 +11,102 @@ import TuningHeader from "../shared/components/TuningHeader";
 import {
   SelectRow,
   InputField,
-  ToggleRow,
-  InfoCard,
 } from "../shared/components/TuningComponents";
+
+const ARRAY_RULE_FIELDS = new Set([
+  "outputDelay",
+  "outputTimeLimit",
+  "firstTarget",
+  "secondTarget",
+]);
+
+const RULE_COUNT = 8;
+
+const PROGRAMMABLE_OUTPUT_DEFAULTS = (() => {
+  const defaults = {};
+  defaults.outputDelay = new Array(RULE_COUNT).fill(0);
+  defaults.outputTimeLimit = new Array(RULE_COUNT).fill(0);
+  defaults.firstTarget = new Array(RULE_COUNT).fill(0);
+  defaults.secondTarget = new Array(RULE_COUNT).fill(0);
+
+  for (let i = 0; i < RULE_COUNT; i += 1) {
+    defaults[`outputInverted${i}`] = 0;
+    defaults[`kindOfLimiting${i}`] = 0;
+    defaults[`outputPin${i}`] = 0;
+    defaults[`firstDataIn${i}`] = 0;
+    defaults[`secondDataIn${i}`] = 0;
+    defaults[`firstCompType${i}`] = 0;
+    defaults[`secondCompType${i}`] = 0;
+    defaults[`bitwise${i}`] = 0;
+  }
+  return defaults;
+})();
+
+function getRuleFieldValue(pageData, name, ruleIndex) {
+  if (ARRAY_RULE_FIELDS.has(name)) {
+    const values = Array.isArray(pageData?.[name]) ? pageData[name] : [];
+    return values[ruleIndex] ?? 0;
+  }
+
+  return pageData?.[`${name}${ruleIndex}`] ?? 0;
+}
+
+function setRuleFieldValue(pageDraft, name, ruleIndex, value) {
+  if (ARRAY_RULE_FIELDS.has(name)) {
+    const nextValues = Array.isArray(pageDraft?.[name])
+      ? [...pageDraft[name]]
+      : [...PROGRAMMABLE_OUTPUT_DEFAULTS[name]];
+    nextValues[ruleIndex] = value;
+    return {
+      ...pageDraft,
+      [name]: nextValues,
+    };
+  }
+
+  return {
+    ...pageDraft,
+    [`${name}${ruleIndex}`]: value,
+  };
+}
+
+function buildValidationPayload(pageData) {
+  const payload = {};
+
+  for (let i = 0; i < RULE_COUNT; i += 1) {
+    payload[`outputInverted${i}`] = getRuleFieldValue(pageData, "outputInverted", i);
+    payload[`kindOfLimiting${i}`] = getRuleFieldValue(pageData, "kindOfLimiting", i);
+    payload[`outputPin${i}`] = getRuleFieldValue(pageData, "outputPin", i);
+    payload[`outputDelay${i}`] = getRuleFieldValue(pageData, "outputDelay", i);
+    payload[`firstDataIn${i}`] = getRuleFieldValue(pageData, "firstDataIn", i);
+    payload[`secondDataIn${i}`] = getRuleFieldValue(pageData, "secondDataIn", i);
+    payload[`outputTimeLimit${i}`] = getRuleFieldValue(pageData, "outputTimeLimit", i);
+    payload[`firstTarget${i}`] = getRuleFieldValue(pageData, "firstTarget", i);
+    payload[`secondTarget${i}`] = getRuleFieldValue(pageData, "secondTarget", i);
+    payload[`firstCompType${i}`] = getRuleFieldValue(pageData, "firstCompType", i);
+    payload[`secondCompType${i}`] = getRuleFieldValue(pageData, "secondCompType", i);
+    payload[`bitwise${i}`] = getRuleFieldValue(pageData, "bitwise", i);
+  }
+
+  return payload;
+}
 
 /**
  * Modernized Programmable Outputs Module
  * Uses standardized TuningComponents for consistent UI/UX.
  */
 export default function ProgrammableOutputs() {
-  const { parsedIni } = useStore();
+  const { parsedIni, currentProject } = useStore();
   const [currentRule, setCurrentRule] = useState(0);
+  const [validationErrors, setValidationErrors] = useState({});
+  const currentPage13 =
+    currentProject?.constants?.decodedPages?.[13] ||
+    currentProject?.constants?.decodedPages?.["13"] ||
+    {};
 
   // Constants mapping logic
   const {
     localConstants,
-    setLocalField,
+    setLocalPage,
     handleSave,
     discardChanges,
     isSaving,
@@ -39,21 +114,63 @@ export default function ProgrammableOutputs() {
     isConnected,
     isDirty,
     isReady,
-  } = useTuningModule([0, 13], {
+  } = useTuningModule([13], {
     onValidate: (data) => {
-      if (!data[13]) return true;
-      const result = programmableOutputsSchema.safeParse(data[13]);
+      const mergedPage13 = {
+        ...PROGRAMMABLE_OUTPUT_DEFAULTS,
+        ...currentPage13,
+        ...(data[13] || {}),
+      };
+      const result = programmableOutputsSchema.safeParse(
+        buildValidationPayload(mergedPage13),
+      );
+      if (!result.success) {
+        const nextErrors = {};
+        result.error.issues.forEach((issue) => {
+          const fieldName = issue.path?.[0];
+          if (fieldName) nextErrors[fieldName] = issue.message;
+        });
+        setValidationErrors(nextErrors);
+        return false;
+      }
+      setValidationErrors({});
       return result.success;
     },
   });
 
-  // Handle both 0-indexed (legacy) and 1-indexed (Correct INI mapping)
-  const boardData = localConstants[1] || localConstants[0] || {};
-  const pageData = localConstants[13] || {};
+  const pageData = {
+    ...PROGRAMMABLE_OUTPUT_DEFAULTS,
+    ...currentPage13,
+    ...(localConstants[13] || {}),
+  };
+  const boardData =
+    currentProject?.constants?.decodedPages?.[1] ||
+    currentProject?.constants?.decodedPages?.[0] ||
+    {};
 
-  const getVal = (name) => pageData[`${name}${currentRule}`] ?? 0;
-  const updateField = (name, val) =>
-    setLocalField(13, `${name}${currentRule}`, val);
+  const getVal = (name) => getRuleFieldValue(pageData, name, currentRule);
+  const normalizeValue = (val) => {
+    if (typeof val === "number" && Number.isFinite(val)) return val;
+    return 0;
+  };
+  const updateField = (name, val) => {
+    const normalizedValue = normalizeValue(val);
+    const nextPageDraft = setRuleFieldValue(
+      pageData,
+      name,
+      currentRule,
+      normalizedValue,
+    );
+    setLocalPage(13, nextPageDraft);
+    setValidationErrors((prev) => {
+      const fieldKey = `${name}${currentRule}`;
+      if (!prev[fieldKey]) return prev;
+      const next = { ...prev };
+      delete next[fieldKey];
+      return next;
+    });
+  };
+  const getFieldError = (name) => validationErrors[`${name}${currentRule}`];
 
   // Metadata Extraction for consistent labels
   const iniOptions = useMemo(() => {
@@ -69,6 +186,8 @@ export default function ProgrammableOutputs() {
     const firstDataIn = clean(`firstDataIn${currentRule}`);
     const secondDataIn = clean(`secondDataIn${currentRule}`);
     const pins = clean(`outputPin${currentRule}`);
+    const polarity = clean(`outputInverted${currentRule}`);
+    const limiting = clean(`kindOfLimiting${currentRule}`);
     const firstComp = page13[`firstCompType${currentRule}`]?.options || [
       "==",
       "!=",
@@ -79,7 +198,15 @@ export default function ProgrammableOutputs() {
     ];
     const logic = clean(`bitwise${currentRule}`);
 
-    return { firstDataIn, secondDataIn, pins, firstComp, logic };
+    return {
+      firstDataIn,
+      secondDataIn,
+      pins,
+      polarity,
+      limiting,
+      firstComp,
+      logic,
+    };
   }, [parsedIni, currentRule]);
 
   const boardLayoutLabel = useMemo(() => {
@@ -99,66 +226,6 @@ export default function ProgrammableOutputs() {
   }
 
   const tabs = [1, 2, 3, 4, 5, 6, 7, 8];
-
-  // Micro-UI Helper Components
-  const SmallSelect = ({ label, value, options, onChange, theme = "cyan" }) => (
-    <div className="flex flex-col gap-1 flex-1 min-w-0">
-      <span className="text-[7px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">
-        {label}
-      </span>
-      <div className="relative group/select">
-        <select
-          value={value}
-          onChange={(e) => onChange(parseInt(e.target.value))}
-          className={`w-full bg-black/60 border border-white/5 rounded-xl px-3 py-2 text-[10px] font-orbitron font-bold text-neon-${theme} outline-none focus:border-neon-${theme}/50 appearance-none cursor-pointer transition-all hover:bg-black/80`}
-        >
-          {options.map((opt, i) => (
-            <option
-              key={typeof opt === "string" ? i : opt.index}
-              value={typeof opt === "string" ? i : opt.index}
-              className="bg-bg-deep text-white"
-            >
-              {typeof opt === "string" ? opt : opt.label}
-            </option>
-          ))}
-        </select>
-        <div
-          className={`absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-white/10 group-hover/select:text-neon-${theme}`}
-        >
-          <ChevronDown size={10} />
-        </div>
-      </div>
-    </div>
-  );
-
-  const SmallInput = ({
-    label,
-    value,
-    onChange,
-    units,
-    theme = "cyan",
-    step = 1,
-  }) => (
-    <div className="flex flex-col gap-1 w-24">
-      <span className="text-[7px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">
-        {label}
-      </span>
-      <div className="relative">
-        <input
-          type="number"
-          step={step}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="w-full bg-black/60 border border-white/5 rounded-xl px-3 py-2 text-[10px] font-mono font-bold text-white outline-none focus:border-neon-cyan/50 text-center"
-        />
-        {units && (
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[7px] text-white/20 font-black">
-            {units}
-          </span>
-        )}
-      </div>
-    </div>
-  );
 
   return (
     <div className="flex flex-col h-full bg-transparent select-none animate-in fade-in duration-700">
@@ -201,7 +268,7 @@ export default function ProgrammableOutputs() {
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-            <div className="xl:col-span-9 space-y-4">
+            <div className="xl:col-span-9 space-y-4" style={{ WebkitAppRegion: "no-drag" }}>
               {/* Universal Hardware & Timing Bar */}
               <section className="p-5 rounded-[28px] glass-card border border-white/5 bg-black/20">
                 <div className="flex flex-wrap items-center gap-6">
@@ -212,19 +279,21 @@ export default function ProgrammableOutputs() {
                     </span>
                   </div>
                   <div className="flex-1 grid grid-cols-2 md:grid-cols-5 gap-4">
-                    <SmallSelect
+                    <SelectRow
                       label="Output Pin"
                       value={getVal("outputPin")}
                       options={iniOptions.pins}
                       onChange={(v) => updateField("outputPin", v)}
+                      description={getFieldError("outputPin")}
                     />
-                    <SmallSelect
+                    <SelectRow
                       label="Logic Polarity"
                       value={getVal("outputInverted")}
-                      options={["Normal", "Inverted"]}
+                      options={iniOptions.polarity}
                       onChange={(v) => updateField("outputInverted", v)}
+                      description={getFieldError("outputInverted")}
                     />
-                    <SmallInput
+                    <InputField
                       label="Activation Delay"
                       value={getVal("outputDelay") / 10}
                       units="s"
@@ -232,13 +301,16 @@ export default function ProgrammableOutputs() {
                       onChange={(v) =>
                         updateField("outputDelay", Math.round(v * 10))
                       }
+                      description={getFieldError("outputDelay")}
                     />
-                    <SmallInput
-                      label="Hysteresis"
-                      value={getVal("hysteresis")}
-                      onChange={(v) => updateField("hysteresis", v)}
+                    <SelectRow
+                      label="Limit Mode"
+                      value={getVal("kindOfLimiting")}
+                      options={iniOptions.limiting}
+                      onChange={(v) => updateField("kindOfLimiting", v)}
+                      description={getFieldError("kindOfLimiting")}
                     />
-                    <SmallInput
+                    <InputField
                       label="Time Limit"
                       value={getVal("outputTimeLimit") / 10}
                       units="s"
@@ -246,6 +318,7 @@ export default function ProgrammableOutputs() {
                       onChange={(v) =>
                         updateField("outputTimeLimit", Math.round(v * 10))
                       }
+                      description={getFieldError("outputTimeLimit")}
                     />
                   </div>
                 </div>
@@ -268,26 +341,29 @@ export default function ProgrammableOutputs() {
                     </div>
                     <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                       <div className="md:col-span-7">
-                        <SmallSelect
+                        <SelectRow
                           label="Source Variable"
                           value={getVal("firstDataIn")}
                           options={iniOptions.firstDataIn}
                           onChange={(v) => updateField("firstDataIn", v)}
+                          description={getFieldError("firstDataIn")}
                         />
                       </div>
                       <div className="md:col-span-2">
-                        <SmallSelect
+                        <SelectRow
                           label="Operator"
                           value={getVal("firstCompType")}
                           options={iniOptions.firstComp}
                           onChange={(v) => updateField("firstCompType", v)}
+                          description={getFieldError("firstCompType")}
                         />
                       </div>
                       <div className="md:col-span-3">
-                        <SmallInput
+                        <InputField
                           label="Threshold Value"
                           value={getVal("firstTarget")}
                           onChange={(v) => updateField("firstTarget", v)}
+                          description={getFieldError("firstTarget")}
                         />
                       </div>
                     </div>
@@ -295,19 +371,15 @@ export default function ProgrammableOutputs() {
 
                   {/* Joiner */}
                   <div className="flex justify-center -my-3 relative z-10">
-                    <select
-                      value={getVal("bitwise")}
-                      onChange={(e) =>
-                        updateField("bitwise", parseInt(e.target.value))
-                      }
-                      className="bg-bg-deep border border-neon-purple/50 text-neon-purple rounded-lg px-6 py-1 text-[8px] font-orbitron font-black uppercase tracking-widest focus:outline-none shadow-glow-purple cursor-pointer hover:border-white transition-all appearance-none text-center"
-                    >
-                      {iniOptions.logic.map((opt) => (
-                        <option key={opt.index} value={opt.index}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="w-full max-w-xs">
+                      <SelectRow
+                        label="Join Logic"
+                        value={getVal("bitwise")}
+                        onChange={(v) => updateField("bitwise", v)}
+                        options={iniOptions.logic}
+                        description={getFieldError("bitwise")}
+                      />
+                    </div>
                   </div>
                   {/* Condition 2 */}
                   {getVal("bitwise") > 0 ? (
@@ -315,29 +387,31 @@ export default function ProgrammableOutputs() {
                       <div className="w-6 h-6 rounded flex items-center justify-center bg-white/5 text-[8px] font-black text-white/20">
                         02
                       </div>
-                      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                        <div className="md:col-span-7">
-                          <SmallSelect
-                            label="Source Variable"
-                            value={getVal("secondDataIn")}
-                            options={iniOptions.secondDataIn}
-                            onChange={(v) => updateField("secondDataIn", v)}
-                          />
-                        </div>
-                        <div className="md:col-span-2">
-                          <SmallSelect
-                            label="Operator"
-                            value={getVal("secondCompType")}
-                            options={iniOptions.firstComp}
-                            onChange={(v) => updateField("secondCompType", v)}
-                            theme="purple"
-                          />
-                        </div>
-                        <div className="md:col-span-3">
-                          <SmallInput
-                            label="Threshold Value"
-                            value={getVal("secondTarget")}
-                            onChange={(v) => updateField("secondTarget", v)}
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                      <div className="md:col-span-7">
+                        <SelectRow
+                          label="Source Variable"
+                          value={getVal("secondDataIn")}
+                          options={iniOptions.secondDataIn}
+                          onChange={(v) => updateField("secondDataIn", v)}
+                          description={getFieldError("secondDataIn")}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <SelectRow
+                          label="Operator"
+                          value={getVal("secondCompType")}
+                          options={iniOptions.firstComp}
+                          onChange={(v) => updateField("secondCompType", v)}
+                          description={getFieldError("secondCompType")}
+                        />
+                      </div>
+                      <div className="md:col-span-3">
+                        <InputField
+                          label="Threshold Value"
+                          value={getVal("secondTarget")}
+                          onChange={(v) => updateField("secondTarget", v)}
+                          description={getFieldError("secondTarget")}
                           />
                         </div>
                       </div>
@@ -400,6 +474,26 @@ export default function ProgrammableOutputs() {
                   </div>
                 );
               })()}
+
+              {Object.keys(validationErrors).some((key) => key.endsWith(String(currentRule))) && (
+                <div className="p-5 rounded-[28px] border border-neon-red/30 bg-neon-red/10 text-neon-red space-y-3">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={14} />
+                    <span className="text-[9px] font-black uppercase tracking-widest">
+                      Rule {currentRule + 1} Validation
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 text-[10px] font-bold">
+                    {Object.entries(validationErrors)
+                      .filter(([key]) => key.endsWith(String(currentRule)))
+                      .map(([key, message]) => (
+                        <div key={key} className="leading-relaxed">
+                          {key}: {message}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               <div className="p-5 rounded-[28px] border border-white/5 bg-black/40 space-y-3">
                 <div className="flex items-center gap-2 text-white/40">

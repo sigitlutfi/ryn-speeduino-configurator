@@ -44,7 +44,7 @@ const FALLBACK_CONSTANTS = {
 };
 
 const StartupCurves = () => {
-  const parsedIni = useStore((s) => s.currentProject?.parsedIni);
+  const parsedIni = useStore((s) => s.parsedIni);
   const [activeCurve, setActiveCurve] = useState(null);
   const [activePoint, setActivePoint] = useState(null);
 

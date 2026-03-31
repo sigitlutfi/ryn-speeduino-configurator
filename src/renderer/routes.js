@@ -14,6 +14,7 @@ export const ROUTES = {
   SETTINGS_IAT: "/settings/iat",
   SETTINGS_INJECTOR: "/settings/injector",
   SETTINGS_PROGRAMMABLE: "/settings/programmable",
+  SETTINGS_IO_SUMMARY: "/io/summary",
   SETTINGS_SPARK: "/settings/spark",
   SETTINGS_AFR: "/settings/afr",
   SETTINGS_FLEX: "/settings/flex",

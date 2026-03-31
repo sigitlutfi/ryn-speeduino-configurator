@@ -3,18 +3,15 @@ import { useStore } from "../core/store.js";
 import { ROUTES } from "../routes.js";
 import {
   FileText,
-  Edit2,
   Layout,
   Github,
   Settings,
   Power,
-  Database,
   RefreshCcw,
   FolderOpen,
   Save,
   XCircle,
   HelpCircle,
-  Monitor,
   Maximize,
   ExternalLink,
   Zap,
@@ -57,15 +54,26 @@ const MenuButton = ({ label, children, isOpen, onClick }) => (
   </div>
 );
 
-const MenuItem = ({ icon: Icon, label, shortcut, onClick, danger, active }) => (
+const MenuItem = ({
+  icon: Icon,
+  label,
+  shortcut,
+  onClick,
+  danger,
+  active,
+  disabled,
+}) => (
   <button
     onClick={onClick}
+    disabled={disabled}
     className={`w-full flex items-center justify-between  px-3.5 py-2.5 rounded-xl text-[11px] transition-all group ${
       active
         ? "bg-neon-cyan/10 text-neon-cyan"
         : danger
           ? "text-neon-red/70 hover:bg-neon-red/10 hover:text-neon-red"
-          : "text-gray-400 hover:bg-white/5 hover:text-white"
+          : disabled
+            ? "text-gray-600 cursor-not-allowed opacity-60"
+            : "text-gray-400 hover:bg-white/5 hover:text-white"
     }`}
   >
     <div className="flex items-center gap-3">
@@ -77,7 +85,9 @@ const MenuItem = ({ icon: Icon, label, shortcut, onClick, danger, active }) => (
               ? "text-neon-cyan"
               : danger
                 ? "text-neon-red/50 group-hover:text-neon-red"
-                : "text-gray-500 group-hover:text-neon-cyan"
+                : disabled
+                  ? "text-gray-600"
+                  : "text-gray-500 group-hover:text-neon-cyan"
           }`}
         />
       )}
@@ -95,6 +105,7 @@ const Divider = () => <div className="h-[1px] bg-white/5 my-1 mx-1.5" />;
 
 export default function AppToolbar() {
   const [openMenu, setOpenMenu] = useState(null);
+  const [openSubmenu, setOpenSubmenu] = useState(null);
   const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
   const currentProject = useStore((s) => s.currentProject);
   const closeProject = useStore((s) => s.closeProject);
@@ -120,9 +131,13 @@ export default function AppToolbar() {
 
   const handleMenuClick = (menu) => {
     setOpenMenu(openMenu === menu ? null : menu);
+    setOpenSubmenu(null);
   };
 
-  const closeMenus = () => setOpenMenu(null);
+  const closeMenus = () => {
+    setOpenMenu(null);
+    setOpenSubmenu(null);
+  };
 
   const handleNewProject = async () => {
     closeMenus();
@@ -134,18 +149,30 @@ export default function AppToolbar() {
     const filePath = await window.projects.pickExisting();
     if (filePath) {
       const proj = await window.projects.loadFile(filePath);
-      if (proj && !proj.error) useStore.getState().setProject(proj);
+      if (proj && !proj.error) {
+        useStore.getState().setProject({ ...proj, filePath });
+      }
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     closeMenus();
-    useStore.getState().saveProject();
+    const result = await useStore.getState().saveProject();
+    if (result?.ok) {
+      notify("Project saved successfully", "success");
+    } else if (result?.error) {
+      notify(`Save error: ${result.error}`, "error");
+    }
   };
 
-  const handleSaveAs = () => {
+  const handleSaveAs = async () => {
     closeMenus();
-    useStore.getState().saveProjectAs();
+    const result = await useStore.getState().saveProjectAs();
+    if (result?.ok) {
+      notify("Project saved successfully", "success");
+    } else if (result?.error && result.error !== "Save cancelled") {
+      notify(`Save As error: ${result.error}`, "error");
+    }
   };
 
   const handleToolbarSync = async () => {
@@ -231,13 +258,21 @@ export default function AppToolbar() {
               onClick={handleOpenProject}
             />
             {recentProjects.length > 0 && (
-              <div className="relative group/recent">
+              <div className="relative">
                 <MenuItem
                   icon={RefreshCcw}
                   label="Recent Projects"
-                  onClick={() => {}}
+                  active={openSubmenu === "recent-projects"}
+                  onClick={() =>
+                    setOpenSubmenu(
+                      openSubmenu === "recent-projects"
+                        ? null
+                        : "recent-projects",
+                    )
+                  }
                 />
-                <div className="absolute left-full top-0 ml-1 hidden group-hover/recent:block">
+                {openSubmenu === "recent-projects" && (
+                  <div className="absolute left-full top-0 ml-1">
                   <div className="glass-strong rounded-2xl border border-white/10 shadow-2xl p-2 min-w-[200px]">
                     {recentProjects.slice(0, 5).map((p) => (
                       <MenuItem
@@ -248,13 +283,17 @@ export default function AppToolbar() {
                             p.filePath,
                           );
                           if (proj && !proj.error)
-                            useStore.getState().setProject(proj);
+                            useStore.getState().setProject({
+                              ...proj,
+                              filePath: p.filePath,
+                            });
                           closeMenus();
                         }}
                       />
                     ))}
                   </div>
-                </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -307,28 +346,6 @@ export default function AppToolbar() {
               danger
               onClick={() => window.close()}
             />
-          </MenuButton>
-
-          <MenuButton
-            label="Edit"
-            isOpen={openMenu === "edit"}
-            onClick={() => handleMenuClick("edit")}
-          >
-            <div className="px-2 py-1.5 mb-1 text-[9px] font-orbitron font-black text-gray-600 uppercase tracking-widest">
-              History
-            </div>
-            <MenuItem icon={RefreshCcw} label="Undo" shortcut="Ctrl+Z" />
-            <MenuItem icon={RefreshCcw} label="Redo" shortcut="Ctrl+Y" />
-
-            <Divider />
-
-            <div className="px-2 py-1.5 mb-1 text-[9px] font-orbitron font-black text-gray-600 uppercase tracking-widest">
-              Tuning Operations
-            </div>
-            <MenuItem icon={Edit2} label="Copy Table Data" shortcut="Ctrl+C" />
-            <MenuItem icon={Edit2} label="Paste & Merge" shortcut="Ctrl+V" />
-            <MenuItem icon={SlidersHorizontal} label="Scale Selection..." />
-            <MenuItem icon={SlidersHorizontal} label="Interpolate Range" />
           </MenuButton>
 
           <MenuButton

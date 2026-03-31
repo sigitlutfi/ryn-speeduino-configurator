@@ -20,6 +20,7 @@ import AFRO2Settings from "./features/fuel/AFRO2Settings.jsx";
 import FlexFuelSettings from "./features/fuel/FlexFuelSettings.jsx";
 import IATCorrection from "./features/fuel/curves/IATCorrection.jsx";
 import InjectorCharacteristics from "./features/engine/InjectorCharacteristics.jsx";
+import IOSummary from "./features/io/IOSummary.jsx";
 import ProgrammableOutputs from "./features/io/ProgrammableOutputs.jsx";
 import SparkSetup from "./features/spark/SparkSetup.jsx";
 import VVTControl from "./features/engine/VVTControl.jsx";
@@ -65,6 +66,9 @@ export default function App() {
   const setConnectionStatus = useStore((s) => s.setConnectionStatus);
   const setConnectionPort = useStore((s) => s.setConnectionPort);
   const setConnectionBaud = useStore((s) => s.setConnectionBaud);
+  const setConnectionTransportStatus = useStore((s) => s.setConnectionTransportStatus);
+  const setConnectionHandshakeStatus = useStore((s) => s.setConnectionHandshakeStatus);
+  const addConnectionEvent = useStore((s) => s.addConnectionEvent);
   const setRealtime = useStore((s) => s.setRealtime);
   const notify = useStore((s) => s.notify);
   const clearRuntimeProfileSession = useStore(
@@ -92,13 +96,25 @@ export default function App() {
     // Connection status handler with handshake sequence
     window.serial.onStatus(async (status) => {
       console.log("[App] Serial status event", status);
+
       if (status === "connected") {
-        // Perform handshake before marking as fully connected
         try {
+          setConnectionTransportStatus("connected");
+          setConnectionHandshakeStatus("probing");
+          addConnectionEvent("transport", "Serial transport connected", {
+            port: useStore.getState().connection.port,
+            baud: useStore.getState().connection.baud,
+          });
+
           console.log("[App] Serial connected, performing handshake...");
           const handshakeInfo = await serialService.handshake();
           setConnectionStatus("connected");
+          setConnectionHandshakeStatus("ok");
           notify("ECU connected", "success", 2000);
+          addConnectionEvent("handshake", "ECU handshake completed", {
+            signature: handshakeInfo?.signature || "",
+            product: handshakeInfo?.product || "",
+          });
 
           const {
             currentProject,
@@ -111,14 +127,17 @@ export default function App() {
           if (
             currentProject?.ini?.signature &&
             handshakeInfo?.signature &&
-            currentProject.ini.signature.trim() !==
-              handshakeInfo.signature.trim()
+            currentProject.ini.signature.trim() !== handshakeInfo.signature.trim()
           ) {
             console.warn("[App] INI signature mismatch detected", {
               projectName: currentProject.projectName,
               projectSignature: currentProject.ini.signature,
               ecuSignature: handshakeInfo.signature,
               iniPath: currentProject.ini.path || "(embedded only)",
+            });
+            addConnectionEvent("warning", "Project INI signature does not match ECU", {
+              projectSignature: currentProject.ini.signature,
+              ecuSignature: handshakeInfo.signature,
             });
             notify(
               `INI mismatch: project=${currentProject.ini.signature}, ecu=${handshakeInfo.signature}. Check loaded project/INI.`,
@@ -135,6 +154,13 @@ export default function App() {
                 const different = results.different?.length || 0;
                 const missing = results.missing?.length || 0;
                 const errors = results.errors?.length || 0;
+
+                addConnectionEvent("sync", "Initial ECU comparison completed", {
+                  matched,
+                  different,
+                  missing,
+                  errors,
+                });
                 notify(
                   `CRC sync check: ${matched} match, ${different} different, ${missing} missing local`,
                   different > 0 ? "warning" : "info",
@@ -162,17 +188,28 @@ export default function App() {
         } catch (err) {
           console.error("[App] Handshake failed:", err);
           setConnectionStatus("error", "Handshake failed");
+          setConnectionTransportStatus("error");
+          setConnectionHandshakeStatus("failed");
+          addConnectionEvent("error", "ECU handshake failed", {
+            error: err?.message || "Handshake failed",
+          });
           notify("ECU handshake failed", "error");
-          // Disconnect if handshake fails
           window.serial.disconnect();
         }
       } else if (status === "disconnected") {
         serialService.reset();
         setConnectionStatus("disconnected");
+        setConnectionTransportStatus("disconnected");
+        setConnectionHandshakeStatus("idle");
+        addConnectionEvent("transport", "Serial transport disconnected");
         clearRuntimeProfileSession({ state: "Disconnected" });
       } else if (status.startsWith("error:")) {
         console.error("[App] Serial transport error", status.slice(6));
         setConnectionStatus("error", status.slice(6));
+        setConnectionTransportStatus("error");
+        addConnectionEvent("error", "Serial transport error", {
+          error: status.slice(6),
+        });
       }
     });
 
@@ -181,13 +218,16 @@ export default function App() {
       serialService.offRealtime(handleRealtime);
       serialService.destroy();
     };
-  }, [
-    init,
-    setConnectionStatus,
-    setRealtime,
-    notify,
-    clearRuntimeProfileSession,
-  ]);
+    }, [
+      init,
+      setConnectionStatus,
+      setConnectionTransportStatus,
+      setConnectionHandshakeStatus,
+      setRealtime,
+      notify,
+      addConnectionEvent,
+      clearRuntimeProfileSession,
+    ]);
 
   useEffect(() => {
     if (
@@ -213,7 +253,10 @@ export default function App() {
       settings.lastSerialBaud || "",
     ].join("|");
 
-    if (!currentProjectPath) return;
+    if (!currentProjectPath) {
+      autoReconnectAttemptRef.current = null;
+      return;
+    }
     if (!settings.autoReconnect) return;
     if (!settings.lastSerialPort) return;
     if (connectionStatus !== "disconnected") return;
@@ -251,6 +294,12 @@ export default function App() {
         setConnectionPort(settings.lastSerialPort);
         setConnectionBaud(baud);
         setConnectionStatus("connecting");
+        setConnectionTransportStatus("connecting");
+        setConnectionHandshakeStatus("idle");
+        addConnectionEvent("transport", "Attempting auto reconnect", {
+          port: settings.lastSerialPort,
+          baud,
+        });
 
         console.log("[App] Auto reconnect attempt", {
           port: settings.lastSerialPort,
@@ -264,11 +313,19 @@ export default function App() {
         if (!result?.ok) {
           console.warn("[App] Auto reconnect failed", result?.error);
           setConnectionStatus("error", result?.error || "Auto reconnect failed");
+          setConnectionTransportStatus("error");
+          addConnectionEvent("error", "Auto reconnect failed", {
+            error: result?.error || "Auto reconnect failed",
+          });
         }
       } catch (error) {
         if (cancelled) return;
         console.warn("[App] Auto reconnect exception", error);
         setConnectionStatus("error", error?.message || "Auto reconnect failed");
+        setConnectionTransportStatus("error");
+        addConnectionEvent("error", "Auto reconnect failed", {
+          error: error?.message || "Auto reconnect failed",
+        });
       }
     };
 
@@ -286,6 +343,9 @@ export default function App() {
     setConnectionStatus,
     setConnectionPort,
     setConnectionBaud,
+    setConnectionTransportStatus,
+    setConnectionHandshakeStatus,
+    addConnectionEvent,
   ]);
 
   useEffect(() => {
@@ -419,6 +479,10 @@ export default function App() {
                   <Route
                     path={ROUTES.SETTINGS_PROGRAMMABLE}
                     component={ProgrammableOutputs}
+                  />
+                  <Route
+                    path={ROUTES.SETTINGS_IO_SUMMARY}
+                    component={IOSummary}
                   />
                   <Route path={ROUTES.SETTINGS_SPARK} component={SparkSetup} />
                   <Route path={ROUTES.SETTINGS_AFR} component={AFRO2Settings} />

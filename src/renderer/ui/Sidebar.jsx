@@ -27,6 +27,7 @@ import {
   FileX,
   Table2,
   Fuel,
+  LayoutGrid,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
@@ -180,6 +181,11 @@ const NAV_CONFIG = [
     icon: Plug,
     theme: "purple",
     items: [
+      {
+        path: ROUTES.SETTINGS_IO_SUMMARY,
+        label: "I/O Summary",
+        icon: LayoutGrid,
+      },
       {
         path: ROUTES.SETTINGS_PROGRAMMABLE,
         label: "Prog. Outputs",

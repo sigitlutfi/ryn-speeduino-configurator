@@ -16,48 +16,51 @@ import {
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
-import { createIniSchema } from "../shared/utils/validation";
 import { evaluateCondition } from "../shared/utils/evaluator";
+import { triggerSetupSchema } from "../shared/schemas";
+
+const TRIGGER_FIELDS = [
+  "TrigPattern",
+  "numTeeth",
+  "TrigSpeed",
+  "missingTeeth",
+  "TrigAngMul",
+  "TrigAng",
+  "SkipCycles",
+  "TrigEdge",
+  "TrigEdgeSec",
+  "trigPatternSec",
+  "TrigFilter",
+  "useResync",
+];
 
 export default function TriggerSetup() {
-  const currentProject = useStore((s) => s.currentProject);
   const parsedIni = useStore((s) => s.parsedIni);
   const [validationErrors, setValidationErrors] = useState({});
 
   const {
     localConstants,
-    setLocalField,
+    getFieldValue,
+    setFieldValue,
+    getFieldInfo,
     handleSave,
     discardChanges,
     isSaving,
     saveStatus,
     isConnected,
     isDirty,
-  } = useTuningModule(0, {
+  } = useTuningModule(TRIGGER_FIELDS, {
     onValidate: (data) => {
-      const page0 = data[0] || {};
-      const fields = [
-        "TrigPattern",
-        "numTeeth",
-        "TrigSpeed",
-        "missingTeeth",
-        "TrigAngMul",
-        "TrigAng",
-        "SkipCycles",
-        "TrigEdge",
-        "TrigEdgeSec",
-        "trigPatternSec",
-        "TrigFilter",
-        "useResync",
-      ];
-
-      const triggerSetupSchema = createIniSchema(parsedIni, 0, fields);
-      const result = triggerSetupSchema.safeParse(page0);
+      const mergedFields = Object.values(data || {}).reduce(
+        (acc, pageData) => ({ ...acc, ...(pageData || {}) }),
+        {},
+      );
+      const result = triggerSetupSchema.safeParse(mergedFields);
 
       const errors = {};
 
       // Cross-field logic: Missing tooth pattern (TrigPattern=0) MUST have missing teeth > 0
-      if (page0.TrigPattern === 0 && page0.missingTeeth === 0) {
+      if (mergedFields.TrigPattern === 0 && mergedFields.missingTeeth === 0) {
         errors.missingTeeth =
           "Missing tooth pattern requires at least 1 missing tooth";
       }
@@ -87,18 +90,15 @@ export default function TriggerSetup() {
   }
 
   const constantsDef = parsedIni.constants?.pages || {};
-  const constants = localConstants[0] || {};
 
   const getConstantDef = (name) => {
-    for (const page in constantsDef) {
-      const def = constantsDef[page][name];
-      if (def) return { ...def, name, page };
-    }
-    return null;
+    const info = getFieldInfo(name);
+    if (!info) return null;
+    return { ...info.meta, name: info.key, page: info.pageId };
   };
 
   const handleFieldChange = (name, value) => {
-    setLocalField(0, name, value);
+    setFieldValue(name, value);
     if (validationErrors[name]) {
       setValidationErrors((prev) => {
         const next = { ...prev };
@@ -111,7 +111,8 @@ export default function TriggerSetup() {
   const getValue = (name) => {
     const def = getConstantDef(name);
     if (!def) return 0;
-    return constants[name] ?? def.defaultValue ?? 0;
+    const currentValue = getFieldValue(name);
+    return currentValue ?? def.defaultValue ?? 0;
   };
 
   const getIsFieldEnabled = (name) => {
@@ -121,9 +122,10 @@ export default function TriggerSetup() {
 
     // 2. Prepare context (Flattened constants across all pages for cross-page conditions)
     const context = {
-      ...(localConstants[0] || {}),
-      ...(localConstants[1] || {}),
-      ...(localConstants[2] || {}),
+      ...Object.values(localConstants || {}).reduce(
+        (acc, pageData) => ({ ...acc, ...(pageData || {}) }),
+        {},
+      ),
     };
 
     // 3. evaluate the condition string using our dynamic evaluator
@@ -134,7 +136,7 @@ export default function TriggerSetup() {
     const def = getConstantDef(name);
     if (!def) return null;
 
-    const currentValue = constants[name] ?? def.defaultValue ?? 0;
+    const currentValue = getValue(name);
     const error = validationErrors[name];
     const disabled = getIsFieldEnabled(name) === false;
 

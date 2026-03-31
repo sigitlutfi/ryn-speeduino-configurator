@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { useStore } from "../../../core/store";
 import CurveEditor from "../../../ui/CurveEditor";
 import {
-  Database,
   Thermometer,
   Info,
   AlertTriangle,
@@ -15,14 +14,16 @@ import TuningHeader from "../../shared/components/TuningHeader";
 import { createIniSchema, isMonotonic } from "../../shared/utils/validation";
 
 const IATCorrection = () => {
-  const PAGE = 1;
+  const parsedIni = useStore((s) => s.parsedIni);
   const X_BINS_NAME = "airDenBins";
   const Y_RATES_NAME = "airDenRates";
+  const IAT_FIELDS = [X_BINS_NAME, Y_RATES_NAME];
 
   const [validationErrors, setValidationErrors] = useState({});
 
   const {
     localConstants,
+    getFieldInfo,
     setLocalPage,
     handleSave,
     discardChanges,
@@ -30,13 +31,14 @@ const IATCorrection = () => {
     saveStatus,
     isConnected,
     isDirty,
-  } = useTuningModule(PAGE, {
+  } = useTuningModule(IAT_FIELDS, {
+    page: 1,
     onValidate: (data) => {
-      const p1 = data[PAGE] || {};
-      const fields = [X_BINS_NAME, Y_RATES_NAME];
+      const pageId = getFieldInfo(X_BINS_NAME)?.pageId ?? 1;
+      const pageData = data[pageId] || {};
 
-      const iatSchema = createIniSchema(parsedIni, PAGE, fields);
-      const result = iatSchema.safeParse(p1);
+      const iatSchema = createIniSchema(parsedIni, pageId, IAT_FIELDS);
+      const result = iatSchema.safeParse(pageData);
 
       const errors = {};
 
@@ -46,7 +48,7 @@ const IATCorrection = () => {
         });
       }
 
-      if (!isMonotonic(p1[X_BINS_NAME])) {
+      if (!isMonotonic(pageData[X_BINS_NAME])) {
         errors[X_BINS_NAME] = "Temperature bins must be increasing";
       }
 
@@ -62,7 +64,8 @@ const IATCorrection = () => {
 
   const [hoveredIdx, setHoveredIdx] = useState(null);
 
-  const currentData = localConstants[PAGE] || {};
+  const pageId = getFieldInfo(X_BINS_NAME)?.pageId ?? 1;
+  const currentData = localConstants[pageId] || {};
   const xValues = currentData[X_BINS_NAME] || [
     0, 10, 20, 30, 40, 50, 60, 70, 80,
   ];
@@ -71,7 +74,7 @@ const IATCorrection = () => {
   ];
 
   const handleCurveChange = (newX, newY) => {
-    setLocalPage(PAGE, {
+    setLocalPage(pageId, {
       [X_BINS_NAME]: newX,
       [Y_RATES_NAME]: newY,
     });
@@ -84,7 +87,7 @@ const IATCorrection = () => {
     if (type === "x") nextX[index] = value;
     else nextY[index] = value;
 
-    setLocalPage(PAGE, {
+    setLocalPage(pageId, {
       [X_BINS_NAME]: nextX,
       [Y_RATES_NAME]: nextY,
     });

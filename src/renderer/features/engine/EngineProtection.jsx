@@ -41,7 +41,7 @@ const DEFAULT_CURVES = {
 };
 
 const EngineProtection = () => {
-  const parsedIni = useStore((s) => s.currentProject?.parsedIni);
+  const parsedIni = useStore((s) => s.parsedIni);
   const realtime = useStore((s) => s.realtime);
   const engine = realtime?.engine || {};
 
