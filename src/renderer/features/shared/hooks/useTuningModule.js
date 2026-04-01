@@ -134,7 +134,7 @@ export function useTuningModule(targets, options = {}) {
 
         // Sync targeted pages
         pagesFound.forEach((pId) => {
-          const storeData = getDecodedPages(currentProject.constants)?.[pId] || {};
+          const storeData = getDecodedPages(currentProject.constants, parsedIni)?.[pId] || {};
           if (JSON.stringify(prev[pId]) !== JSON.stringify(storeData)) {
             next[pId] = storeData;
             hasChanges = true;
@@ -308,13 +308,13 @@ export function useTuningModule(targets, options = {}) {
     const reset = {};
     if (isPageTargetMode) {
       pagesFound.forEach((pId) => {
-        const decodedPage = getDecodedPages(currentProject?.constants)?.[pId];
+        const decodedPage = getDecodedPages(currentProject?.constants, parsedIni)?.[pId];
         if (decodedPage) reset[pId] = decodedPage;
       });
     } else {
       Object.values(fieldToPageMap.map).forEach((info) => {
         if (!info) return;
-        const decodedPage = getDecodedPages(currentProject?.constants)?.[info.pageId];
+        const decodedPage = getDecodedPages(currentProject?.constants, parsedIni)?.[info.pageId];
         if (!decodedPage) return;
         if (!reset[info.pageId]) reset[info.pageId] = {};
         reset[info.pageId][info.key] = decodedPage[info.key];
@@ -322,7 +322,7 @@ export function useTuningModule(targets, options = {}) {
     }
     setLocalConstants(reset);
     notify("Changes discarded", "info");
-  }, [currentProject?.constants, pagesFound, isPageTargetMode, fieldToPageMap, notify]);
+  }, [currentProject?.constants, pagesFound, isPageTargetMode, fieldToPageMap, notify, parsedIni]);
 
   const isDirty = useMemo(() => {
     if (isPageTargetMode) {
@@ -333,7 +333,7 @@ export function useTuningModule(targets, options = {}) {
         if (DIRTY_SYNC_STATES.has(pageSnapshot?.syncState)) return true;
 
         const current = localConstants[pId] || {};
-        const store = getDecodedPages(currentProject?.constants)?.[pId] || {};
+        const store = getDecodedPages(currentProject?.constants, parsedIni)?.[pId] || {};
         if (JSON.stringify(current) !== JSON.stringify(store)) return true;
       }
       return false;
@@ -347,7 +347,7 @@ export function useTuningModule(targets, options = {}) {
       if (DIRTY_SYNC_STATES.has(pageSnapshot?.syncState)) return true;
 
       const currentValue = localConstants[info.pageId]?.[info.key];
-      const storeValue = getDecodedPages(currentProject?.constants)?.[info.pageId]?.[info.key];
+      const storeValue = getDecodedPages(currentProject?.constants, parsedIni)?.[info.pageId]?.[info.key];
       if (JSON.stringify(currentValue) !== JSON.stringify(storeValue)) return true;
     }
 
@@ -359,6 +359,7 @@ export function useTuningModule(targets, options = {}) {
     DIRTY_SYNC_STATES,
     isPageTargetMode,
     fieldToPageMap,
+    parsedIni,
   ]);
 
   return {

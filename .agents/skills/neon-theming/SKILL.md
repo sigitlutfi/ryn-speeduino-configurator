@@ -1,53 +1,69 @@
 ---
 name: neon-theming
-description: Guidelines and utility classes for implementing the premium "Neon Dark" theme inspired by ryn-race-timer.
+description: Visual direction guidance for the repo's restrained neon automotive identity, including accent color usage, telemetry emphasis, glow discipline, and background mood. Use when a task needs the right visual character on top of the shared acrylic UI system.
 ---
 
 # Neon Theming Skill
 
-This skill provides the design tokens and utility patterns for creating high-performance, visually stunning automotive dashboards with a "Neon/Cyberpunk" aesthetic.
+Use this skill for visual character, not for the shared material system. Pair it with `ui-acrylic-system` when a task needs reusable surfaces, spacing, or utility classes.
 
-## 🎨 Color Palette (Tailwind Config)
+## Visual Direction
+
+1. Build around dark graphite and petrol-blue surfaces instead of pure black.
+2. Use cyan and green as signal colors, with orange and red reserved for warnings or hot states.
+3. Keep the look technical, focused, and instrument-like rather than flashy.
+4. Use glow as a minor accent only; contrast and hierarchy should carry most of the emphasis.
+5. Avoid anything that makes the UI feel like a generic cyberpunk template.
+
+## Color Palette
 
 Add the following to your `tailwind.config.js`:
 
 ```javascript
 neon: {
-  green: '#00ffb4',
-  cyan: '#00d4ff',
-  orange: '#ff6b35',
-  purple: '#a855f7',
-  red: '#f43f5e',
-  yellow: '#eab308',
+  green: '#69f0ae',
+  cyan: '#3be7ff',
+  blue: '#4d7cff',
+  orange: '#ff8a3d',
+  red: '#ff5f57',
+  yellow: '#ffd166',
 },
 bg: {
-  deep: '#040608',
-  primary: '#080b14',
-  card: '#0d1220',
+  deep: '#04070b',
+  shell: '#0a1017',
+  panel: '#101826',
+  elevated: '#162235',
 }
 ```
 
-## 🔡 Typography
+## Typography
 
-Use Google Fonts: `Orbitron`, `Share Tech Mono`, and `Inter`.
+Use `Orbitron` for display labels, `Share Tech Mono` for numeric readouts, and a clean UI sans only for supporting text.
 
-- **Headers/Display**: `font-orbitron` (Uppercase, tracking-widest).
-- **Data/Readouts**: `font-mono` (`Share Tech Mono`).
-- **UI/Body**: `font-inter`.
+- Headers and section labels: uppercase, tight leading, moderate tracking.
+- Numeric readouts: large mono, tabular spacing, bright foreground.
+- Supporting UI copy: neutral and quieter than telemetry values.
 
-## ✨ Core Utilities
+## Do And Avoid
 
-### Glassmorphism
-Apply to panels for depth:
-- `glass`: Subtle blur with `rgba(8, 12, 20, 0.85)`.
-- `glass-strong`: Heavier blur and shadow for overlays.
+- Do use restrained cyan and green accents to guide attention.
+- Do let one or two key signals own the accent color in each module.
+- Do keep the UI feeling operational and professional.
+- Avoid heavy glow on every edge, number, and divider.
+- Avoid rainbow accents or decorative color noise.
+- Avoid generic glassmorphism decisions here; leave surface rules to `ui-acrylic-system`.
 
-### Neon Glows
-- `glow-cyan`: `text-shadow: 0 0 8px rgba(0, 212, 255, 0.8)`.
-- `box-glow-green`: Subtle outer and inner shadow for badges/indicators.
+## Glow System
 
-### Background Overlay
-Include the `neon-grid` class in your main container:
+- Use cyan glow for active telemetry, focus states, and highlighted panel headers.
+- Use green glow for healthy or connected states.
+- Use orange or red for warnings, limit thresholds, or destructive actions.
+- Keep glow narrow and local. It should support hierarchy, not replace it.
+
+## Background Treatment
+
+Use a layered background, not a flat fill. Combine a dark gradient wash, restrained radial light pools, and a subtle technical pattern only when it helps the page.
+
 ```css
 .neon-grid {
   position: fixed;
@@ -55,43 +71,40 @@ Include the `neon-grid` class in your main container:
   pointer-events: none;
   z-index: 0;
   background-image:
-    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(59, 231, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 231, 255, 0.04) 1px, transparent 1px);
   background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.9), transparent);
 }
 ```
 
-## 🏗️ Component Architecture
+## Usage Rules
 
-To maintain modularity and reusability, follow these architectural rules:
+1. Apply this skill after the base surface and spacing system is already in place.
+2. Use accent color and glow to mark state changes, active modules, and key telemetry.
+3. Keep most text neutral so highlighted values actually stand out.
 
-### 1. Features vs UI
-- **`src/renderer/features/`**: Contains domain-specific, stateful components (e.g., `Dashboard`, `VETable`). 
-  - They *can* import from the store.
-  - They are organized by business domain.
-- **`src/renderer/ui/`**: Contains stateless, atomic, or layout components (e.g., `Gauge`, `Button`, `TableEditor`).
-  - They *should not* import the store directly (prefer props).
-  - They are highly reusable across different features.
-
-### 2. State Access
-- Always import the store from `../../core/store.js`.
-- Use selective selectors: `const rpm = useStore(s => s.realtime.rpm)`.
-
-### 3. Shared Logic
-- Place ECU-agnostic logic (parsers, utility functions) in `src/shared/`.
-- Ensure main and renderer processes can import from `shared/` without circular dependencies.
-
-## 🛠️ Usage Example
+## Usage Example
 
 ```jsx
-<div className="glass p-4 rounded-xl border-white/5 shadow-2xl overflow-hidden relative">
-  {/* Add a subtle top-right glow light source */}
-  <div className="absolute top-0 right-0 w-32 h-32 bg-neon-cyan/5 blur-3xl pointer-events-none" />
-  
-  <h2 className="text-lg font-orbitron font-bold text-neon-cyan uppercase glow-cyan">
+<section className="acrylic-panel relative overflow-hidden rounded-xl px-4 py-3">
+  <div className="pointer-events-none absolute right-0 top-0 h-24 w-24 bg-neon-cyan/10 blur-3xl" />
+
+  <p className="font-orbitron text-xs uppercase tracking-[0.28em] text-white/45">
+    Live Telemetry
+  </p>
+
+  <h2 className="mt-1 font-orbitron text-base font-semibold uppercase tracking-[0.18em] text-neon-cyan">
     Telemetry
   </h2>
-  
-  <div className="text-3xl font-mono text-white">12,500 RPM</div>
-</div>
+
+  <div className="mt-3 flex items-end justify-between gap-3">
+    <div className="font-mono text-4xl text-white">12,500 RPM</div>
+    <div className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-neon-green">
+      SYNCED
+    </div>
+  </div>
+
+  <div className="mt-2 h-px w-full bg-gradient-to-r from-neon-cyan/50 via-white/10 to-transparent" />
+</section>
 ```

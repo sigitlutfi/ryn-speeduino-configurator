@@ -21,6 +21,7 @@ import {
   GitCompare,
   Download,
   CheckCircle2,
+  Upload,
 } from "lucide-react";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -455,6 +456,14 @@ export default function AppToolbar() {
                     }
                   }}
                 />
+                <MenuItem
+                  icon={Upload}
+                  label="Flash Firmware…"
+                  onClick={() => {
+                    navigate(ROUTES.TOOLS_FLASH_FIRMWARE);
+                    closeMenus();
+                  }}
+                />
               </>
             ) : (
               <div className="px-4 py-6 text-center">
@@ -533,6 +542,19 @@ export default function AppToolbar() {
           className="flex items-center gap-4 px-3"
           style={{ WebkitAppRegion: "no-drag" }}
         >
+          {currentProject && (
+            <button
+              onClick={() => navigate(ROUTES.TOOLS_FLASH_FIRMWARE)}
+              className="group flex items-center gap-2 rounded-lg border border-neon-orange/25 bg-neon-orange/10 px-3 py-1.5 text-neon-orange transition-all duration-300 hover:bg-neon-orange hover:text-white"
+              title="Open firmware flashing tool"
+            >
+              <Upload size={12} className="transition-transform group-hover:-translate-y-0.5" />
+              <span className="text-[9px] font-black uppercase tracking-widest">
+                Flash FW
+              </span>
+            </button>
+          )}
+
           {connectionStatus === "connected" && (
             <div className="flex items-center gap-2">
               {needsPullCta ? (

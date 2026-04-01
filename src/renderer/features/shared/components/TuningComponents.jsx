@@ -1,5 +1,33 @@
 import React, { useEffect, useState } from "react";
-import { ChevronDown, HelpCircle, AlertTriangle } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+
+function normalizeSelectOption(opt, index) {
+  if (typeof opt === "string") {
+    return { label: opt, value: index };
+  }
+
+  if (!opt || typeof opt !== "object") {
+    return null;
+  }
+
+  const label =
+    opt.label ?? opt.name ?? (opt.value !== undefined ? String(opt.value) : "");
+  const value = opt.value ?? opt.index ?? index;
+
+  if (!label || label.toUpperCase() === "INVALID") {
+    return null;
+  }
+
+  return {
+    ...opt,
+    label,
+    value,
+  };
+}
+
+function isOptionSelected(optionValue, currentValue) {
+  return String(optionValue) === String(currentValue ?? "");
+}
 
 /**
  * Standard Select Row for Tuning Modules
@@ -13,14 +41,15 @@ export const SelectRow = ({
   icon: Icon,
   disabled = false,
 }) => {
-  // Filter out INVALID options if they are just strings
   const cleanOptions = Array.isArray(options)
-    ? options
-        .map((opt, i) =>
-          typeof opt === "string" ? { label: opt, index: i } : opt,
-        )
-        .filter((opt) => opt.label && opt.label.toUpperCase() !== "INVALID")
+    ? options.map(normalizeSelectOption).filter(Boolean)
     : [];
+
+  const selectedValue = cleanOptions.some((opt) =>
+    isOptionSelected(opt.value, value),
+  )
+    ? value
+    : (cleanOptions[0]?.value ?? 0);
 
   return (
     <div
@@ -43,15 +72,20 @@ export const SelectRow = ({
 
         <div className="relative w-full">
           <select
-            value={value ?? 0}
+            value={String(selectedValue)}
             disabled={disabled}
-            onChange={(e) => onChange(parseInt(e.target.value, 10))}
+            onChange={(e) => {
+              const selectedOption = cleanOptions.find((opt) =>
+                isOptionSelected(opt.value, e.target.value),
+              );
+              onChange(selectedOption?.value ?? e.target.value);
+            }}
             className="w-full bg-black/40 border border-white/10 rounded-2xl pl-5 pr-10 py-3.5 text-[11px] font-orbitron font-black text-neon-cyan outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20 transition-all appearance-none cursor-pointer hover:bg-black/60 shadow-xl"
           >
             {cleanOptions.map((opt) => (
               <option
-                key={opt.index}
-                value={opt.index}
+                key={`${label}-${String(opt.value)}`}
+                value={String(opt.value)}
                 className="bg-bg-deep text-white"
               >
                 {opt.label}
@@ -120,11 +154,20 @@ export const InputField = ({
             onChange={(e) => {
               const nextDraft = e.target.value;
               setDraft(nextDraft);
-              onChange(
-                rawInput
-                  ? nextDraft
-                  : (nextDraft === "" ? 0 : parseFloat(nextDraft)),
-              );
+              if (rawInput) {
+                onChange(nextDraft);
+                return;
+              }
+
+              if (nextDraft === "") {
+                onChange(0);
+                return;
+              }
+
+              const parsed = parseFloat(nextDraft);
+              if (Number.isFinite(parsed)) {
+                onChange(parsed);
+              }
             }}
             onBlur={(e) => {
               setIsFocused(false);
@@ -146,12 +189,25 @@ export const InputField = ({
 /**
  * Standard Toggle Row
  */
-export const ToggleRow = ({ label, value, onChange, description }) => {
+export const ToggleRow = ({
+  label,
+  value,
+  onChange,
+  description,
+  disabled = false,
+}) => {
   const active = !!value;
   return (
-    <div
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
       onClick={() => onChange(active ? 0 : 1)}
-      className="group relative flex items-center justify-between p-6 rounded-[32px] bg-black/20 border border-white/5 hover:border-white/10 transition-all duration-500 cursor-pointer overflow-hidden"
+      className={`group relative flex w-full items-center justify-between p-6 rounded-[32px] bg-black/20 border border-white/5 transition-all duration-500 overflow-hidden text-left ${
+        disabled
+          ? "opacity-40 pointer-events-none"
+          : "cursor-pointer hover:border-white/10"
+      }`}
     >
       <div
         className={`absolute inset-y-0 left-0 w-1 transition-all duration-500 ${active ? "bg-neon-cyan shadow-glow-cyan" : "bg-transparent"}`}
@@ -177,7 +233,7 @@ export const ToggleRow = ({ label, value, onChange, description }) => {
           className={`w-4 h-4 rounded-full transition-all duration-500 transform ${active ? "translate-x-6 bg-neon-cyan shadow-glow-cyan" : "translate-x-0 bg-white/10"}`}
         />
       </div>
-    </div>
+    </button>
   );
 };
 
@@ -186,7 +242,13 @@ export const ToggleRow = ({ label, value, onChange, description }) => {
  */
 export const InfoCard = ({ title, children, icon: Icon, theme = "cyan" }) => {
   const themes = {
+    blue: "border-neon-blue/20 bg-neon-blue/5 text-neon-blue box-glow-blue",
     cyan: "border-neon-cyan/20 bg-neon-cyan/5 text-neon-cyan box-glow-cyan",
+    green:
+      "border-neon-green/20 bg-neon-green/5 text-neon-green box-glow-green",
+    orange:
+      "border-neon-orange/20 bg-neon-orange/5 text-neon-orange box-glow-orange",
+    red: "border-neon-red/20 bg-neon-red/5 text-neon-red box-glow-red",
     yellow:
       "border-neon-yellow/20 bg-neon-yellow/5 text-neon-yellow box-glow-yellow",
     magenta:
@@ -198,7 +260,7 @@ export const InfoCard = ({ title, children, icon: Icon, theme = "cyan" }) => {
 
   return (
     <div
-      className={`p-6 rounded-[32px] border ${themes[theme]} transition-all duration-500 hover:scale-[1.02]`}
+      className={`p-2 rounded-xl border ${themes[theme] || themes.cyan} transition-all duration-500 hover:scale-[1.02]`}
     >
       <div className="flex items-center gap-3 mb-3">
         {Icon && <Icon size={18} />}

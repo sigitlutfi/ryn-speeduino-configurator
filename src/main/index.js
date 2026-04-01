@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, protocol, net } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
 import started from "electron-squirrel-startup";
 import { createMockSerial } from "../shared/protocol/mock-serial.js";
 
@@ -11,6 +13,97 @@ if (started) {
 // --- Serial state ---
 let activePort = null; // serialport instance or mock
 let mainWindow = null;
+let activeFirmwareFlash = null;
+
+const emitFirmwareStatus = (payload) => {
+  mainWindow?.webContents.send("firmware:status", payload);
+};
+
+const closeActivePortForFlash = async () => {
+  if (!activePort) return;
+
+  try {
+    if (typeof activePort.close === "function") {
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+
+        try {
+          activePort.close(() => finish());
+          setTimeout(finish, 250);
+        } catch {
+          finish();
+        }
+      });
+    }
+  } catch (error) {
+    console.warn("[main] Failed to close active port before flash", error);
+  } finally {
+    activePort = null;
+    mainWindow?.webContents.send("serial:status", "disconnected");
+  }
+};
+
+const resolveAvrdudeTooling = () => {
+  const binaryName = process.platform === "win32" ? "avrdude.exe" : "avrdude";
+  const platformFolder =
+    process.platform === "win32"
+      ? "avrdude-windows"
+      : process.platform === "darwin"
+        ? "avrdude-darwin-x86_64"
+        : process.arch === "x32"
+          ? "avrdude-linux_i686"
+          : process.arch === "arm"
+            ? "avrdude-armhf"
+            : process.arch === "arm64"
+              ? "avrdude-aarch64"
+              : "avrdude-linux_x86_64";
+  const bundledBase = app.isPackaged
+    ? path.join(process.resourcesPath, "bin", platformFolder)
+    : path.join(app.getAppPath(), "bin", platformFolder);
+  const bundledBinary = path.join(bundledBase, binaryName);
+  const envBinary = process.env.SPEEDUINO_AVRDUDE_PATH;
+
+  if (fs.existsSync(bundledBinary)) {
+    const bundledConfig = path.join(bundledBase, "avrdude.conf");
+    return {
+      executable: bundledBinary,
+      configPath: fs.existsSync(bundledConfig) ? bundledConfig : null,
+      source: "bundled",
+    };
+  }
+
+  if (envBinary && fs.existsSync(envBinary)) {
+    const envDir = path.dirname(envBinary);
+    const envConfig = path.join(envDir, "avrdude.conf");
+    return {
+      executable: envBinary,
+      configPath: fs.existsSync(envConfig) ? envConfig : null,
+      source: "environment",
+    };
+  }
+
+  return {
+    executable: "avrdude",
+    configPath: null,
+    source: "path",
+  };
+};
+
+const pushFirmwareLog = (phase, chunk) => {
+  const text = String(chunk ?? "");
+  if (!text.trim()) return;
+
+  emitFirmwareStatus({
+    type: "log",
+    phase,
+    message: text,
+  });
+};
 
 // --- IPC Handlers ---
 
@@ -216,6 +309,187 @@ ipcMain.handle("project:pick-image", async () => {
 
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
+});
+
+ipcMain.handle("firmware:pick-hex", async () => {
+  const { dialog } = require("electron");
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select Firmware HEX File",
+    properties: ["openFile"],
+    filters: [{ name: "Firmware HEX", extensions: ["hex"] }],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle("firmware:flash", async (_event, payload = {}) => {
+  const port = payload.port;
+  const hexPath = payload.hexPath;
+
+  if (activeFirmwareFlash) {
+    return { ok: false, error: "Firmware flashing is already in progress" };
+  }
+
+  if (!port) {
+    return { ok: false, error: "Serial port is required" };
+  }
+
+  if (!hexPath) {
+    return { ok: false, error: "HEX file is required" };
+  }
+
+  if (!fs.existsSync(hexPath)) {
+    return { ok: false, error: "Selected HEX file does not exist" };
+  }
+
+  await closeActivePortForFlash();
+
+  const tooling = resolveAvrdudeTooling();
+  const args = [];
+  if (tooling.configPath) {
+    args.push("-C", tooling.configPath);
+  }
+  args.push(
+    "-v",
+    "-p",
+    "atmega2560",
+    "-c",
+    "wiring",
+    "-b",
+    "115200",
+    "-P",
+    port,
+    "-D",
+    "-U",
+    `flash:w:${hexPath}:i`,
+  );
+
+  emitFirmwareStatus({
+    type: "state",
+    phase: "preflight",
+    message: `Launching avrdude via ${tooling.source}`,
+  });
+
+  return await new Promise((resolve) => {
+    let stderrBuffer = "";
+    let combinedLog = "";
+    let burnStarted = false;
+    let progressPercent = 0;
+    let settled = false;
+
+    const finalize = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    try {
+      const child = spawn(tooling.executable, args, {
+        windowsHide: true,
+      });
+
+      activeFirmwareFlash = child;
+
+      emitFirmwareStatus({
+        type: "state",
+        phase: "flashing",
+        percent: 0,
+        message: `Flashing ${path.basename(hexPath)} to ${port}`,
+      });
+
+      child.stdout.on("data", (chunk) => {
+        const text = chunk.toString();
+        combinedLog += text;
+        pushFirmwareLog("stdout", text);
+      });
+
+      child.stderr.on("data", (chunk) => {
+        const text = chunk.toString();
+        combinedLog += text;
+        stderrBuffer += text;
+        pushFirmwareLog("stderr", text);
+
+        if (!burnStarted && stderrBuffer.includes("Writing |")) {
+          burnStarted = true;
+          emitFirmwareStatus({
+            type: "state",
+            phase: "flashing",
+            percent: 0,
+            message: "Writing firmware to ECU",
+          });
+        }
+
+        if (burnStarted) {
+          const hashes = (text.match(/#/g) || []).length;
+          if (hashes > 0) {
+            progressPercent = Math.min(100, progressPercent + hashes);
+            emitFirmwareStatus({
+              type: "progress",
+              phase: "flashing",
+              percent: progressPercent,
+            });
+          }
+        }
+      });
+
+      child.on("error", (error) => {
+        activeFirmwareFlash = null;
+        const message =
+          error.code === "ENOENT"
+            ? "avrdude was not found. Install it or configure SPEEDUINO_AVRDUDE_PATH."
+            : error.message;
+
+        emitFirmwareStatus({
+          type: "error",
+          phase: "flashing",
+          message,
+        });
+        finalize({ ok: false, error: message, log: combinedLog });
+      });
+
+      child.on("close", (code) => {
+        activeFirmwareFlash = null;
+
+        if (code === 0) {
+          emitFirmwareStatus({
+            type: "progress",
+            phase: "flashing",
+            percent: 100,
+          });
+          emitFirmwareStatus({
+            type: "completed",
+            phase: "flashing",
+            percent: 100,
+            message: "Firmware flashing completed",
+          });
+          finalize({ ok: true, code: 0, log: combinedLog });
+          return;
+        }
+
+        const errorMessage =
+          stderrBuffer.trim() ||
+          `avrdude exited with code ${code}`;
+
+        emitFirmwareStatus({
+          type: "error",
+          phase: "flashing",
+          message: errorMessage,
+          code,
+        });
+        finalize({ ok: false, error: errorMessage, code, log: combinedLog });
+      });
+    } catch (error) {
+      activeFirmwareFlash = null;
+      const message = error.message || "Firmware flash failed";
+      emitFirmwareStatus({
+        type: "error",
+        phase: "flashing",
+        message,
+      });
+      finalize({ ok: false, error: message, log: combinedLog });
+    }
+  });
 });
 
 ipcMain.handle("project:pick-directory", async () => {

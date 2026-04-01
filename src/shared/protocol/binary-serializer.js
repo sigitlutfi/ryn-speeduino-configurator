@@ -17,6 +17,11 @@ function getDataTypeSize(dataType) {
   }
 }
 
+function canAccess(buffer, offset, dataType) {
+  const typeSize = getDataTypeSize(dataType);
+  return offset >= 0 && offset + typeSize <= buffer.length;
+}
+
 /**
  * Write a scalar value to buffer based on data type
  */
@@ -74,6 +79,13 @@ export function serializeValue(buffer, offset, value, meta) {
     // Bits can be backed by U08, U16, U32 (matching binary-parser.js)
     const underlyingType = dataType || "U08";
     const typeSize = getDataTypeSize(underlyingType);
+
+    if (!canAccess(buffer, offset, underlyingType)) {
+      console.warn(
+        `[Serializer] Skipping bitfield write at offset ${offset}: ${underlyingType} needs ${typeSize} byte(s), buffer length is ${buffer.length}`,
+      );
+      return;
+    }
 
     // Read current underlying value
     let raw = 0;

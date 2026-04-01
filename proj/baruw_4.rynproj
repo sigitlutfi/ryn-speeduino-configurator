@@ -5,7 +5,14 @@
   "engine": {
     "displacement": null,
     "cylinders": null,
-    "type": null
+    "type": null,
+    "reqFuelCalc": {
+      "displacement": 200,
+      "displacementUnit": "cc",
+      "injectorFlow": 200,
+      "injectorUnit": "ccmin",
+      "stoich": 14.7
+    }
   },
   "ini": {
     "path": "C:\\Users\\ryn\\speeduino\\speeduino\\reference\\speeduino.ini",
@@ -22,7 +29,7 @@
       "baud": 115200
     },
     "sync": {
-      "state": "fully-verified",
+      "state": "partially-synced",
       "activePages": [
         1,
         2,
@@ -40,8 +47,8 @@
         14,
         15
       ],
-      "lastConnectedAt": "2026-03-30T17:59:24.893Z",
-      "lastSyncAt": "2026-03-30T16:53:52.065Z"
+      "lastConnectedAt": "2026-03-31T08:36:47.721Z",
+      "lastSyncAt": "2026-03-31T07:00:12.084Z"
     }
   },
   "units": {
@@ -55,22 +62,22 @@
         "pageId": 1,
         "size": 128,
         "rawEncoding": "base64",
-        "rawData": "CmQopLSvqJqGeXBoZmQUKQADRkYtAgIAegKBCmMBYwFjAWMBQUBAZFoyllAa5goEAQaTAAAAAAAAAA8KMh5QDAp5AP///wkZFA8KGRQPBhQoUHgIBgQCFChQesAgFAgFFC1BMgpaAAAAMgAAAAAAAAAAAAAAAAA8FLQK//8SAGQ=",
-        "crc32": "65C1983E",
+        "rawData": "CmQopLSvqJqGeXBoZmQUZgADRkYtAgIAegKBCmMBYwFjAWMBSRFAZFoyllAa5goEAQaTAAAAAAAAAA8KMh5QDAp5AP///wkZFA8KGRQPBhQoUHgIBgQCFChQesAgFAgFFC1BMgpaAAAAMgAAAAAAAAAAAAAAAAA8FLQK//8SAGQ=",
+        "crc32": "A5D73699",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:49.053Z",
-        "lastVerifiedAt": "2026-03-30T17:59:24.928Z",
+        "lastReadAt": "2026-03-31T07:00:09.118Z",
+        "lastVerifiedAt": "2026-03-31T08:36:47.808Z",
         "source": "ecu-read"
       },
       "2": {
         "pageId": 2,
         "size": 288,
         "rawEncoding": "base64",
-        "rawData": "KCgoKCgnJiUkIyIiIiIiIikpKisrKikoKCgwMTIzMzIoKSosLS8vLS0vMjQ2NjY2KywuMTM0NDEwMjU4Ojo6Oy8wMzU4OTg2NTY5PD0+Pj8yNDc5Ojs7Ojk7PkBBQUFCNTg7PD0+Pj0+P0JERUVFRTg7PkFAQUNBQUNGR0hISEg7PUFERUZGRURHSktLSkpKPUBDRklJSUdHSUxOTk1MTD9CRkpNTUtJSUxPUFFQT09BREhNT09OTExOUlNUU1NTQ0VKT1FRT05OUFRWV1ZVVkVHS1BRUVBPT1JVWFpZV1dGSEtOUFBQT1BTVllbWllZR0hKTVBRUFBSVFZZW1taWwUHCg8UGR4jKC0yNzxBRksKDQ8SFBcZHiEjJigrLTAy",
-        "crc32": "C54986EA",
+        "rawData": "KCgoKCgnJiUkIyIiIiIiIikpKisrKikoKCgwMTIzMzIkJSYsLS8vLS0vMjQ2NjY2JygpMTM0NDEwMjU4Ojo6OyorLjU4OTg2NTY5PD0+Pj8tLzI5Ojs7Ojk7PkBBQUFCMDI1PD0+Pj0+P0JERUVFRTg7PkFAQUNBQUNGR0hISEg7PUFERUZGRURHSktLSkpKPUBDRklJSUdHSUxOTk1MTD9CRkpNTUtJSUxPUFFQT09BREhNT09OTExOUlNUU1NTQ0VKT1FRT05OUFRWV1ZVVkVHS1BRUVBPT1JVWFpZV1dGSEtOUFBQT1BTVllbWllZR0hKTVBRUFBSVFZZW1taWwUHCg8UGR4jKC0yNzxBRksKDQ8SFBcZHiEjJigrLTAy",
+        "crc32": "86AB9065",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:49.260Z",
-        "lastVerifiedAt": "2026-03-30T17:59:24.964Z",
+        "lastReadAt": "2026-03-31T07:00:09.334Z",
+        "lastVerifiedAt": "2026-03-31T08:36:47.851Z",
         "source": "ecu-read"
       },
       "3": {
@@ -80,8 +87,8 @@
         "rawData": "OTo7PD1AQUNERUZHSEhJSjk6Ozw9QEFDREtMTU5OT1A2NjZAQURHSUpLTE1OTk9QNjY2QEFER0lKSkxNTU1OTzY2NkBBREdISkpMTU1NTk83Ozw/QERGSElKS0xMTE1ONzs+P0BDRkdISUpLTExNTjg7PT9AQkVGR0hJSktLTE04Oz0/QEFERkdISUpKSktLODw9P0BBREVGR0hJSUlKSjk8PT9AQURFRkdHSEhISUk7PT9AQUNFRkdHSEhISElJPD5AQkNFR0hISElJSUlKSj5AQkRFRkhKSkpKSkpKSko/QUJERUZJSktLS0tLS0tMPkJCREVGSEpKSkpKSktKSwUKDxQZHiMoLTI3PEFGUFoFCAoNDxIUFxkcISUoLDAy",
         "crc32": "816BF987",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:49.465Z",
-        "lastVerifiedAt": "2026-03-30T17:59:24.999Z",
+        "lastReadAt": "2026-03-31T07:00:09.547Z",
+        "lastVerifiedAt": "2026-03-31T08:36:47.890Z",
         "source": "ecu-read"
       },
       "4": {
@@ -90,9 +97,9 @@
         "rawEncoding": "base64",
         "rawData": "AAAABQARAQoAAAMEIi0eDAEooDwUFEYHFitPDztKVQAOMjtETVZiZ2gIamlkZFtVABQoPFBkAAAAAgUGlksChj22uYSJHT8UMkZVZHgPDw8PDw8FCh09Ml+UwABUWFxgYmRlZ2RkZGRkZGRkHigtNzxGDw8PDw8PGf//ggAjAAA=",
         "crc32": "D27708C6",
-        "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:49.638Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.020Z",
+        "syncState": "burn-pending",
+        "lastReadAt": "2026-03-31T08:38:50.978Z",
+        "lastVerifiedAt": "2026-03-31T08:38:50.978Z",
         "source": "ecu-read"
       },
       "5": {
@@ -102,19 +109,19 @@
         "rawData": "k5OTk5aXl5STk5OTk5OTk5OTk5OWl5eUk5OTk5OMjIyOjo6Rk5OTk5OTkIyMjIyMjo6OkZOTlpaWk5CMjIyMjI6OjpGTk5aWlpOQjIyMjIyOjo6Rk5OWlpaTkIyMjIyMjo6OkZOTlpaWk5CMjIyMjI6OjpGTk5aWlpOQjIyMjIyOjo6Rk5OTk5OTkIyMjIyMjo6OkZOTk5OTk5CMjIyMjI6OjpGSkpKSkpKQjIyMjIyOjo6Ojo6Ojo6Ojo6Ojo6Oi4uLi4uLi4uLi4uLi4uLi4mJiYmJiYmJiYmJiYmJiYmIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiAUHCg8UGR4jKC0yNzxBRksKDQ8SFBcZHiEjJigrLTAy",
         "crc32": "4434D23D",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:49.859Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.056Z",
+        "lastReadAt": "2026-03-31T07:00:09.919Z",
+        "lastVerifiedAt": "2026-03-31T08:36:47.962Z",
         "source": "ecu-read"
       },
       "6": {
         "pageId": 6,
         "size": 143,
         "rawEncoding": "base64",
-        "rawData": "yyMAFG4EAg9kqg8MjAAAQl55lKnLbmpkZGRiABQoPFBkeIygc25pZmNhX11bD5ZQABnxKA8QAwBkIyYBwS0eGXhuaWReVFNPT05qWlBDOCsiGxMMQTszMC0sKSgmJg4qPk9daneGk52AXkYzRUM/OhMuTXcYAF0DAoIXAAAAAAABRktIS0tLS0tLS0tLS0s=",
-        "crc32": "2472A85E",
-        "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:50.038Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.078Z",
+        "rawData": "yyMAFG4EAg9kqg8MjAAAQl55lKnLbmpkZGRiAwwfMEVXY3F4aYqDg4KAeYhbD5ZQABnxKA8QAwBkIyYBwS0eGXhuaWReVFNPT05qWlBDOCsiGxMMQTszMC0sKSgmJg4qPk9daneGk52AXkYzRUM/OhMuTXcYAF0DAoIXAAAAAAABRktIS0tLS0tLS0tLS0s=",
+        "crc32": "919FBEB8",
+        "syncState": "burn-pending",
+        "lastReadAt": "2026-03-31T09:05:13.053Z",
+        "lastVerifiedAt": "2026-03-31T09:05:13.053Z",
         "source": "ecu-read"
       },
       "7": {
@@ -124,8 +131,8 @@
         "rawData": "S0hLS0tLS0tLS0tLS0tLS0tLS0tLS0tLSwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsAAAAcHAACkAADHAAAABwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOgAyACMAGQAAAAAAAAAAAB/f39/f39/fwAAAAAAAAAAAAAAAAAAAAAAAAAAAAoSGQAAAAkJFiMyAAAADg4dNUsAAAAWFic/WgAAAB8fNFBkAAAAKChAWmQBBgoUAyg3Rv//////////",
         "crc32": "30AA085E",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:50.253Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.124Z",
+        "lastReadAt": "2026-03-31T07:00:10.296Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.039Z",
         "source": "ecu-read"
       },
       "8": {
@@ -135,8 +142,8 @@
         "rawData": "gICAgICAgICAgICAgICAgICAgICAgICAgE5OTk5OTk5OTk5OAAAAAAAAAAAAAAAATk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OAAAAAAAAAAAAAAAATk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OAAAAAAAAAAAAAAAATk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OAAAAAAAAAAAAAAAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////",
         "crc32": "A247F170",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:50.592Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.250Z",
+        "lastReadAt": "2026-03-31T07:00:10.635Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.172Z",
         "source": "ecu-read"
       },
       "9": {
@@ -146,8 +153,8 @@
         "rawData": "AMzMzMzMzMzMzMzMzMzMzMwAAAAAAAAAAAAAAAAAAAAABgYAAAAAAAAAAAAAAAD9BQAAAAAAAAAAAAAAAAAAAAD//wH/AQEBAQEBAQEB//////8AAAAAAAAAAAAAAAcBAQEBAQEBAQEBAQEBAQEAAAAAAAAAAAAAAAAAAAAAAAQAAQYKSkNDQ0hdR0BHSkcLBwAHGUdtR0ZHAksHBwcHBwcHBwcHB0EjKCgtN0EAKDxQZHgAAAAAAABEWiigDgAA",
         "crc32": "83082379",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:50.771Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.278Z",
+        "lastReadAt": "2026-03-31T07:00:10.818Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.205Z",
         "source": "ecu-read"
       },
       "10": {
@@ -157,8 +164,8 @@
         "rawData": "AChGbhwXFRQIAAAACgoKCwwAAAAAAAAAABT/B8gBvAIAFCg8UGQyADIAMgAyADIAMgAAFCg8UGRkaXN4hYUAFCg8UGQyNjc3NzcoeGR9ZKrfHjw8HgUgPEYeFAUMe39kMhQeKDwyMjIyMjIeHh4eHh4PAx4FAgEUAQFQeACZUgAAgPAA4GIKeA7uqO6oBQ8jPAAeKCgAABQ8AHMAAAAAADJklsj6KCgoKCgoAAAAAChGZIKgZGRkZGRkQGQAZAD///9kZGRkZGRkZGRkZGRkZA==",
         "crc32": "66AC9666",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:50.958Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.306Z",
+        "lastReadAt": "2026-03-31T07:00:10.998Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.243Z",
         "source": "ecu-read"
       },
       "11": {
@@ -168,8 +175,8 @@
         "rawData": "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZAUHCQ8VHSYvNzk7PT9BQkIIDQ8SFBcZHB4hIyYrLTAy",
         "crc32": "748AF8BC",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:51.161Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.344Z",
+        "lastReadAt": "2026-03-31T07:00:11.205Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.283Z",
         "source": "ecu-read"
       },
       "12": {
@@ -179,19 +186,19 @@
         "rawData": "//////////////////////////////////////////////////////////////////////////////////////////////////////////8AAAAECAgAABAQDAAMDAACMCwoJCQkJihAPDo4Nv////////////////////////9kZBn///////////////////////////9/f39/f39/fygoJyYoKCcmKCgnJigoJycKGSg8FCgySwAAAAAAAAAA",
         "crc32": "9D302BB9",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:51.367Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.385Z",
+        "lastReadAt": "2026-03-31T07:00:11.399Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.327Z",
         "source": "ecu-read"
       },
       "13": {
         "pageId": 13,
         "size": 128,
         "rawEncoding": "base64",
-        "rawData": "/wAAAAAAAAAAAP///////////////////////////////wAAAAAAAAAA/////////////////////////////////////////////////////8DAwMDAwMDAXz09PT09187Iwr25tbGuZ2dnZ2hoaGhoaGlhaGlpamoKamprAAA=",
-        "crc32": "63113413",
-        "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:51.532Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.408Z",
+        "rawData": "/wAKAAAAAAAAADL//////////////////////////////1AAAAAAAAAA/////////////////////////////////////////////////////wDAwMDAwMDAXz09PT09187Iwr25tbGuZ2dnZ2hoaGhoaGlhaGlpamoKamprAAA=",
+        "crc32": "07E85279",
+        "syncState": "burn-pending",
+        "lastReadAt": "2026-03-31T09:13:14.531Z",
+        "lastVerifiedAt": "2026-03-31T09:13:14.531Z",
         "source": "ecu-read"
       },
       "14": {
@@ -201,8 +208,8 @@
         "rawData": "OTo7PD1AQUNERUZHSEhJSjk6Ozw9QEFDREVGR0hISUo5Ojs8PUBBQ0RFRkdISElKOTw9PD1AQUNEREZHR0dISTk+Pjw9QEFCRERGR0dHSEk5PDw8PUBBQkNERUZGRkdIOTw8PD0/P0BBQkNERUVGRzk8PDw9Pj4/QEFCQ0RERUY6Ojo6PT09PT09PTw7PDw8Ojo6Ojw8PDw7Ozs6Ojo6Ojo6Ojo6Ojo6OTk5ODg4ODg6Ojo6OTk5OTg4ODc3Nzc3Ojo6Ojg4ODg3Nzc2NjY2Njo6Ojg1NTU1NDQ0MzMzMzM4ODg2MzMzMzMzMzExMTExNzc3NTIyMjIyMjIwMDAwMAUHDBEWGyAlKi80OT5DSE0AAAAAAAAAAAAAAAAAAAAA",
         "crc32": "B354FBA1",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:51.740Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.446Z",
+        "lastReadAt": "2026-03-31T07:00:11.770Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.399Z",
         "source": "ecu-read"
       },
       "15": {
@@ -212,8 +219,8 @@
         "rawData": "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZA8UGR4jKC0yQUZLUFVaX2QAAADOwMBkMiiHCmQKMmTAFDzn7Pb7GShLWgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
         "crc32": "A37E82E6",
         "syncState": "verified",
-        "lastReadAt": "2026-03-30T16:53:51.953Z",
-        "lastVerifiedAt": "2026-03-30T17:59:25.487Z",
+        "lastReadAt": "2026-03-31T07:00:11.978Z",
+        "lastVerifiedAt": "2026-03-31T08:36:48.448Z",
         "source": "ecu-read"
       }
     }
@@ -5354,9 +5361,9 @@
           50
         ],
         [
-          40,
-          41,
-          42,
+          36,
+          37,
+          38,
           44,
           45,
           47,
@@ -5372,9 +5379,9 @@
           54
         ],
         [
-          43,
-          44,
-          46,
+          39,
+          40,
+          41,
           49,
           51,
           52,
@@ -5390,9 +5397,9 @@
           59
         ],
         [
-          47,
-          48,
-          51,
+          42,
+          43,
+          46,
           53,
           56,
           57,
@@ -5408,9 +5415,9 @@
           63
         ],
         [
+          45,
+          47,
           50,
-          52,
-          55,
           57,
           58,
           59,
@@ -5426,9 +5433,9 @@
           66
         ],
         [
+          48,
+          50,
           53,
-          56,
-          59,
           60,
           61,
           62,
@@ -7808,6 +7815,6 @@
     "accentColor": "cyan"
   },
   "createdAt": "2026-03-30T16:53:27.846Z",
-  "updatedAt": "2026-03-30T18:20:58.650Z",
+  "updatedAt": "2026-03-31T09:13:14.635Z",
   "filePath": "C:\\Users\\ryn\\node\\ryn-speeduino-configurator\\proj\\baruw_4.rynproj"
 }

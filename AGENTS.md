@@ -22,6 +22,26 @@ npm run make
 npm run lint
 ```
 
+## Working Conventions
+
+- Prefer Git Bash command syntax for terminal examples and repeatable workflows in this repository.
+- Use PowerShell only when a Windows-native command is materially safer or clearer.
+- For UI styling, prefer modern acrylic surfaces, restrained blur, compact spacing, and restrained neon accents over generic glassmorphism.
+
+## Code Style
+
+- Use JavaScript throughout the repo; do not introduce TypeScript unless explicitly requested.
+- Keep `src/main/preload.js` in CommonJS style and use ES modules in `src/main/index.js`, `src/shared/*`, and `src/renderer/*`.
+- Prefer 2-space indentation, single quotes, and no semicolons unless the surrounding file already differs.
+- Use camelCase for variables and functions, PascalCase for React components, and SCREAMING_SNAKE_CASE for constants.
+
+## Project Structure
+
+- Put stateful domain screens under `src/renderer/features/`.
+- Put reusable presentational building blocks under `src/renderer/ui/`.
+- Keep ECU-agnostic parsing and protocol logic in `src/shared/`.
+- Treat `src/renderer/core/store/index.js` and its slices as the canonical state layout.
+
 ## Architecture
 
 ### Electron Process Structure

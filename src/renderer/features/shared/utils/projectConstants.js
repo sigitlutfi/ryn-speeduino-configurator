@@ -1,10 +1,17 @@
-export function getDecodedPages(constants) {
+import { decodePageSnapshots } from "../../../../shared/protocol/page-cache.js";
+
+export function getDecodedPages(constants, parsedIni = null) {
   if (!constants) return {};
-  return constants.decodedPages || {};
+  if (constants.decodedPages && Object.keys(constants.decodedPages).length > 0) {
+    return constants.decodedPages;
+  }
+  if (parsedIni && constants.pages) {
+    return decodePageSnapshots(parsedIni, constants.pages);
+  }
+  return {};
 }
 
-export function getDecodedPage(constants, pageId) {
-  const decodedPages = getDecodedPages(constants);
+export function getDecodedPage(constants, pageId, parsedIni = null) {
+  const decodedPages = getDecodedPages(constants, parsedIni);
   return decodedPages?.[pageId] || decodedPages?.[String(pageId)] || {};
 }
-

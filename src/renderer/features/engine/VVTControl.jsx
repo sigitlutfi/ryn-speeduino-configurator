@@ -241,11 +241,17 @@ const VVTControl = () => {
             <TuningGrid
               values={activeCam === 1 ? vvt1Table.values : vvt2Table.values}
               rpmAxis={activeCam === 1 ? vvt1Table.rpmAxis : vvt2Table.rpmAxis}
-              loadAxis={activeCam === 1 ? vvt1Table.loadAxis : vvt2Table.loadAxis}
+              loadAxis={
+                activeCam === 1 ? vvt1Table.loadAxis : vvt2Table.loadAxis
+              }
               onUpdate={activeCam === 1 ? vvt1Table.update : vvt2Table.update}
               theme="orange"
-              xAxisLabel={activeCam === 1 ? vvt1Table.meta.xLabel : vvt2Table.meta.xLabel}
-              yAxisLabel={activeCam === 1 ? vvt1Table.meta.yLabel : vvt2Table.meta.yLabel}
+              xAxisLabel={
+                activeCam === 1 ? vvt1Table.meta.xLabel : vvt2Table.meta.xLabel
+              }
+              yAxisLabel={
+                activeCam === 1 ? vvt1Table.meta.yLabel : vvt2Table.meta.yLabel
+              }
               unitLabel="°"
             />
           </div>

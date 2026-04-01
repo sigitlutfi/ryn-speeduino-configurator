@@ -31,6 +31,7 @@ import Analysis from "./features/dashboard/Analysis.jsx";
 import AppToolbar from "./ui/AppToolbar.jsx";
 import Sidebar from "./ui/Sidebar.jsx";
 import NotificationTray from "./ui/NotificationTray.jsx";
+import IniMismatchDialog from "./ui/IniMismatchDialog.jsx";
 import GlobalPreferencesPage from "./features/system/GlobalPreferencesPage.jsx";
 import EngineProtection from "./features/engine/EngineProtection.jsx";
 import CrankingSettings from "./features/startup/CrankingSettings.jsx";
@@ -45,10 +46,12 @@ import FanSettings from "./features/io/FanSettings.jsx";
 import SensorCalibration from "./features/tools/SensorCalibration.jsx";
 import ProtocolStats from "./features/tools/ProtocolStats.jsx";
 import RawConsole from "./features/tools/RawConsole.jsx";
+import FlashFirmware from "./features/system/FlashFirmware.jsx";
 import TachoOutput from "./features/io/TachoOutput.jsx";
 import PitLimiter from "./features/racing/PitLimiter.jsx";
 import RumbleIdle from "./features/racing/RumbleIdle.jsx";
 import AntiLag from "./features/racing/AntiLag.jsx";
+import PopAndBang from "./features/racing/PopAndBang.jsx";
 import RuntimeProfiles from "./features/dashboard/RuntimeProfiles.jsx";
 import RuntimeProfileEditor from "./features/dashboard/RuntimeProfileEditor.jsx";
 
@@ -77,6 +80,10 @@ export default function App() {
   const syncDialogOpen = useStore((s) => s.syncDialogOpen);
   const syncDialogResults = useStore((s) => s.syncDialogResults);
   const closeSyncDialog = useStore((s) => s.closeSyncDialog);
+  const iniMismatchDialogOpen = useStore((s) => s.iniMismatchDialogOpen);
+  const iniMismatchDetails = useStore((s) => s.iniMismatchDetails);
+  const openIniMismatchDialog = useStore((s) => s.openIniMismatchDialog);
+  const closeIniMismatchDialog = useStore((s) => s.closeIniMismatchDialog);
   const autoReconnectAttemptRef = useRef(null);
 
   const accent = getAccent(settings.accentColor);
@@ -124,11 +131,12 @@ export default function App() {
           } = useStore.getState();
           updateECUConnectionInfo(handshakeInfo);
 
-          if (
-            currentProject?.ini?.signature &&
-            handshakeInfo?.signature &&
-            currentProject.ini.signature.trim() !== handshakeInfo.signature.trim()
-          ) {
+          const hasIniSignatureMismatch =
+            Boolean(currentProject?.ini?.signature) &&
+            Boolean(handshakeInfo?.signature) &&
+            currentProject.ini.signature.trim() !== handshakeInfo.signature.trim();
+
+          if (hasIniSignatureMismatch) {
             console.warn("[App] INI signature mismatch detected", {
               projectName: currentProject.projectName,
               projectSignature: currentProject.ini.signature,
@@ -140,13 +148,19 @@ export default function App() {
               ecuSignature: handshakeInfo.signature,
             });
             notify(
-              `INI mismatch: project=${currentProject.ini.signature}, ecu=${handshakeInfo.signature}. Check loaded project/INI.`,
+              `INI mismatch: project=${currentProject.ini.signature}, ecu=${handshakeInfo.signature}`,
               "warning",
               7000,
             );
+            openIniMismatchDialog({
+              projectName: currentProject.projectName,
+              projectSignature: currentProject.ini.signature,
+              ecuSignature: handshakeInfo.signature,
+              iniPath: currentProject.ini.path || "(embedded only)",
+            });
           }
 
-          if (currentProject?.ini?.content) {
+          if (currentProject?.ini?.content && !hasIniSignatureMismatch) {
             try {
               const results = await compareWithECU();
               if (!results?.error) {
@@ -182,7 +196,7 @@ export default function App() {
             }
           }
 
-          if (parsedIni?.outputChannels?.ochGetCommand) {
+          if (parsedIni?.outputChannels?.ochGetCommand && !hasIniSignatureMismatch) {
             serialService.startOutputChannelsPolling(parsedIni);
           }
         } catch (err) {
@@ -201,6 +215,7 @@ export default function App() {
         setConnectionStatus("disconnected");
         setConnectionTransportStatus("disconnected");
         setConnectionHandshakeStatus("idle");
+        closeIniMismatchDialog();
         addConnectionEvent("transport", "Serial transport disconnected");
         clearRuntimeProfileSession({ state: "Disconnected" });
       } else if (status.startsWith("error:")) {
@@ -227,6 +242,8 @@ export default function App() {
       notify,
       addConnectionEvent,
       clearRuntimeProfileSession,
+      openIniMismatchDialog,
+      closeIniMismatchDialog,
     ]);
 
   useEffect(() => {
@@ -437,6 +454,15 @@ export default function App() {
           onClose={closeSyncDialog}
           diffResults={syncDialogResults}
         />
+        <IniMismatchDialog
+          isOpen={iniMismatchDialogOpen}
+          details={iniMismatchDetails}
+          onClose={closeIniMismatchDialog}
+          onReview={() => {
+            closeIniMismatchDialog();
+            navigate(ROUTES.COMM);
+          }}
+        />
 
         {!currentProject ? (
           <div className="flex-1 overflow-hidden relative">
@@ -518,6 +544,10 @@ export default function App() {
                   />
                   <Route path={ROUTES.RACING_ANTILAG} component={AntiLag} />
                   <Route
+                    path={ROUTES.RACING_POPANDBANG}
+                    component={PopAndBang}
+                  />
+                  <Route
                     path={ROUTES.RACING_PROFILES}
                     component={RuntimeProfiles}
                   />
@@ -545,6 +575,10 @@ export default function App() {
                   <Route
                     path={ROUTES.TOOLS_DIAGNOSTICS}
                     component={ProtocolStats}
+                  />
+                  <Route
+                    path={ROUTES.TOOLS_FLASH_FIRMWARE}
+                    component={FlashFirmware}
                   />
                   <Route path={ROUTES.SETTINGS_TACHO} component={TachoOutput} />
                   <Route path={ROUTES.COMM} component={Communications} />

@@ -23,6 +23,7 @@ const Indicator = ({
     "neon-red": "bg-neon-red shadow-glow-red",
     "neon-yellow": "bg-neon-yellow shadow-glow-yellow",
     "neon-cyan": "bg-neon-cyan shadow-glow-cyan",
+    "neon-orange": "bg-neon-orange shadow-glow-orange",
     "gray-700": "bg-gray-700",
   };
 
@@ -59,6 +60,7 @@ export default function IndicatorTray() {
   const toggleIndicatorTray = useStore((s) => s.toggleIndicatorTray);
   const engine = useStore((s) => s.realtime?.engine || {});
   const performance = useStore((s) => s.realtime?.performance || {});
+  const popBangTimerSeconds = Number(performance.rollingPopBangActiveTime || 0) / 1000;
 
   if (!showIndicatorTray) return null;
 
@@ -245,6 +247,13 @@ export default function IndicatorTray() {
           offLabel: "OFF",
           onColor: "neon-red",
         },
+        {
+          label: "Pop & Bang",
+          active: performance.rollingPopBangActive,
+          onLabel: "ACTIVE",
+          offLabel: "OFF",
+          onColor: "neon-orange",
+        },
       ],
     },
     {
@@ -321,6 +330,52 @@ export default function IndicatorTray() {
                 ))}
               </React.Fragment>
             ))}
+          </div>
+
+          <div className="mt-5 p-4 rounded-2xl bg-white/5 border border-white/5">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap size={12} className="text-neon-orange" />
+              <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.3em]">
+                Pop & Bang Detail
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Indicator
+                label="Switch"
+                active={performance.rollingPopBangSwitch}
+                onLabel="ON"
+                offLabel="OFF"
+                onColor="neon-cyan"
+              />
+              <Indicator
+                label="Cut Step"
+                active={performance.rollingPopBangCutCounter > 0}
+                onLabel={`STEP ${performance.rollingPopBangCutCounter || 0}`}
+                offLabel="STEP 0"
+                onColor="neon-red"
+              />
+              <Indicator
+                label="Timer"
+                active={performance.rollingPopBangActive}
+                onLabel={`${popBangTimerSeconds.toFixed(popBangTimerSeconds < 10 ? 1 : 0)}S`}
+                offLabel="0.0S"
+                onColor="neon-orange"
+              />
+              <Indicator
+                label="Timing Corr"
+                active={Math.abs(performance.rollingPopBangTimingCorr || 0) > 0}
+                onLabel={`${performance.rollingPopBangTimingCorr || 0} DEG`}
+                offLabel="0 DEG"
+                onColor="neon-yellow"
+              />
+              <Indicator
+                label="Fuel Corr"
+                active={(performance.rollingPopBangFuelCorr || 100) !== 100}
+                onLabel={`${performance.rollingPopBangFuelCorr || 100}%`}
+                offLabel="100%"
+                onColor="neon-green"
+              />
+            </div>
           </div>
         </div>
 

@@ -186,6 +186,8 @@ export function parseIni(content, preprocessorSymbols = {}) {
     tables: {},
     curves: {},
     dialogs: {},
+    dialogFields: {},
+    fieldHelp: {},
   };
 
   const macros = {};
@@ -221,6 +223,26 @@ export function parseIni(content, preprocessorSymbols = {}) {
       iterations++;
     }
     return resolved;
+  };
+
+  const storeDialogField = (variable, entry) => {
+    if (!variable) return;
+
+    if (!result.dialogFields[variable]) {
+      result.dialogFields[variable] = [];
+    }
+
+    result.dialogFields[variable].push(entry);
+
+    if (!result.dialogs[variable]) {
+      result.dialogs[variable] = {
+        label: entry.label,
+        condition: entry.condition,
+        dialog: entry.dialog,
+        conditions: entry.conditions || [],
+        source: entry.source,
+      };
+    }
   };
 
   for (let rawLine of lines) {
@@ -395,37 +417,36 @@ export function parseIni(content, preprocessorSymbols = {}) {
         else if (name === "yBins")
           currentCurve.yBins = { varName: tokens[0], channel: tokens[1] };
       }
-    } else if (currentSection === "dialog" || currentSection === "dialogs") {
+    } else if (
+      currentSection === "dialog" ||
+      currentSection === "dialogs" ||
+      currentSection === "settinggroups" ||
+      currentSection === "userdefined"
+    ) {
       if (name === "dialog") {
         const tokens = splitTokens(rest);
         currentDialog = tokens[0]?.trim();
-      } else if (name === "field") {
+      } else if (name === "field" || name === "displayOnlyField") {
         const tokens = splitTokens(rest);
-        // Syntax: field = "Label", variable, { condition } or field = "Label", variable
         const label = unquote(tokens[0]);
         const variable = tokens[1]?.trim();
-        let condition = null;
+        const rawConditions = tokens
+          .filter((token) => token.startsWith("{") && token.endsWith("}"))
+          .map((token) => token.slice(1, -1).trim());
+        const conditions = rawConditions.filter(Boolean);
+        const condition = conditions.length > 0 ? conditions[conditions.length - 1] : null;
 
-        // Find curly brackets if they exist in tokens
-        const condIdx = tokens.findIndex((t) => t.startsWith("{"));
-        if (condIdx !== -1) {
-          condition = tokens[condIdx].trim();
-          // Clean up { }
-          if (condition.startsWith("{") && condition.endsWith("}")) {
-            condition = condition.slice(1, -1).trim();
-          }
-        }
-
-        if (variable) {
-          if (!result.dialogs[variable]) {
-            result.dialogs[variable] = {
-              label,
-              condition,
-              dialog: currentDialog,
-            };
-          }
-        }
+        storeDialogField(variable, {
+          label,
+          variable,
+          dialog: currentDialog,
+          source: name,
+          condition,
+          conditions,
+        });
       }
+    } else if (currentSection === "settingcontexthelp") {
+      result.fieldHelp[name] = unquote(rest);
     }
   }
 

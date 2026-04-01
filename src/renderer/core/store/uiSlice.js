@@ -14,6 +14,20 @@ export const createUISlice = (set) => ({
   openSyncDialog: (results) => set({ syncDialogOpen: true, syncDialogResults: results }),
   closeSyncDialog: () => set({ syncDialogOpen: false, syncDialogResults: null }),
 
+  // INI mismatch dialog
+  iniMismatchDialogOpen: false,
+  iniMismatchDetails: null,
+  openIniMismatchDialog: (details) =>
+    set({
+      iniMismatchDialogOpen: true,
+      iniMismatchDetails: details ?? null,
+    }),
+  closeIniMismatchDialog: () =>
+    set({
+      iniMismatchDialogOpen: false,
+      iniMismatchDetails: null,
+    }),
+
   // Global ECU operation state
   operation: null,
   setOperation: (operation) =>

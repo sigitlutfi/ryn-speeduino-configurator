@@ -99,6 +99,12 @@ export function decodeOutputChannels(buffer, parsedIni) {
       alsTimingCorr: firstDefined(channels.alsTimingCorrection, 0),
       alsFuelCorr: firstDefined(channels.alsFuelCorrection, 100),
       alsActiveTime: firstDefined(channels.alsActiveTime, 0),
+      rollingPopBangActive: toBool(channels.rollingPopBangActive),
+      rollingPopBangSwitch: toBool(channels.rollingPopBangSwitchState),
+      rollingPopBangActiveTime: firstDefined(channels.rollingPopBangActiveTime, 0),
+      rollingPopBangCutCounter: firstDefined(channels.rollingPopBangCutCounter, 0),
+      rollingPopBangTimingCorr: firstDefined(channels.rollingPopBangTimingCorrection, 0),
+      rollingPopBangFuelCorr: firstDefined(channels.rollingPopBangFuelCorrection, 100),
     },
     outputChannels: channels,
   };

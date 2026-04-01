@@ -11,10 +11,10 @@ Create a new folder in `src/renderer/features/[feature-name]`.
 Example: `src/renderer/features/logger/`.
 
 ## 2. Extend the Store (If needed)
-Update `src/renderer/core/store.js`:
-- Add the initial state.
-- Add actions for the new feature.
-- Follow the modular selector pattern.
+Update the relevant slice under `src/renderer/core/store/`:
+- Add initial state only in the slice that owns the feature.
+- Add actions close to the domain that uses them.
+- Follow the existing slice composition pattern from `src/renderer/core/store/index.js`.
 
 ## 3. Extract UI Components
 If your feature needs a complex UI element (like a specific chart or gauge):
@@ -26,12 +26,12 @@ If your feature needs a complex UI element (like a specific chart or gauge):
 Create the main feature component in `src/renderer/features/[feature-name]/Index.jsx`.
 - Import necessary UI components from `../../ui/`.
 - Connect to the store via `useStore`.
-- Apply neon aesthetics (glassmorphism, glows).
+- Apply acrylic surfaces, restrained blur, and compact professional spacing.
 
-## 5. Register in App.jsx
-- Add a new tab entry in the `TABS` constant.
-- Add the case in the `renderContent` switch statement.
-- Ensure proper icon usage.
+## 5. Register the Route
+- Add a route entry in `src/renderer/core/routes.js`.
+- Keep the category and label aligned with the existing navigation structure.
+- Ensure the icon matches the feature intent.
 
 ## 6. Verify IPC (Optional)
 If the feature requires background processing:

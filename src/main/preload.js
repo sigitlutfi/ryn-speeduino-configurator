@@ -39,6 +39,16 @@ contextBridge.exposeInMainWorld('projects', {
   pickDirectory: () => ipcRenderer.invoke('project:pick-directory'),
 });
 
+contextBridge.exposeInMainWorld('firmware', {
+  pickHex: () => ipcRenderer.invoke('firmware:pick-hex'),
+  flash: (payload) => ipcRenderer.invoke('firmware:flash', payload),
+  onStatus: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('firmware:status', handler);
+    return () => ipcRenderer.removeListener('firmware:status', handler);
+  },
+});
+
 contextBridge.exposeInMainWorld('config', {
   get: () => ipcRenderer.invoke('config:get'),
   saveSettings: (settings) => ipcRenderer.invoke('config:save-settings', settings),

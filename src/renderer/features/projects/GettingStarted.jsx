@@ -302,11 +302,12 @@ export default function GettingStarted() {
   };
 
   const renderHome = () => (
-    <div className="flex gap-8 max-w-6xl w-full">
+    <div className="flex w-full max-w-[1240px] gap-8 xl:gap-10">
       {/* Left: Primary Actions */}
       <div className="flex-1 space-y-4">
         {/* Hardware Status Bar */}
-        <div className="flex items-center justify-between px-6 py-3 glass border border-white/5 rounded-2xl mb-6 overflow-hidden relative group/hw">
+        <div className="relative mb-6 overflow-hidden rounded-[28px] border border-white/8 bg-white/[0.03] px-6 py-4 backdrop-blur-md">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-neon-cyan/70 via-white/20 to-transparent" />
           <div className="flex items-center gap-3 relative z-10">
             {availablePorts.length > 0 ? (
               <div className="w-2.5 h-2.5 rounded-full bg-neon-green animate-pulse box-glow-green" />
@@ -326,7 +327,7 @@ export default function GettingStarted() {
             {recentProject && (
               <button
                 onClick={() => setProject(recentProject)}
-                className="text-[9px] font-bold text-neon-cyan uppercase tracking-widest hover:underline"
+                className="rounded-full border border-neon-cyan/20 bg-neon-cyan/10 px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.18em] text-neon-cyan transition-all hover:border-neon-cyan/30 hover:bg-neon-cyan/16"
                 title={`Open ${recentProject.projectName || "Recent Project"}`}
               >
                 Open Last Project
@@ -349,20 +350,34 @@ export default function GettingStarted() {
           )}
         </div>
 
-        <h2 className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest pl-1 mb-4">
-          Quick Start
-        </h2>
+        <div className="mb-4 flex items-end justify-between gap-4 pl-1">
+          <div>
+            <h2 className="text-[10px] font-orbitron font-bold uppercase tracking-[0.24em] text-white/40">
+              Quick Start
+            </h2>
+            <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-white/28">
+              Choose the fastest path back into tuning.
+            </p>
+          </div>
+          <div className="hidden text-[9px] font-bold uppercase tracking-[0.2em] text-neon-cyan/55 lg:block">
+            Home Base
+          </div>
+        </div>
 
         {recentProject && (
           <button
             onClick={() => setProject(recentProject)}
-            className="w-full group relative overflow-hidden p-8  rounded-3xl hover:border-neon-green/40 hover:bg-neon-green/15 hover:backdrop-blur-xl backdrop-blur-xl transition-all text-left"
+            className="group relative w-full overflow-hidden rounded-[32px] border border-neon-green/22 bg-gradient-to-r from-neon-green/12 to-transparent p-8 text-left backdrop-blur-xl transition-all hover:border-neon-green/40 hover:bg-neon-green/15"
           >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-neon-green/80 via-white/25 to-transparent" />
             <div className="flex items-center gap-6">
               <div className="w-14 h-14 rounded-2xl bg-neon-green/10 flex items-center justify-center text-neon-green border border-neon-green/20 group-hover:scale-110 transition-transform">
                 <Play size={28} strokeWidth={1.8} className="translate-x-0.5" />
               </div>
               <div>
+                <div className="mb-2 text-[8px] font-black uppercase tracking-[0.24em] text-neon-green/75">
+                  Recommended
+                </div>
                 <div className="text-lg font-orbitron font-bold text-white uppercase tracking-wider">
                   Resume Last Project
                 </div>
@@ -384,6 +399,9 @@ export default function GettingStarted() {
               <Plus size={32} strokeWidth={1.5} />
             </div>
             <div>
+              <div className="mb-2 text-[8px] font-black uppercase tracking-[0.24em] text-neon-cyan/70">
+                Fresh Build
+              </div>
               <div className="text-lg font-orbitron font-bold text-white uppercase tracking-wider">
                 New Project
               </div>
@@ -404,6 +422,9 @@ export default function GettingStarted() {
               <FolderOpen size={32} strokeWidth={1.5} />
             </div>
             <div>
+              <div className="mb-2 text-[8px] font-black uppercase tracking-[0.24em] text-neon-purple/70">
+                Existing Workspace
+              </div>
               <div className="text-lg font-orbitron font-bold text-white uppercase tracking-wider">
                 Open Project
               </div>
@@ -417,20 +438,20 @@ export default function GettingStarted() {
       </div>
 
       {/* Right: Recent Projects */}
-      <div className="w-[450px] space-y-4">
-        <div className="flex items-center justify-between pl-1 mb-4">
-          <h2 className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">
+      <div className="w-[420px] space-y-4 xl:w-[450px]">
+        <div className="mb-4 flex items-center justify-between pl-1">
+          <h2 className="text-[10px] font-orbitron font-bold uppercase tracking-[0.24em] text-white/40">
             Recent Activity
           </h2>
           {recentProjects.length > 0 && (
-            <span className="text-[9px] text-neon-cyan/60 uppercase font-bold tracking-widest">
+            <span className="text-[9px] uppercase font-bold tracking-[0.2em] text-neon-cyan/60">
               Last {recentProjects.length} Sessions
             </span>
           )}
         </div>
 
         {recentProjects.length === 0 ? (
-          <div className="h-[300px] border border-dashed border-white/5 rounded-3xl flex flex-col items-center justify-center text-gray-700">
+          <div className="flex h-[320px] flex-col items-center justify-center rounded-[28px] border border-dashed border-white/8 bg-white/[0.02] text-gray-700">
             <Clock size={32} className="mb-2 opacity-20" />
             <span className="text-[10px] uppercase tracking-widest font-bold">
               No recent projects
@@ -449,7 +470,7 @@ export default function GettingStarted() {
                 >
                   <button
                     onClick={() => setProject(p)}
-                    className={`w-full glass border border-white/5 rounded-2xl p-4 hover:bg-white/5 hover:backdrop-blur-md transition-all text-left flex items-center gap-4 ${
+                    className={`w-full glass border border-white/5 rounded-[24px] p-4 hover:bg-white/5 hover:backdrop-blur-md transition-all text-left flex items-center gap-4 ${
                       p.color === "cyan"
                         ? "hover:border-neon-cyan/30"
                         : p.color === "purple"
@@ -537,9 +558,9 @@ export default function GettingStarted() {
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="glass p-12 rounded-[40px] border border-white/10 shadow-2xl w-[600px] space-y-6"
+      className="glass w-[700px] rounded-[40px] border border-white/10 p-10 shadow-2xl space-y-6"
     >
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 border-b border-white/6 pb-5">
         <div className="w-12 h-12 rounded-2xl bg-neon-cyan/20 border border-neon-cyan/30 flex items-center justify-center text-neon-cyan">
           <Cpu size={24} />
         </div>
@@ -554,6 +575,42 @@ export default function GettingStarted() {
       </div>
 
       <div className="space-y-5">
+        <div className="grid gap-3 rounded-[28px] border border-white/8 bg-white/[0.03] p-4 lg:grid-cols-3">
+          <div className="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
+            <div className="text-[8px] font-black uppercase tracking-[0.24em] text-white/35">
+              Build Status
+            </div>
+            <div className="mt-2 text-[11px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
+              {iniPath ? 'Configuration Loaded' : 'Awaiting INI'}
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+              {iniPath ? 'Core metadata ready for initialization' : 'Select firmware definition first'}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
+            <div className="text-[8px] font-black uppercase tracking-[0.24em] text-white/35">
+              Base Tune
+            </div>
+            <div className="mt-2 text-[11px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
+              {initBaseTune ? 'Enabled' : 'Manual Setup'}
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+              {initBaseTune ? 'Applies safe starter defaults where supported' : 'Create project without automatic defaults'}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
+            <div className="text-[8px] font-black uppercase tracking-[0.24em] text-white/35">
+              Engine Profile
+            </div>
+            <div className="mt-2 text-[11px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
+              {displacement || '2000'}cc / {cylinders || '4'} Cyl
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+              {engineType || 'inline'} layout target
+            </div>
+          </div>
+        </div>
+
         {/* Project Name */}
         <div className="space-y-2">
           <label className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest block ml-1">
@@ -573,7 +630,7 @@ export default function GettingStarted() {
           <label className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest block ml-1">
             Project Identity Color
           </label>
-          <div className="flex gap-4 ml-1">
+          <div className="ml-1 flex gap-4">
             {COLORS.map((c) => (
               <button
                 key={c.id}
@@ -603,65 +660,67 @@ export default function GettingStarted() {
         </div>
 
         {/* INI File */}
-        <div className="space-y-2">
-          <label className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest block ml-1">
-            Configuration (.INI)
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              readOnly
-              value={iniPath}
-              className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-xs outline-none cursor-default truncate opacity-80"
-              placeholder="No file selected"
-            />
-            <button
-              onClick={handlePickIni}
-              className="px-6 bg-neon-cyan/10 hover:bg-neon-cyan/20 border border-neon-cyan/30 rounded-2xl text-[10px] font-bold text-neon-cyan uppercase tracking-widest transition-all"
-            >
-              Pick
-            </button>
-          </div>
-          {iniSignature && (
-            <div className="ml-1 flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-neon-green" />
-              <span className="text-[10px] text-neon-green font-mono">
-                {iniSignature}
-              </span>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
+          <div className="space-y-2">
+            <label className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest block ml-1">
+              Configuration (.INI)
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                readOnly
+                value={iniPath}
+                className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-xs outline-none cursor-default truncate opacity-80"
+                placeholder="No file selected"
+              />
+              <button
+                onClick={handlePickIni}
+                className="px-6 bg-neon-cyan/10 hover:bg-neon-cyan/20 border border-neon-cyan/30 rounded-2xl text-[10px] font-bold text-neon-cyan uppercase tracking-widest transition-all"
+              >
+                Pick
+              </button>
             </div>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest block ml-1">
-            Board Layout
-            {boardLayoutChoices.length > 0 && (
-              <span className="ml-2 text-neon-orange/70">(required)</span>
+            {iniSignature && (
+              <div className="ml-1 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-neon-green" />
+                <span className="text-[10px] text-neon-green font-mono">
+                  {iniSignature}
+                </span>
+              </div>
             )}
-          </label>
-          <select
-            value={boardLayoutValue}
-            onChange={(e) => setBoardLayoutValue(e.target.value)}
-            disabled={!iniPath || boardLayoutChoices.length === 0}
-            className="w-full bg-[#1a1a2e] border border-white/10 rounded-2xl px-5 py-4 text-white text-xs focus:border-neon-cyan outline-none disabled:opacity-40"
-          >
-            <option value="">
-              {boardLayoutChoices.length > 0
-                ? "Select board layout"
-                : iniPath
-                  ? "No board layout selector in this INI"
-                  : "Pick an INI first"}
-            </option>
-            {boardLayoutChoices.map((choice) => (
-              <option key={choice.value} value={choice.value}>
-                {choice.label}
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest block ml-1">
+              Board Layout
+              {boardLayoutChoices.length > 0 && (
+                <span className="ml-2 text-neon-orange/70">(required)</span>
+              )}
+            </label>
+            <select
+              value={boardLayoutValue}
+              onChange={(e) => setBoardLayoutValue(e.target.value)}
+              disabled={!iniPath || boardLayoutChoices.length === 0}
+              className="w-full bg-[#1a1a2e] border border-white/10 rounded-2xl px-5 py-4 text-white text-xs focus:border-neon-cyan outline-none disabled:opacity-40"
+            >
+              <option value="">
+                {boardLayoutChoices.length > 0
+                  ? "Select board layout"
+                  : iniPath
+                    ? "No board layout selector in this INI"
+                    : "Pick an INI first"}
               </option>
-            ))}
-          </select>
-          <p className="ml-1 text-[10px] text-white/35">
-            Board layout sets the default pin routing for this project. You can still change it later in Engine
-            Constants.
-          </p>
+              {boardLayoutChoices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            <p className="ml-1 text-[10px] leading-relaxed text-white/35">
+              Board layout sets the default pin routing for this project. You can still change it later in Engine
+              Constants.
+            </p>
+          </div>
         </div>
 
         <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 cursor-pointer hover:bg-white/[0.05] transition-all">
@@ -818,27 +877,56 @@ export default function GettingStarted() {
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center mb-16"
+            className="mb-12 flex w-full max-w-[1240px] items-end justify-between gap-10 xl:flex-row"
           >
-            <div className="relative group">
-              <div className="absolute inset-0 bg-neon-cyan/20 blur-2xl rounded-full scale-150 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-              <div className="w-32 h-32 rounded-[40px] bg-gradient-to-br from-neon-cyan/20 to-neon-purple/20 border border-white/10 flex items-center justify-center mb-8 box-glow-cyan relative overflow-hidden backdrop-blur-sm">
-                <img
-                  src={new URL("../../assets/logo.png", import.meta.url).href}
-                  alt="RYN CONFIGURATOR"
-                  className="w-32 h-32 object-contain drop-shadow-[0_0_15px_rgba(0,212,255,0.5)]"
-                />
+            <div className="flex items-center gap-6">
+              <div className="relative group">
+                <div className="absolute inset-0 rounded-[32px] bg-neon-cyan/16 blur-2xl opacity-0 transition-opacity duration-700 group-hover:opacity-100" />
+                <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-[28px] border border-white/10 bg-gradient-to-br from-neon-cyan/16 to-neon-purple/12 backdrop-blur-sm">
+                  <img
+                    src={new URL("../../assets/logo.png", import.meta.url).href}
+                    alt="RYN CONFIGURATOR"
+                    className="h-24 w-24 object-contain drop-shadow-[0_0_15px_rgba(0,212,255,0.35)]"
+                  />
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-[9px] font-black uppercase tracking-[0.28em] text-neon-cyan/70">
+                  Project Workspace
+                </div>
+                <h1 className="text-4xl font-orbitron font-black uppercase tracking-[0.28em] text-white xl:text-5xl">
+                  RYN <span className="text-neon-cyan">Configurator</span>
+                </h1>
+                <p className="max-w-[620px] text-[11px] uppercase tracking-[0.16em] text-white/35">
+                  Reopen your last tune, start a fresh build, or import an existing workspace without leaving the
+                  launch bay.
+                </p>
               </div>
             </div>
-            <h1 className="text-5xl font-orbitron font-black text-white uppercase tracking-[0.4em] drop-shadow-glow-cyan">
-              RYN <span className="text-neon-cyan">CONFIGURATOR</span>
-            </h1>
-            <div className="flex items-center gap-6 mt-6">
-              <span className="h-[2px] w-12 bg-gradient-to-r from-transparent to-neon-cyan/40" />
-              <p className="text-[14px] text-neon-cyan uppercase tracking-[0.6em] font-black glow-cyan opacity-90">
-                TUNING CAN BE FUN
-              </p>
-              <span className="h-[2px] w-12 bg-gradient-to-l from-transparent to-neon-cyan/40" />
+
+            <div className="grid w-full max-w-[360px] gap-3 sm:grid-cols-2 xl:w-[360px] xl:grid-cols-1">
+              <div className="rounded-[24px] border border-white/8 bg-white/[0.03] px-5 py-4 backdrop-blur-md">
+                <div className="text-[8px] font-black uppercase tracking-[0.24em] text-white/35">
+                  Launch Flow
+                </div>
+                <div className="mt-2 text-[11px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
+                  Resume, create, import
+                </div>
+                <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+                  Recent project history stays on the right rail
+                </div>
+              </div>
+              <div className="rounded-[24px] border border-white/8 bg-white/[0.03] px-5 py-4 backdrop-blur-md">
+                <div className="text-[8px] font-black uppercase tracking-[0.24em] text-white/35">
+                  Quick Import
+                </div>
+                <div className="mt-2 text-[11px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
+                  Drag and drop .rynproj
+                </div>
+                <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+                  Drop a project file anywhere on this screen to open it instantly
+                </div>
+              </div>
             </div>
           </motion.div>
         )}

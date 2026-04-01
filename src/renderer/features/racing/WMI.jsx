@@ -19,6 +19,12 @@ import {
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
 import CurveEditor from "../../ui/CurveEditor";
+import PinSelect from "../shared/components/PinSelect";
+import {
+  SelectRow,
+  InputField,
+  InfoCard,
+} from "../shared/components/TuningComponents";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 
 const WMI_FIELDS = [
@@ -115,57 +121,12 @@ const WMI = () => {
     </div>
   );
 
-  const FormField = ({
-    name,
-    label,
-    unit,
-    type = "number",
-    theme = "cyan",
-    disabled = false,
-    step = 1,
-  }) => {
-    const val = getValue(name);
-    const info = getFieldInfo(name);
-
-    return (
-      <div
-        className={`flex flex-col gap-1.5 p-2.5 rounded-xl transition-all ${disabled ? "opacity-20 select-none cursor-not-allowed grayscale" : "hover:bg-white/5"}`}
-      >
-        <label className="text-[7px] font-black text-gray-400 uppercase tracking-widest flex justify-between">
-          {label}
-          {unit && <span className="text-white/20 italic">{unit}</span>}
-        </label>
-
-        {type === "select" ? (
-          <select
-            value={val}
-            onChange={(e) => updateValue(name, parseInt(e.target.value))}
-            className={`bg-black/30 text-[10px] font-bold text-white outline-none border-none cursor-pointer focus:text-neon-${theme} py-1`}
-          >
-            {info?.meta?.options?.map(
-              (opt, i) =>
-                opt !== "INVALID" && (
-                  <option key={i} value={i} className="bg-bg-deep text-white">
-                    {opt}
-                  </option>
-                ),
-            )}
-          </select>
-        ) : (
-          <input
-            type="number"
-            step={step}
-            value={val}
-            onChange={(e) => updateValue(name, parseFloat(e.target.value))}
-            className={`bg-transparent text-sm font-mono font-black text-white outline-none border-none focus:text-neon-${theme}`}
-          />
-        )}
-      </div>
-    );
-  };
-
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden h-screen animate-in fade-in duration-700">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-neon-red/18 via-neon-red/8 to-transparent" />
+      <div className="pointer-events-none absolute -top-16 right-[-8rem] h-64 w-64 rounded-full bg-neon-red/10 blur-[120px]" />
+      <div className="pointer-events-none absolute left-[-6rem] top-40 h-56 w-56 rounded-full bg-neon-red/6 blur-[110px]" />
+      <div className="pointer-events-none relative z-10 h-2 w-full bg-gradient-to-r from-neon-red/80 via-neon-red to-neon-orange/70" />
       <TuningHeader
         title="WMI Control"
         icon={FlaskConical}
@@ -191,22 +152,32 @@ const WMI = () => {
                 theme="cyan"
               />
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <FormField
-                  name="wmiEnabled"
+                <SelectRow
                   label="Master Switch"
-                  type="select"
+                  value={getValue("wmiEnabled")}
+                  onChange={(val) => updateValue("wmiEnabled", val)}
+                  options={getFieldInfo("wmiEnabled")?.meta?.options}
                 />
-                <FormField name="wmiMode" label="Control Mode" type="select" />
-                <FormField
-                  name="vvt2Pin"
+                <SelectRow
+                  label="Control Mode"
+                  value={getValue("wmiMode")}
+                  onChange={(val) => updateValue("wmiMode", val)}
+                  options={getFieldInfo("wmiMode")?.meta?.options}
+                />
+                <PinSelect
                   label="PWM Output Pin"
-                  type="select"
+                  fieldName="vvt2Pin"
+                  value={getValue("vvt2Pin")}
+                  onChange={(val) => updateValue("vvt2Pin", val)}
+                  description="WMI PWM output only allows free output-capable pins"
+                  icon={Wind}
                   disabled={wmiEnabled === 0}
                 />
-                <FormField
-                  name="vvtFreq"
+                <InputField
                   label="PWM Freq"
-                  unit="Hz"
+                  value={getValue("vvtFreq")}
+                  onChange={(val) => updateValue("vvtFreq", val)}
+                  units="Hz"
                   disabled={wmiEnabled === 0}
                 />
               </div>
@@ -217,15 +188,19 @@ const WMI = () => {
               className={`lg:col-span-4 p-6 rounded-3xl glass-card border border-white/5 bg-black/40 transition-all ${wmiEnabled === 0 ? "opacity-30 grayscale" : ""}`}
             >
               <SectionHeader title="Arming Interface" icon={Zap} theme="blue" />
-              <FormField
-                name="wmiEnabledPin"
+              <PinSelect
                 label="Enable / Arm Pin"
-                type="select"
-                theme="blue"
+                fieldName="wmiEnabledPin"
+                value={getValue("wmiEnabledPin")}
+                onChange={(val) => updateValue("wmiEnabledPin", val)}
+                description="Only unclaimed input pins can be used for WMI arming"
+                icon={Zap}
                 disabled={wmiEnabled === 0}
               />
-              <div className="mt-2 text-[8px] font-bold text-white/20 uppercase italic px-2">
-                External switch required for activation
+              <div className="mt-3">
+                <InfoCard title="Arming Note" theme="blue">
+                  External switch required for activation.
+                </InfoCard>
               </div>
             </div>
           </div>
@@ -241,12 +216,42 @@ const WMI = () => {
                 theme="cyan"
               />
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
-                <FormField name="wmiTPS" label="Min TPS" unit="%" />
-                <FormField name="wmiRPM" label="Min RPM" unit="RPM" />
-                <FormField name="wmiMAP" label="Min MAP" unit="kPa" />
-                <FormField name="wmiMAP2" label="Max MAP" unit="kPa" />
-                <FormField name="wmiIAT" label="Min IAT" unit="°C" />
-                <FormField name="wmiOffset" label="PWM Offset" unit="ms" />
+                <InputField
+                  label="Min TPS"
+                  value={getValue("wmiTPS")}
+                  onChange={(val) => updateValue("wmiTPS", val)}
+                  units="%"
+                />
+                <InputField
+                  label="Min RPM"
+                  value={getValue("wmiRPM")}
+                  onChange={(val) => updateValue("wmiRPM", val)}
+                  units="RPM"
+                />
+                <InputField
+                  label="Min MAP"
+                  value={getValue("wmiMAP")}
+                  onChange={(val) => updateValue("wmiMAP", val)}
+                  units="kPa"
+                />
+                <InputField
+                  label="Max MAP"
+                  value={getValue("wmiMAP2")}
+                  onChange={(val) => updateValue("wmiMAP2", val)}
+                  units="kPa"
+                />
+                <InputField
+                  label="Min IAT"
+                  value={getValue("wmiIAT")}
+                  onChange={(val) => updateValue("wmiIAT", val)}
+                  units="°C"
+                />
+                <InputField
+                  label="PWM Offset"
+                  value={getValue("wmiOffset")}
+                  onChange={(val) => updateValue("wmiOffset", val)}
+                  units="ms"
+                />
               </div>
             </div>
 
@@ -262,46 +267,56 @@ const WMI = () => {
                   <span className="text-[7px] font-black text-white/30 uppercase tracking-widest pl-2 block">
                     Tank Empty Input
                   </span>
-                  <FormField
-                    name="wmiEmptyEnabled"
+                  <SelectRow
                     label="Empty Status"
-                    type="select"
-                    theme="blue"
+                    value={getValue("wmiEmptyEnabled")}
+                    onChange={(val) => updateValue("wmiEmptyEnabled", val)}
+                    options={getFieldInfo("wmiEmptyEnabled")?.meta?.options}
                   />
-                  <FormField
-                    name="wmiEmptyPin"
+                  <PinSelect
                     label="Input Pin"
-                    type="select"
-                    theme="blue"
+                    fieldName="wmiEmptyPin"
+                    value={getValue("wmiEmptyPin")}
+                    onChange={(val) => updateValue("wmiEmptyPin", val)}
+                    description="Reserve one free input pin for empty-tank sensing"
+                    icon={AlertTriangle}
+                    disabled={wmiEnabled === 0}
                   />
-                  <FormField
-                    name="wmiEmptyPolarity"
+                  <SelectRow
                     label="Input Polarity"
-                    type="select"
-                    theme="blue"
+                    value={getValue("wmiEmptyPolarity")}
+                    onChange={(val) => updateValue("wmiEmptyPolarity", val)}
+                    options={getFieldInfo("wmiEmptyPolarity")?.meta?.options}
+                    disabled={wmiEnabled === 0}
                   />
                 </div>
                 <div className="space-y-4">
                   <span className="text-[7px] font-black text-white/30 uppercase tracking-widest pl-2 block">
                     Status Indicator
                   </span>
-                  <FormField
-                    name="wmiIndicatorEnabled"
+                  <SelectRow
                     label="Indicator LED"
-                    type="select"
-                    theme="cyan"
+                    value={getValue("wmiIndicatorEnabled")}
+                    onChange={(val) => updateValue("wmiIndicatorEnabled", val)}
+                    options={getFieldInfo("wmiIndicatorEnabled")?.meta?.options}
                   />
-                  <FormField
-                    name="wmiIndicatorPin"
+                  <PinSelect
                     label="Output Pin"
-                    type="select"
-                    theme="cyan"
+                    fieldName="wmiIndicatorPin"
+                    value={getValue("wmiIndicatorPin")}
+                    onChange={(val) => updateValue("wmiIndicatorPin", val)}
+                    description="Indicator output is locked away from other active owners"
+                    icon={CircleDot}
+                    disabled={wmiEnabled === 0}
                   />
-                  <FormField
-                    name="wmiIndicatorPolarity"
+                  <SelectRow
                     label="Output Polarity"
-                    type="select"
-                    theme="cyan"
+                    value={getValue("wmiIndicatorPolarity")}
+                    onChange={(val) => updateValue("wmiIndicatorPolarity", val)}
+                    options={
+                      getFieldInfo("wmiIndicatorPolarity")?.meta?.options
+                    }
+                    disabled={wmiEnabled === 0}
                   />
                 </div>
               </div>
@@ -328,11 +343,11 @@ const WMI = () => {
               </div>
 
               <div className="grid grid-cols-1 gap-6">
-                <FormField
-                  name="wmiAdvEnabled"
+                <SelectRow
                   label="Advance Correction"
-                  type="select"
-                  theme="blue"
+                  value={getValue("wmiAdvEnabled")}
+                  onChange={(val) => updateValue("wmiAdvEnabled", val)}
+                  options={getFieldInfo("wmiAdvEnabled")?.meta?.options}
                 />
 
                 <div
@@ -401,20 +416,13 @@ const WMI = () => {
             </div>
           </div>
 
-          <div className="p-6 rounded-3xl border border-dashed border-white/5 flex items-center justify-between group hover:border-neon-cyan/20 transition-all">
-            <div className="flex items-center gap-4">
-              <ShieldAlert
-                size={16}
-                className="text-white/20 group-hover:text-neon-cyan transition-colors"
-              />
-              <p className="text-[9px] font-medium text-white/20 uppercase tracking-widest group-hover:text-white/40">
-                WMI Duty Cycle is logged as 'WMI duty' in Status Page 4
-              </p>
-            </div>
-            <div className="text-[8px] font-black text-white/10 uppercase tracking-[0.4em]">
-              Chemical Safety Lock Active
-            </div>
-          </div>
+          <InfoCard
+            title="Chemical Safety Lock Active"
+            icon={ShieldAlert}
+            theme="cyan"
+          >
+            WMI Duty Cycle is logged as 'WMI duty' in Status Page 4.
+          </InfoCard>
         </div>
       </div>
     </div>

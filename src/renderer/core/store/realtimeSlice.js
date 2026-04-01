@@ -15,8 +15,20 @@ const INITIAL_REALTIME = {
   },
   performance: {
     pitLimiterActive: false,
+    pitLimiterSwitch: false,
     rumbleIdleActive: false,
+    rumbleIdleBeat: true,
     alsActive: false,
+    alsSwitch: false,
+    alsTimingCorr: 0,
+    alsFuelCorr: 100,
+    alsActiveTime: 0,
+    rollingPopBangActive: false,
+    rollingPopBangSwitch: false,
+    rollingPopBangActiveTime: 0,
+    rollingPopBangCutCounter: 0,
+    rollingPopBangTimingCorr: 0,
+    rollingPopBangFuelCorr: 100,
   },
 };
 

@@ -7,7 +7,8 @@ description: Technical blueprint for navigating Speeduino firmware's speeduino.i
 
 ## 📜 Core INI Paths & Search
 - **Path**: `c:\Users\ryn\speeduino\speeduino\reference\speeduino.ini`
-- **Lookup Command (PowerShell)**: `Select-String -Path speeduino.ini -Pattern "<term>"`
+- **Lookup Command (Git Bash)**: `rg -n "<term>" speeduino.ini`
+- **Fallback (PowerShell)**: `Select-String -Path speeduino.ini -Pattern "<term>"`
 
 ---
 

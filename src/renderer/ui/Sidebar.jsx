@@ -28,6 +28,7 @@ import {
   Table2,
   Fuel,
   LayoutGrid,
+  Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
@@ -166,6 +167,12 @@ const NAV_CONFIG = [
         label: "Anti-Lag System",
         icon: Flame,
         theme: "red",
+      },
+      {
+        path: ROUTES.RACING_POPANDBANG,
+        label: "Rolling Pop & Bang",
+        icon: Sparkles,
+        theme: "orange",
       },
 
       {
