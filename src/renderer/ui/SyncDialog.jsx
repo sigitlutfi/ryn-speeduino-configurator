@@ -12,24 +12,50 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
 
   const {
     different,
+    generated = [],
     missing,
     matching,
     errors = [],
     pageStates = {},
     pageDiffs = {},
   } = diffResults;
-  const hasDifferences = different.length > 0 || missing.length > 0 || errors.length > 0;
+  const hasDifferences =
+    different.length > 0 ||
+    generated.length > 0 ||
+    missing.length > 0 ||
+    errors.length > 0;
   const allPages = Object.keys(pageStates).map(Number).sort((a, b) => a - b);
   const hasErrors = errors.length > 0;
-  const mostlyMissing = missing.length > 0 && different.length <= 1 && missing.length >= matching.length;
+  const generatedDiffs = generated
+    .map((pageId) => pageDiffs[pageId])
+    .filter(Boolean);
+  const generatedBlankCount = generatedDiffs.filter((diff) => diff.ecuLooksBlank).length;
+  const generatedNonBlankCount = generatedDiffs.length - generatedBlankCount;
+  const mostlyMissing =
+    missing.length > 0 &&
+    different.length <= 1 &&
+    generated.length === 0 &&
+    missing.length >= matching.length;
+  const generatedOnly = generated.length > 0 && different.length === 0 && missing.length === 0;
+  const generatedBiasTowardUpload =
+    generated.length > 0 &&
+    generatedBlankCount >= generatedNonBlankCount &&
+    different.length === 0 &&
+    missing.length === 0;
+  const generatedBiasTowardDownload =
+    generated.length > 0 &&
+    (generatedNonBlankCount > generatedBlankCount || missing.length > 0);
   const recommendedAction = hasErrors
-    ? "review"
-    : mostlyMissing
-      ? "download"
-      : "review";
+    ? 'review'
+    : generatedBiasTowardUpload
+      ? 'upload'
+      : mostlyMissing || generatedBiasTowardDownload
+        ? 'download'
+        : 'review';
   const activeOperation = operation?.scope === "sync" ? operation : null;
   const busy = loading || Boolean(activeOperation);
-  const uploadDisabled = busy || missing.length > 0;
+  const uploadPages = [...new Set([...different, ...generated])];
+  const uploadDisabled = busy || hasErrors || uploadPages.length === 0;
   const totalSteps = Number.isFinite(activeOperation?.total) ? activeOperation.total : 0;
   const currentStep = Number.isFinite(activeOperation?.current) ? activeOperation.current : 0;
   const progressPercent = totalSteps > 0
@@ -80,18 +106,21 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
   const handleUpload = async () => {
     setLoading(true);
     try {
-      // Upload only different pages
-      const pagesToUpload = [...different];
-      const result = await uploadToECU(pagesToUpload.length > 0 ? pagesToUpload : null);
+      const result = await uploadToECU(uploadPages.length > 0 ? uploadPages : null);
 
       if (result.ok) {
         notify("Uploaded project to ECU successfully", "success");
         onClose();
       } else {
-        notify("Upload completed with errors", "warning");
+        const firstError = result?.errors?.[0];
+        const detail =
+          firstError?.pageId !== undefined
+            ? ` Page ${firstError.pageId}: ${firstError.error}`
+            : firstError?.error || " Unknown issue";
+        notify(`Upload completed with errors.${detail}`, "warning", 12000);
       }
     } catch (err) {
-      notify(`Upload failed: ${err.message}`, "error");
+      notify(`Upload failed: ${err.message}`, "error", 12000);
     } finally {
       setLoading(false);
     }
@@ -188,15 +217,19 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                     <p>
                       {hasErrors
                         ? "The sync check hit one or more read/verify errors. Treat this state as unsafe until you pull fresh data from the ECU or re-run the check successfully."
+                        : recommendedAction === "upload" && generatedOnly
+                        ? "This project still contains generated local pages, while the ECU appears mostly blank or freshly flashed. Uploading the project is a reasonable way to establish the initial baseline."
                         : recommendedAction === "download"
-                        ? "This project looks new or incomplete. The safest next step is to pull data from the ECU into the project."
+                        ? generated.length > 0
+                          ? "This project still contains generated local pages and the ECU appears to hold a real baseline. Pull from the ECU first so the project is based on real controller data."
+                          : "Project baseline is incomplete. Pull once from the ECU to finish synchronization and capture the remaining pages."
                         : "Your project file differs from ECU memory. Review the direction carefully before overwriting either side."}
                     </p>
                   </div>
                 </div>
 
                 {/* Status Summary */}
-                <div className={`grid gap-2 ${errors.length > 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+                <div className={`grid gap-2 ${errors.length > 0 ? 'grid-cols-5' : 'grid-cols-4'}`}>
                   <div className="rounded-xl bg-neon-green/10 border border-neon-green/30 px-3 py-2.5 text-center">
                     <div className="text-xl font-bold text-neon-green">{matching.length}</div>
                     <div className="mt-0.5 text-[10px] text-gray-400 uppercase tracking-[0.24em]">Matching</div>
@@ -204,6 +237,10 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                   <div className="rounded-xl bg-neon-orange/10 border border-neon-orange/30 px-3 py-2.5 text-center">
                     <div className="text-xl font-bold text-neon-orange">{different.length}</div>
                     <div className="mt-0.5 text-[10px] text-gray-400 uppercase tracking-[0.24em]">Different</div>
+                  </div>
+                  <div className="rounded-xl bg-neon-yellow/10 border border-neon-yellow/30 px-3 py-2.5 text-center">
+                    <div className="text-xl font-bold text-neon-yellow">{generated.length}</div>
+                    <div className="mt-0.5 text-[10px] text-gray-400 uppercase tracking-[0.24em]">Generated</div>
                   </div>
                   <div className="rounded-xl bg-gray-500/10 border border-gray-500/30 px-3 py-2.5 text-center">
                     <div className="text-xl font-bold text-gray-400">{missing.length}</div>
@@ -237,6 +274,8 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                             ? "bg-neon-green/15 border-neon-green/35 text-neon-green"
                             : state === "different"
                               ? "bg-neon-orange/15 border-neon-orange/35 text-neon-orange"
+                              : state === "generated-local"
+                                ? "bg-neon-yellow/15 border-neon-yellow/35 text-neon-yellow"
                               : state === "missing-local"
                                 ? "bg-gray-500/15 border-gray-500/35 text-gray-300"
                                 : "bg-neon-red/15 border-neon-red/35 text-neon-red";
@@ -249,7 +288,7 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                               >
                                 P{pageId} · {state}
                               </span>
-                              {state === 'different' && diff && (
+                              {(state === 'different' || state === 'generated-local') && diff && (
                                 <button
                                   type="button"
                                   onClick={() => toggleDiffPage(pageId)}
@@ -261,11 +300,14 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                               )}
                             </div>
 
-                            {state === 'different' && diff && isExpanded && (
+                            {(state === 'different' || state === 'generated-local') && diff && isExpanded && (
                               <div className="w-full max-w-xl rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-[11px] text-gray-300">
                                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-400">
                                   <span>Offset: <span className="font-mono text-white">{diff.offset}</span></span>
                                   <span>Bytes: <span className="font-mono text-white">{diff.length}</span></span>
+                                  {state === 'generated-local' && (
+                                    <span>Basis: <span className="font-mono text-white">{diff.ecuLooksBlank ? 'ECU looks blank' : 'ECU has real data'}</span></span>
+                                  )}
                                   {diff.localCRC && (
                                     <span>Local CRC: <span className="font-mono text-white">{diff.localCRC}</span></span>
                                   )}
@@ -298,10 +340,17 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                     <p>
                       Recommendation: resolve the read/verify errors first. Prefer <span className="text-neon-cyan font-semibold">Download from ECU</span> after the connection is stable, then re-check sync before considering any upload.
                     </p>
+                  ) : recommendedAction === "upload" ? (
+                    <p>
+                      Recommendation: use <span className="text-neon-yellow font-semibold">Upload to ECU</span>.
+                      These pages are still project-generated and the ECU looks mostly blank or freshly flashed, so pushing the project as the initial baseline is reasonable.
+                    </p>
                   ) : recommendedAction === "download" ? (
                     <p>
                       Recommendation: use <span className="text-neon-cyan font-semibold">Download from ECU</span>.
-                      Missing local snapshots mean this project does not yet contain enough raw page data to safely push back.
+                      {generated.length > 0
+                        ? "Generated local pages are provisional. Pull the ECU data first so the project is grounded in real controller memory before you overwrite anything."
+                        : "Your initialized base tune pages already align, but the project baseline is not complete yet. Pull once from the ECU to capture the remaining pages and finish synchronization."}
                     </p>
                   ) : (
                     <p>
@@ -341,18 +390,28 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                   <button
                     onClick={handleUpload}
                     disabled={uploadDisabled}
-                    className="w-full flex items-center justify-between px-5 py-4 rounded-xl bg-neon-yellow/10 border border-neon-yellow/30 hover:bg-neon-yellow/20 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`w-full flex items-center justify-between px-5 py-4 rounded-xl transition-all group disabled:opacity-50 disabled:cursor-not-allowed ${
+                      recommendedAction === "upload"
+                        ? "bg-neon-yellow/20 border border-neon-yellow/50 shadow-[0_0_24px_rgba(255,204,0,0.12)]"
+                        : "bg-neon-yellow/10 border border-neon-yellow/30 hover:bg-neon-yellow/20"
+                    }`}
                   >
                     <div className="flex items-center gap-3">
                       <Upload className="text-neon-yellow" size={20} />
                       <div className="text-left">
                         <div className="text-sm font-bold text-neon-yellow">
-                          {busy && activeOperation?.type === "upload" ? "Uploading to ECU..." : "Upload to ECU"}
+                          {busy && activeOperation?.type === "upload"
+                            ? "Uploading to ECU..."
+                            : `Upload to ECU ${recommendedAction === "upload" ? "(Recommended)" : ""}`}
                         </div>
                         <div className="text-xs text-gray-400">
-                          {missing.length > 0
-                            ? "Upload is disabled while local snapshots are missing. Pull from ECU first so the project has a complete base."
-                            : "Overwrite ECU RAM with project data. Use only if this project is the intended source."}
+                          {hasErrors
+                            ? "Upload is disabled until the read or verify errors are resolved."
+                            : uploadPages.length === 0
+                              ? "There are no generated or different local pages available to upload yet."
+                            : generated.length > 0
+                              ? "Only generated and different local pages will be written. Missing pages stay untouched, which is appropriate for a fresh project."
+                              : "Overwrite ECU RAM with project data. Use only if this project is the intended source."}
                         </div>
                       </div>
                     </div>

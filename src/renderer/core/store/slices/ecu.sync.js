@@ -27,9 +27,24 @@ import {
 import { buildDisplayTablesFromDecodedPages } from "../utils/table.transforms.js";
 
 export function createECUSyncSlice(set, get) {
+  const MAX_PAGE_WRITE_CHUNK = 64;
+
   const formatDiffHex = (buffer, maxBytes = 16) => {
     const bytes = Array.from(Buffer.from(buffer || []).slice(0, maxBytes));
     return bytes.map((value) => value.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+  };
+
+  const formatErrorMessage = (error) => {
+    if (!error) return "Unknown ECU sync error";
+    if (typeof error === "string") return error;
+    if (error instanceof Error) return error.message || error.toString();
+    if (typeof error?.message === "string" && error.message) return error.message;
+
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
   };
 
   return {
@@ -57,7 +72,7 @@ export function createECUSyncSlice(set, get) {
 
       const results = { ok: true, pages: {}, errors: [] };
 
-      serialService.suspendOutputChannelsPolling();
+      await serialService.enterExclusiveMode();
       try {
         setOperation({
           type: options.burn ? "upload" : "write",
@@ -161,12 +176,34 @@ export function createECUSyncSlice(set, get) {
                 current: index,
                 total: targetPages.length,
               });
-              await serialService.writePage(
-                pageId,
-                dirtyRegion.offset,
-                dirtyRegion.length,
-                Array.from(dirtyRegion.after),
-              );
+
+              for (
+                let chunkOffset = 0;
+                chunkOffset < dirtyRegion.length;
+                chunkOffset += MAX_PAGE_WRITE_CHUNK
+              ) {
+                const chunkLength = Math.min(
+                  MAX_PAGE_WRITE_CHUNK,
+                  dirtyRegion.length - chunkOffset,
+                );
+                const chunkData = Array.from(
+                  dirtyRegion.after.slice(chunkOffset, chunkOffset + chunkLength),
+                );
+
+                console.log("[ECU Sync] Writing chunk", {
+                  pageId,
+                  offset: dirtyRegion.offset + chunkOffset,
+                  length: chunkLength,
+                });
+
+                await serialService.writePage(
+                  pageId,
+                  dirtyRegion.offset + chunkOffset,
+                  chunkLength,
+                  chunkData,
+                );
+              }
+
               await delay(options.writeSettleMs ?? 1200);
             }
 
@@ -294,9 +331,16 @@ export function createECUSyncSlice(set, get) {
           : firstError?.error
             ? ` ${firstError.error}.`
             : "";
+        console.error("[ECU Sync] Upload/write completed with issues", {
+          targetPages,
+          errors: results.errors,
+          pages: results.pages,
+          options,
+        });
         notify(
           `ECU sync completed with ${results.errors.length} issue(s).${detail}`,
           "warning",
+          12000,
         );
       }
 
@@ -424,6 +468,19 @@ export function createECUSyncSlice(set, get) {
           return { ok: true, verified: true, healed: true };
         }
 
+        const dirtyRegion = findDirtyRegion(localBuffer, ecuPage.buffer);
+        console.error("[ECU Sync] Burn verify mismatch", {
+          pageId,
+          localCRC: localSnapshot?.crc32 || null,
+          ecuCRC,
+          localSize: localBuffer.length,
+          ecuSize: ecuPage.buffer.length,
+          dirtyOffset: dirtyRegion?.offset ?? null,
+          dirtyLength: dirtyRegion?.length ?? null,
+          localHex: formatDiffHex(dirtyRegion?.before),
+          ecuHex: formatDiffHex(dirtyRegion?.after),
+        });
+
         const rebuiltSnapshot = createPageSnapshot({
           pageId,
           size: ecuPage.buffer.length,
@@ -463,9 +520,18 @@ export function createECUSyncSlice(set, get) {
           };
         });
 
-        notify(`Page ${pageId} burn verify failed`, "warning");
+        notify(
+          `Page ${pageId} burn verify failed: CRC/readback mismatch`,
+          "warning",
+          12000,
+        );
         return { ok: false, verified: false, error: "CRC/readback mismatch" };
       } catch (e) {
+        console.error("[ECU Sync] Burn failed", {
+          pageId,
+          message: formatErrorMessage(e),
+          error: e,
+        });
         set((s) => {
           if (!s.currentProject) return {};
           const nextPages = updatePageSnapshotStates(s.currentProject, {
@@ -484,7 +550,11 @@ export function createECUSyncSlice(set, get) {
             },
           };
         });
-        notify(`Burn failed for Page ${pageId}`, "error");
+        notify(
+          `Burn failed for Page ${pageId}: ${formatErrorMessage(e)}`,
+          "error",
+          12000,
+        );
         return { ok: false, error: e.message };
       }
     },
@@ -521,7 +591,7 @@ export function createECUSyncSlice(set, get) {
         scope: "sync",
       });
 
-      serialService.suspendOutputChannelsPolling();
+      await serialService.enterExclusiveMode();
       try {
         for (let index = 0; index < pages.length; index += 1) {
           const pId = pages[index];
@@ -582,6 +652,7 @@ export function createECUSyncSlice(set, get) {
       const results = {
         matching: [],
         different: [],
+        generated: [],
         missing: [],
         errors: [],
         pageStates: {},
@@ -598,7 +669,7 @@ export function createECUSyncSlice(set, get) {
         scope: "sync",
       });
 
-      serialService.suspendOutputChannelsPolling();
+      await serialService.enterExclusiveMode();
       try {
         for (let index = 0; index < pagesToSync.length; index += 1) {
           const pId = pagesToSync[index];
@@ -614,27 +685,48 @@ export function createECUSyncSlice(set, get) {
           try {
             const localSnapshot =
               localSnapshots[pId] || localSnapshots[String(pId)];
-            if (!localSnapshot) {
-              results.missing.push(pId);
-              results.pageStates[pId] = "missing-local";
-              results.pageDiffs[pId] = {
-                pageId: pId,
-                status: "missing-local",
-                summary: "Local snapshot is missing",
-              };
-              pageStateUpdates[pId] = {
-                syncState: "missing-local",
-                lastVerifiedAt: nowIso(),
-              };
-              console.warn("[project] compareWithECU missing local snapshot", {
-                pageId: pId,
-                status: "missing-local",
-              });
-              continue;
+            let effectiveLocalSnapshot = localSnapshot;
+            if (!effectiveLocalSnapshot) {
+              const decodedPage =
+                currentProject?.constants?.decodedPages?.[pId] ||
+                currentProject?.constants?.decodedPages?.[String(pId)] ||
+                {};
+              const rebuiltBuffer = serializeDecodedPage(parsedIni, pId, decodedPage);
+
+              if (rebuiltBuffer.length > 0) {
+                effectiveLocalSnapshot = createPageSnapshot({
+                  pageId: pId,
+                  size: rebuiltBuffer.length,
+                  buffer: rebuiltBuffer,
+                  source: "generated",
+                  syncState: "unknown",
+                  lastReadAt: null,
+                  lastVerifiedAt: null,
+                });
+
+                pageStateUpdates[pId] = effectiveLocalSnapshot;
+              } else {
+                results.missing.push(pId);
+                results.pageStates[pId] = "missing-local";
+                results.pageDiffs[pId] = {
+                  pageId: pId,
+                  status: "missing-local",
+                  summary: "Local snapshot is missing",
+                };
+                pageStateUpdates[pId] = {
+                  syncState: "missing-local",
+                  lastVerifiedAt: nowIso(),
+                };
+                console.warn("[project] compareWithECU missing local snapshot", {
+                  pageId: pId,
+                  status: "missing-local",
+                });
+                continue;
+              }
             }
 
             const ecuCRC = await serialService.readPageCRC(pId);
-            if (localSnapshot.crc32 === ecuCRC) {
+            if (effectiveLocalSnapshot.crc32 === ecuCRC) {
               results.matching.push(pId);
               results.pageStates[pId] = "verified";
               pageStateUpdates[pId] = {
@@ -650,7 +742,7 @@ export function createECUSyncSlice(set, get) {
                 total: pagesToSync.length,
               });
 
-              const localBuffer = decodePageSnapshot(localSnapshot);
+              const localBuffer = decodePageSnapshot(effectiveLocalSnapshot);
               const ecuPage = await readPageFromECU(pId);
               const buffersMatch =
                 localBuffer.length === ecuPage.buffer.length &&
@@ -665,7 +757,7 @@ export function createECUSyncSlice(set, get) {
                 results.pageDiffs[pId] = {
                   pageId: pId,
                   status: "verified",
-                  localCRC: localSnapshot.crc32,
+                  localCRC: effectiveLocalSnapshot.crc32,
                   ecuCRC,
                   summary: "Raw page matches after readback",
                 };
@@ -686,31 +778,55 @@ export function createECUSyncSlice(set, get) {
                 );
               } else {
                 const dirtyRegion = findDirtyRegion(localBuffer, ecuPage.buffer);
-                results.different.push(pId);
-                results.pageStates[pId] = "different";
+                const isGeneratedLocal =
+                  effectiveLocalSnapshot?.source === "generated";
+                const ecuNonZeroBytes = Array.from(ecuPage.buffer || []).reduce(
+                  (count, value) => count + (value !== 0 ? 1 : 0),
+                  0,
+                );
+                const generatedState = isGeneratedLocal
+                  ? "generated-local"
+                  : "different";
+
+                if (isGeneratedLocal) {
+                  results.generated.push(pId);
+                } else {
+                  results.different.push(pId);
+                }
+
+                results.pageStates[pId] = generatedState;
                 results.pageDiffs[pId] = {
                   pageId: pId,
-                  status: "different",
-                  localCRC: localSnapshot.crc32,
+                  status: generatedState,
+                  source: effectiveLocalSnapshot?.source || "unknown",
+                  localCRC: effectiveLocalSnapshot.crc32,
                   ecuCRC,
                   offset: dirtyRegion?.offset ?? 0,
                   length: dirtyRegion?.length ?? ecuPage.buffer.length,
                   localHex: formatDiffHex(dirtyRegion?.before),
                   ecuHex: formatDiffHex(dirtyRegion?.after),
-                  summary: dirtyRegion
-                    ? `${dirtyRegion.length} byte(s) differ starting at offset ${dirtyRegion.offset}`
-                    : "Raw page differs",
+                  ecuNonZeroBytes,
+                  ecuLooksBlank: ecuNonZeroBytes === 0,
+                  summary: isGeneratedLocal
+                    ? dirtyRegion
+                      ? `Generated local page differs from ECU baseline at offset ${dirtyRegion.offset}`
+                      : "Generated local page differs from ECU baseline"
+                    : dirtyRegion
+                      ? `${dirtyRegion.length} byte(s) differ starting at offset ${dirtyRegion.offset}`
+                      : "Raw page differs",
                 };
                 pageStateUpdates[pId] = {
-                  syncState: "different",
+                  syncState: generatedState,
                   lastVerifiedAt: nowIso(),
                 };
                 console.warn("[project] compareWithECU page differs", {
-                  pageId: pId,
-                  localCRC: localSnapshot.crc32,
-                  ecuCRC,
-                  status: "different",
-                });
+                    pageId: pId,
+                    localCRC: effectiveLocalSnapshot.crc32,
+                    ecuCRC,
+                    status: generatedState,
+                    source: effectiveLocalSnapshot?.source || "unknown",
+                    ecuNonZeroBytes,
+                  });
               }
             }
           } catch (e) {
@@ -767,6 +883,7 @@ export function createECUSyncSlice(set, get) {
         console.log("[project] compareWithECU summary", {
           matching: results.matching,
           different: results.different,
+          generated: results.generated,
           missing: results.missing,
           errors: results.errors,
           pageStates: results.pageStates,
@@ -933,8 +1050,14 @@ export function createECUSyncSlice(set, get) {
           pages: Object.keys(pageSnapshots).map(Number),
         });
       } catch (e) {
-        console.error("[ECU Sync] Failed:", e);
-        notify(`Sync Failed: ${e}`, "error");
+        const message = formatErrorMessage(e);
+        console.error("[ECU Sync] Failed:", {
+          message,
+          error: e,
+          pagesToSync,
+          parsedIniPages: Object.keys(parsedIni?.constants?.pages || {}),
+        });
+        notify(`ECU sync failed: ${message}`, "error", 12000);
       } finally {
         serialService.resumeOutputChannelsPolling();
         clearOperation();

@@ -118,6 +118,8 @@ export default function AppToolbar() {
   const recentProjects = useStore((s) => s.recentProjects);
   const notify = useStore((s) => s.notify);
   const operation = useStore((s) => s.operation);
+  const restoreProjectToBaseTune = useStore((s) => s.restoreProjectToBaseTune);
+  const resetProjectToBlankCanvas = useStore((s) => s.resetProjectToBlankCanvas);
   const [, navigate] = useLocation();
   const isSyncing = operation?.type === "pull" || operation?.type === "compare";
   const isBurning = operation?.type === "burn";
@@ -129,6 +131,12 @@ export default function AppToolbar() {
   );
   const needsPullCta =
     connectionStatus === "connected" && syncState !== "fully-verified";
+  const hasBaseTuneSnapshot = Boolean(
+    currentProject?.initialization?.restorePoints?.baseTune,
+  );
+  const hasBlankCanvasSnapshot = Boolean(
+    currentProject?.initialization?.restorePoints?.blankCanvas,
+  );
 
   const handleMenuClick = (menu) => {
     setOpenMenu(openMenu === menu ? null : menu);
@@ -174,6 +182,26 @@ export default function AppToolbar() {
     } else if (result?.error && result.error !== "Save cancelled") {
       notify(`Save As error: ${result.error}`, "error");
     }
+  };
+
+  const handleRestoreBaseTune = async () => {
+    closeMenus();
+    if (!currentProject) return;
+    const confirmed = window.confirm(
+      "Restore this project back to its base tune snapshot?",
+    );
+    if (!confirmed) return;
+    await restoreProjectToBaseTune();
+  };
+
+  const handleResetBlankCanvas = async () => {
+    closeMenus();
+    if (!currentProject) return;
+    const confirmed = window.confirm(
+      "Reset this project to the initial blank-canvas state?",
+    );
+    if (!confirmed) return;
+    await resetProjectToBlankCanvas();
   };
 
   const handleToolbarSync = async () => {
@@ -310,6 +338,29 @@ export default function AppToolbar() {
               onClick={handleSave}
             />
             <MenuItem icon={Save} label="Save As…" onClick={handleSaveAs} />
+
+            {currentProject && (
+              <>
+                <Divider />
+
+                <div className="px-2 py-1.5 mb-1 text-[9px] font-orbitron font-black text-gray-600 uppercase tracking-widest">
+                  Tune Recovery
+                </div>
+                <MenuItem
+                  icon={RefreshCcw}
+                  label="Restore Base Tune"
+                  onClick={handleRestoreBaseTune}
+                  disabled={!hasBaseTuneSnapshot || isCommBusy}
+                />
+                <MenuItem
+                  icon={XCircle}
+                  label="Reset to Blank Canvas"
+                  onClick={handleResetBlankCanvas}
+                  disabled={!hasBlankCanvasSnapshot || isCommBusy}
+                  danger
+                />
+              </>
+            )}
 
             <Divider />
 

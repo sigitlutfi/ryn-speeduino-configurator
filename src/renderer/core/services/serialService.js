@@ -684,10 +684,55 @@ class SerialService {
 
   suspendOutputChannelsPolling() {
     this.outputChannelsSuspendCount += 1;
+    if (this.outputChannelsPollTimer) {
+      clearInterval(this.outputChannelsPollTimer);
+      this.outputChannelsPollTimer = null;
+    }
+  }
+
+  async enterExclusiveMode(timeout = 1500) {
+    this.suspendOutputChannelsPolling();
+    console.log("[Serial] Entering exclusive mode", {
+      suspendCount: this.outputChannelsSuspendCount,
+      outputChannelsPollRunning: this.outputChannelsPollRunning,
+      realtimeReadInFlight: this.realtimeReadInFlight,
+    });
+
+    const startedAt = Date.now();
+    while (this.outputChannelsPollRunning || this.realtimeReadInFlight) {
+      if (Date.now() - startedAt >= timeout) {
+        console.warn("[Serial] Exclusive mode entered with polling still busy", {
+          timeout,
+          outputChannelsPollRunning: this.outputChannelsPollRunning,
+          realtimeReadInFlight: this.realtimeReadInFlight,
+        });
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    console.log("[Serial] Exclusive mode ready", {
+      waitMs: Date.now() - startedAt,
+      outputChannelsPollRunning: this.outputChannelsPollRunning,
+      realtimeReadInFlight: this.realtimeReadInFlight,
+    });
   }
 
   resumeOutputChannelsPolling() {
     this.outputChannelsSuspendCount = Math.max(0, this.outputChannelsSuspendCount - 1);
+    if (
+      this.outputChannelsSuspendCount === 0 &&
+      this.outputChannelsPollConfig &&
+      !this.outputChannelsPollTimer
+    ) {
+      this.startOutputChannelsPolling(
+        this.outputChannelsPollConfig.parsedIni,
+        {
+          intervalMs: this.outputChannelsPollConfig.intervalMs,
+          tsCanId: this.outputChannelsPollConfig.tsCanId,
+        },
+      );
+    }
   }
 
   /**

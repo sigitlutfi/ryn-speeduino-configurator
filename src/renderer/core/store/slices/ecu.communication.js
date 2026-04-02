@@ -9,6 +9,9 @@ import { nowIso, deriveProjectSyncState } from "../utils/project.utils.js";
 import { updatePageSnapshotStates } from "../utils/page.utils.js";
 
 export function createECUCommunicationSlice(set, get) {
+  const DEFAULT_PAGE_READ_CHUNK = 64;
+  const MAX_PAGE_READ_CHUNK = 64;
+
   return {
     readPageFromECU: (pageId) => {
       const { parsedIni, currentProject } = get();
@@ -23,8 +26,8 @@ export function createECUCommunicationSlice(set, get) {
       const chunkSize =
         Number.isFinite(configuredBlockingFactor) &&
         configuredBlockingFactor > 0
-          ? configuredBlockingFactor
-          : 121;
+          ? Math.min(configuredBlockingFactor, MAX_PAGE_READ_CHUNK)
+          : DEFAULT_PAGE_READ_CHUNK;
 
       return (async () => {
         const chunks = [];

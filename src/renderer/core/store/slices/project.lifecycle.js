@@ -12,13 +12,181 @@ import { nowIso, deriveProjectSyncState } from "../utils/project.utils.js";
 import { getDecodedPages, updatePageSnapshotStates } from "../utils/page.utils.js";
 import { buildDisplayTablesFromDecodedPages } from "../utils/table.transforms.js";
 import { createEmptyRuntimeProfileSession } from "../types/runtime.types.js";
+import { buildProjectInitialization } from "../../../features/projects/projectInitialization.js";
 import {
   normalizeProjectV3,
   serializeProjectForSave,
   ensureProjectRuntimeProfiles,
+  createProjectRestorePoint,
+  materializeProjectConstants,
 } from "../utils/project.normalization.js";
 
 export function createProjectLifecycleSlice(set, get) {
+  const buildGeneratedRestorePoint = ({
+    project,
+    parsedIni,
+    initBaseTune = false,
+  }) => {
+    if (!parsedIni) return null;
+
+    const initializationPlan = buildProjectInitialization({
+      parsedIni,
+      selectedBoardLayout: project.initialization?.boardLayout?.value ?? null,
+      engine: project.engine || {},
+      initBaseTune,
+    });
+
+    const decodedPages = initializationPlan.pages || {};
+    const materializedConstants = materializeProjectConstants(parsedIni, {
+      pages: decodedPages,
+      decodedPages,
+    });
+
+    return createProjectRestorePoint({
+      constants: materializedConstants,
+      tables: buildDisplayTablesFromDecodedPages(
+        parsedIni,
+        decodedPages,
+        INITIAL_TABLES,
+      ),
+      runtimeProfiles: project.runtimeProfiles || {},
+    });
+  };
+
+  const ensureRestorePoints = ({ project, parsedIni, tables }) => {
+    const existingRestorePoints = project.initialization?.restorePoints || {};
+
+    const blankCanvas =
+      existingRestorePoints.blankCanvas ||
+      buildGeneratedRestorePoint({
+        project,
+        parsedIni,
+        initBaseTune: false,
+      });
+
+    const baseTune =
+      existingRestorePoints.baseTune ||
+      (project.initialization?.baseTune?.requested ||
+      project.initialization?.baseTune?.applied
+        ? buildGeneratedRestorePoint({
+            project,
+            parsedIni,
+            initBaseTune: true,
+          })
+        : createProjectRestorePoint({
+            constants: project.constants,
+            tables,
+            runtimeProfiles: project.runtimeProfiles,
+          }));
+
+    return {
+      ...project,
+      initialization: {
+        ...(project.initialization || {}),
+        restorePoints: {
+          blankCanvas,
+          baseTune,
+        },
+      },
+    };
+  };
+
+  const applyRestorePoint = async (restoreKey) => {
+    const {
+      currentProject,
+      parsedIni,
+      notify,
+      setOperation,
+      clearOperation,
+    } = get();
+
+    if (!currentProject) {
+      return { ok: false, error: "No active project" };
+    }
+
+    const restorePoint =
+      currentProject.initialization?.restorePoints?.[restoreKey] || null;
+
+    if (!restorePoint) {
+      const error =
+        restoreKey === "baseTune"
+          ? "Base tune snapshot is not available for this project"
+          : "Blank canvas snapshot is not available for this project";
+      notify(error, "warning", 3500);
+      return { ok: false, error };
+    }
+
+      const restoreLabel =
+      restoreKey === "baseTune" ? "base tune" : "blank canvas";
+
+    setOperation({
+      type: "project-restore",
+      stage: "restoring",
+      label: `Restoring ${restoreLabel}`,
+      current: 0,
+      total: 1,
+      scope: "project",
+    });
+
+      const restoredConstants = materializeProjectConstants(parsedIni, {
+        pages: restorePoint.constants?.pages || {},
+        decodedPages: restorePoint.constants?.decodedPages || {},
+      });
+
+      try {
+        const nextProject = ensureProjectRuntimeProfiles(
+          normalizeProjectV3(
+            {
+              ...currentProject,
+              constants: restoredConstants,
+              tables: restorePoint.tables || INITIAL_TABLES,
+              runtimeProfiles:
+                restorePoint.runtimeProfiles || currentProject.runtimeProfiles || {},
+          },
+          parsedIni,
+        ),
+        parsedIni,
+      );
+
+      const nextTables =
+        restorePoint.tables && Object.keys(restorePoint.tables).length > 0
+          ? { ...INITIAL_TABLES, ...restorePoint.tables }
+          : buildDisplayTablesFromDecodedPages(
+              parsedIni,
+              nextProject.constants?.decodedPages,
+              INITIAL_TABLES,
+            );
+
+      set({
+        currentProject: {
+          ...nextProject,
+          tables: nextTables,
+        },
+        tables: nextTables,
+      });
+
+      notify(
+        restoreKey === "baseTune"
+          ? "Project restored to base tune"
+          : "Project restored to blank canvas",
+        "success",
+        3000,
+      );
+
+      return { ok: true };
+    } catch (error) {
+      console.error(`[project] restore ${restoreKey} failed:`, error);
+      notify(
+        error.message || `Failed to restore ${restoreLabel}`,
+        "error",
+        4000,
+      );
+      return { ok: false, error: error.message };
+    } finally {
+      clearOperation();
+    }
+  };
+
   return {
     setProject: async (raw) => {
       try {
@@ -74,6 +242,12 @@ export function createProjectLifecycleSlice(set, get) {
                 project.constants?.decodedPages,
                 INITIAL_TABLES,
               );
+
+        project = ensureRestorePoints({
+          project,
+          parsedIni,
+          tables: hydratedTables,
+        });
 
         set({ tables: hydratedTables });
         project.tables = hydratedTables;
@@ -215,11 +389,70 @@ export function createProjectLifecycleSlice(set, get) {
         if (parts.length === 1) {
           proj[parts[0]] = value;
         } else {
-          proj[parts[0]] = { ...(proj[parts[0]] ?? {}), [parts[1]]: value };
+          if (parts.length === 2) {
+            proj[parts[0]] = { ...(proj[parts[0]] ?? {}), [parts[1]]: value };
+          } else {
+            let target = proj;
+            for (let i = 0; i < parts.length - 1; i += 1) {
+              const part = parts[i];
+              target[part] = { ...(target[part] ?? {}) };
+              target = target[part];
+            }
+            target[parts[parts.length - 1]] = value;
+          }
         }
         return { currentProject: proj };
       });
     },
+
+    captureProjectRestorePoint: (restoreKey, overrides = {}) => {
+      set((s) => {
+        if (!s.currentProject) return {};
+
+        const overrideConstants = overrides.constants;
+        const normalizedOverrideConstants =
+          overrideConstants && s.parsedIni
+            ? materializeProjectConstants(s.parsedIni, overrideConstants)
+            : overrideConstants;
+        const derivedDecodedPages =
+          normalizedOverrideConstants?.decodedPages ||
+          getDecodedPages(normalizedOverrideConstants) ||
+          null;
+        const resolvedTables =
+          overrides.tables ??
+          (normalizedOverrideConstants && s.parsedIni
+            ? buildDisplayTablesFromDecodedPages(
+                s.parsedIni,
+                derivedDecodedPages,
+                INITIAL_TABLES,
+              )
+            : s.tables);
+
+        const restorePoint = createProjectRestorePoint({
+          constants: normalizedOverrideConstants ?? s.currentProject.constants,
+          tables: resolvedTables,
+          runtimeProfiles:
+            overrides.runtimeProfiles ?? s.currentProject.runtimeProfiles,
+        });
+
+        return {
+          currentProject: {
+            ...s.currentProject,
+            initialization: {
+              ...(s.currentProject.initialization || {}),
+              restorePoints: {
+                ...(s.currentProject.initialization?.restorePoints || {}),
+                [restoreKey]: restorePoint,
+              },
+            },
+          },
+        };
+      });
+    },
+
+    restoreProjectToBaseTune: async () => applyRestorePoint("baseTune"),
+
+    resetProjectToBlankCanvas: async () => applyRestorePoint("blankCanvas"),
 
     updateRuntimeProfilePreset: (profileKey, patch = {}) => {
       set((s) => {

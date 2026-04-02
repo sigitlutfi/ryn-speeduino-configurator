@@ -75,6 +75,7 @@ export default function GettingStarted() {
     saveProject,
     updateConstants,
     updateProjectField,
+    captureProjectRestorePoint,
     recentProjects,
     removeRecentProject,
     notify,
@@ -209,6 +210,8 @@ export default function GettingStarted() {
       };
 
       await setProject(raw);
+      captureProjectRestorePoint("blankCanvas");
+
       if (Object.keys(initializationPlan.pages).length > 0) {
         await updateConstants({ pages: initializationPlan.pages });
       }
@@ -223,6 +226,13 @@ export default function GettingStarted() {
           providerOwner: initializationPlan.metadata.providerOwner,
           appliedFields: initializationPlan.metadata.appliedFields,
           warningCount: initializationPlan.warnings.length,
+        },
+      });
+
+      captureProjectRestorePoint("baseTune", {
+        constants: {
+          pages: initializationPlan.pages || {},
+          decodedPages: initializationPlan.pages || {},
         },
       });
 

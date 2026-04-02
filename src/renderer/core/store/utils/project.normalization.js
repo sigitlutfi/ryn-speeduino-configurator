@@ -42,6 +42,67 @@ export function parseIniFromProject(project) {
   }
 }
 
+function cloneJsonSafe(value, fallback) {
+  if (value === undefined) return fallback;
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    console.warn("[project] Failed to clone snapshot payload:", error);
+    return fallback;
+  }
+}
+
+export function createProjectRestorePoint({
+  constants = {},
+  tables = {},
+  runtimeProfiles = {},
+} = {}) {
+  return {
+    constants: cloneJsonSafe(constants, { pages: {}, decodedPages: {} }),
+    tables: cloneJsonSafe(tables, {}),
+    runtimeProfiles: cloneJsonSafe(runtimeProfiles, {}),
+    capturedAt: nowIso(),
+  };
+}
+
+export function materializeProjectConstants(parsedIni, constants = {}) {
+  const decodedPages = cloneJsonSafe(constants?.decodedPages, {}) || {};
+  const pageSnapshots = cloneJsonSafe(constants?.pages, {}) || {};
+
+  if (!parsedIni?.constants?.pages) {
+    return {
+      pages: pageSnapshots,
+      decodedPages,
+    };
+  }
+
+  for (const pageId of Object.keys(parsedIni.constants.pages)) {
+    if (pageSnapshots[pageId]) continue;
+
+    const pageBuffer = serializeDecodedPage(
+      parsedIni,
+      Number(pageId),
+      decodedPages[pageId] || {},
+    );
+
+    if (pageBuffer.length > 0) {
+      pageSnapshots[pageId] = createPageSnapshot({
+        pageId: Number(pageId),
+        size: pageBuffer.length,
+        buffer: pageBuffer,
+        source: "generated",
+        syncState: "unknown",
+      });
+    }
+  }
+
+  return {
+    pages: pageSnapshots,
+    decodedPages,
+  };
+}
+
 function createDefaultRuntimeProfilePreset(
   parsedIni,
   decodedPages,
@@ -282,6 +343,13 @@ export function normalizeProjectV3(raw, parsedIni = null) {
         providerOwner: raw.initialization?.baseTune?.providerOwner ?? null,
         appliedFields: raw.initialization?.baseTune?.appliedFields ?? [],
         warningCount: raw.initialization?.baseTune?.warningCount ?? 0,
+      },
+      restorePoints: {
+        blankCanvas:
+          cloneJsonSafe(raw.initialization?.restorePoints?.blankCanvas, null) ??
+          null,
+        baseTune:
+          cloneJsonSafe(raw.initialization?.restorePoints?.baseTune, null) ?? null,
       },
     },
     createdAt: raw.createdAt ?? raw.created ?? migratedAt,
