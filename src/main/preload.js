@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('projects', {
 contextBridge.exposeInMainWorld('firmware', {
   pickHex: () => ipcRenderer.invoke('firmware:pick-hex'),
   flash: (payload) => ipcRenderer.invoke('firmware:flash', payload),
+  resetEeprom: (payload) => ipcRenderer.invoke('firmware:reset-eeprom', payload),
+  reboot: (payload) => ipcRenderer.invoke('firmware:reboot', payload),
   onStatus: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('firmware:status', handler);

@@ -20,6 +20,8 @@ import {
   Activity,
   X,
   Box,
+  SlidersHorizontal,
+  Copy,
 } from "lucide-react";
 import SurfacePlot3D from "../components/SurfacePlot3D.jsx";
 import {
@@ -27,6 +29,82 @@ import {
   applyMathOp,
   smoothBlock,
 } from "../../shared/utils/tableMath";
+import { useStore } from "../../../core/store/index.js";
+
+const normalizeClipboardText = (text) => text.replace(/\r/g, "").trim();
+
+const parseNumericToken = (token) => {
+  const parsed = Number.parseFloat(token.trim());
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseClipboardMatrix = (text) => {
+  const normalized = normalizeClipboardText(text);
+  if (!normalized) {
+    return { error: "Clipboard is empty." };
+  }
+
+  const rows = normalized
+    .split("\n")
+    .map((line) => line.split("\t").map((part) => part.trim()));
+
+  const columnCount = rows[0]?.length ?? 0;
+  if (!columnCount) {
+    return { error: "Clipboard does not contain numeric cells." };
+  }
+
+  if (rows.some((row) => row.length !== columnCount)) {
+    return { error: "Clipboard rows must have the same number of columns." };
+  }
+
+  const values = rows.map((row) =>
+    row.map((token) => {
+      const parsed = parseNumericToken(token);
+      if (parsed === null) {
+        throw new Error(`Invalid numeric value "${token || "blank"}".`);
+      }
+      return parsed;
+    }),
+  );
+
+  return {
+    values,
+    rows: values.length,
+    cols: columnCount,
+  };
+};
+
+const formatSelectionForClipboard = (values, range, precision) =>
+  values
+    .slice(range.startRow, range.endRow + 1)
+    .map((row) =>
+      row
+        .slice(range.startCol, range.endCol + 1)
+        .map((cell) =>
+          typeof cell === "number" && Number.isFinite(cell)
+            ? cell.toFixed(precision)
+            : `${cell ?? ""}`,
+        )
+        .join("\t"),
+    )
+    .join("\n");
+
+const AXIS_SOURCE_LABELS = {
+  ve: "VE Table 1",
+  ve2: "VE Table 2",
+  ign: "Ignition Table 1",
+  ign2: "Ignition Table 2",
+  afr: "AFR Target Table",
+  lambda: "Lambda Target Table",
+  staging: "Staged Injection",
+  vvtTbl: "VVT Table 1",
+  vvt2Tbl: "VVT Table 2",
+  boostTbl: "Boost Table",
+  boostDCLupTbl: "Boost DC Lookup",
+};
+
+const getAxisSourceDisplayName = (tableKey, axisType) =>
+  `${AXIS_SOURCE_LABELS[tableKey] || tableKey} ${axisType === "rpm" ? "RPM" : "Load"} Axis`;
 
 const TuningGrid = ({
   values,
@@ -46,7 +124,7 @@ const TuningGrid = ({
   const [selection, setSelection] = useState(null); // { r1, c1, r2, c2 }
   const [isSelecting, setIsSelecting] = useState(false);
   const [editing, setEditing] = useState(null); // { r, c }
-  const [editingAxis, setEditingAxis] = useState(null); // { type: 'rpm'|'load', index }
+  const [axisEditor, setAxisEditor] = useState(null); // { type: 'rpm'|'load', values, sourceKey }
   const [showContextMenu, setShowContextMenu] = useState(null); // { x, y }
   const [viewMode, setViewMode] = useState("grid"); // 'grid' | '3d'
   const [setValueInput, setSetValueInput] = useState("");
@@ -57,6 +135,8 @@ const TuningGrid = ({
   const [showSecondary, setShowSecondary] = useState(false);
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
+  const notify = useStore((state) => state.notify);
+  const storeTables = useStore((state) => state.tables);
 
   const containerRef = useRef(null);
   const valuesRef = useRef(values);
@@ -127,10 +207,229 @@ const TuningGrid = ({
     };
   }, [normS]);
 
+  const copySelectionToClipboard = useCallback(async () => {
+    const range = selectionRange();
+    if (!range) return;
+
+    try {
+      const text = formatSelectionForClipboard(values, range, precision);
+      await navigator.clipboard.writeText(text);
+      notify(
+        `Copied ${range.endRow - range.startRow + 1}x${range.endCol - range.startCol + 1} block.`,
+        "success",
+        2500,
+      );
+    } catch {
+      notify("Clipboard copy failed.", "error", 3000);
+    }
+  }, [selectionRange, values, precision, notify]);
+
+  const pasteCellsFromClipboard = useCallback(
+    async () => {
+      const range = selectionRange();
+      if (!range) return;
+
+      let clipboardText = "";
+      try {
+        clipboardText = await navigator.clipboard.readText();
+      } catch {
+        notify("Clipboard paste failed.", "error", 3000);
+        return;
+      }
+
+      let parsed;
+      try {
+        parsed = parseClipboardMatrix(clipboardText);
+      } catch (error) {
+        notify(error.message, "warning", 3500);
+        return;
+      }
+
+      if (parsed.error) {
+        notify(parsed.error, "warning", 3500);
+        return;
+      }
+
+      const selectionRows = range.endRow - range.startRow + 1;
+      const selectionCols = range.endCol - range.startCol + 1;
+      const isSingleValue = parsed.rows === 1 && parsed.cols === 1;
+      const isSingleCellSelection = selectionRows === 1 && selectionCols === 1;
+
+      const targetRowLimit = isSingleCellSelection
+        ? values.length - range.startRow
+        : selectionRows;
+      const targetColLimit = isSingleCellSelection
+        ? (values[range.startRow]?.length ?? 0) - range.startCol
+        : selectionCols;
+
+      const newValues = values.map((row) => [...row]);
+      let appliedRows = 0;
+      let appliedCols = 0;
+
+      if (isSingleValue && !isSingleCellSelection) {
+        const fillValue = parsed.values[0][0];
+        for (let row = range.startRow; row <= range.endRow; row += 1) {
+          for (let col = range.startCol; col <= range.endCol; col += 1) {
+            newValues[row][col] = fillValue;
+          }
+        }
+        appliedRows = selectionRows;
+        appliedCols = selectionCols;
+      } else {
+        appliedRows = Math.min(parsed.rows, targetRowLimit);
+        appliedCols = Math.min(parsed.cols, targetColLimit);
+
+        for (let rowOffset = 0; rowOffset < appliedRows; rowOffset += 1) {
+          for (let colOffset = 0; colOffset < appliedCols; colOffset += 1) {
+            newValues[range.startRow + rowOffset][range.startCol + colOffset] =
+              parsed.values[rowOffset][colOffset];
+          }
+        }
+      }
+
+      if (!appliedRows || !appliedCols) {
+        notify("Clipboard data does not fit the current table.", "warning", 3500);
+        return;
+      }
+
+      updateWithHistory({ values: newValues });
+
+      if (isSingleValue && !isSingleCellSelection) {
+        notify(
+          `Filled ${selectionRows}x${selectionCols} selection from one value.`,
+          "success",
+          2600,
+        );
+        return;
+      }
+
+      const clippedRows = parsed.rows > appliedRows;
+      const clippedCols = parsed.cols > appliedCols;
+      const partialRows =
+        !clippedRows && parsed.rows < selectionRows && !isSingleCellSelection;
+      const partialCols =
+        !clippedCols && parsed.cols < selectionCols && !isSingleCellSelection;
+
+      if (clippedRows || clippedCols) {
+        notify(
+          `Pasted ${appliedRows}x${appliedCols}. Extra cells were ignored.`,
+          "warning",
+          3200,
+        );
+        return;
+      }
+
+      if (partialRows || partialCols) {
+        notify(
+          `Pasted ${parsed.rows}x${parsed.cols}. Remaining cells were unchanged.`,
+          "info",
+          3000,
+        );
+        return;
+      }
+
+      notify(`Pasted ${appliedRows}x${appliedCols} block.`, "success", 2600);
+    },
+    [selectionRange, values, notify],
+  );
+
   const clearSelection = useCallback(() => {
     setSelection(null);
     setShowContextMenu(null);
   }, []);
+
+  const openAxisEditor = useCallback(
+    (axisType) => {
+      const sourceAxis = axisType === "rpm" ? rpmAxis : loadAxis;
+      setAxisEditor({
+        type: axisType,
+        values: Array.from(sourceAxis || []),
+        sourceKey: "",
+      });
+    },
+    [rpmAxis, loadAxis],
+  );
+
+  const axisSourceOptions = useMemo(() => {
+    if (!axisEditor?.type) return [];
+
+    const expectedLength = axisEditor.values.length;
+    return Object.entries(storeTables || {})
+      .map(([tableKey, tableData]) => {
+        const axisValues =
+          axisEditor.type === "rpm" ? tableData?.rpmAxis : tableData?.loadAxis;
+        if (!Array.isArray(axisValues) || axisValues.length !== expectedLength) {
+          return null;
+        }
+
+        const currentAxis = axisEditor.type === "rpm" ? rpmAxis : loadAxis;
+        const isCurrentAxis =
+          axisValues.length === currentAxis.length &&
+          axisValues.every((value, index) => value === currentAxis[index]);
+
+        return {
+          key: `${tableKey}:${axisEditor.type}`,
+          tableKey,
+          label: getAxisSourceDisplayName(tableKey, axisEditor.type),
+          values: Array.from(axisValues),
+          isCurrentAxis,
+        };
+      })
+      .filter(Boolean);
+  }, [axisEditor, storeTables, rpmAxis, loadAxis]);
+
+  const updateAxisEditorValue = useCallback((index, nextValue) => {
+    setAxisEditor((prev) => {
+      if (!prev) return prev;
+      const values = [...prev.values];
+      values[index] = nextValue;
+      return { ...prev, values, sourceKey: "" };
+    });
+  }, []);
+
+  const applyAxisSource = useCallback(
+    (sourceKey) => {
+      const nextSource = axisSourceOptions.find((option) => option.key === sourceKey);
+      if (!nextSource) return;
+
+      setAxisEditor((prev) =>
+        prev
+          ? {
+              ...prev,
+              values: Array.from(nextSource.values),
+              sourceKey,
+            }
+          : prev,
+      );
+      notify(`Loaded ${nextSource.label}.`, "info", 2400);
+    },
+    [axisSourceOptions, notify],
+  );
+
+  const saveAxisEditor = useCallback(() => {
+    if (!axisEditor) return;
+
+    const invalidIndex = axisEditor.values.findIndex((value) => {
+      const parsed = Number.parseFloat(`${value}`.trim());
+      return !Number.isFinite(parsed);
+    });
+
+    if (invalidIndex >= 0) {
+      notify(`Breakpoint ${invalidIndex + 1} is invalid.`, "warning", 3200);
+      return;
+    }
+
+    const nextAxis = axisEditor.values.map((value) => Number.parseFloat(`${value}`));
+    updateWithHistory(
+      axisEditor.type === "rpm" ? { rpmAxis: nextAxis } : { loadAxis: nextAxis },
+    );
+    notify(
+      `${axisEditor.type === "rpm" ? "RPM" : "Load"} axis updated.`,
+      "success",
+      2500,
+    );
+    setAxisEditor(null);
+  }, [axisEditor, notify]);
 
   const handleEmptyAreaMouseDown = useCallback(
     (e) => {
@@ -382,6 +681,13 @@ const TuningGrid = ({
   // Handle Hotkeys
   useEffect(() => {
     const onKeyDown = (e) => {
+      const target = e.target;
+      const isTypingTarget =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+
       // 1. History
       if (e.ctrlKey && e.key === "z") {
         e.preventDefault();
@@ -409,13 +715,29 @@ const TuningGrid = ({
         return;
       }
 
-      if (editing) return;
+      if (!isTypingTarget && e.ctrlKey && e.key.toLowerCase() === "c") {
+        if (normS) {
+          e.preventDefault();
+          copySelectionToClipboard();
+        }
+        return;
+      }
+
+      if (!isTypingTarget && e.ctrlKey && e.key.toLowerCase() === "v") {
+        if (normS) {
+          e.preventDefault();
+          pasteCellsFromClipboard();
+        }
+        return;
+      }
+
+      if (editing || isTypingTarget) return;
 
       if (e.key === "Escape") {
         e.preventDefault();
         clearSelection();
         setEditing(null);
-        setEditingAxis(null);
+        setAxisEditor(null);
         return;
       }
 
@@ -493,6 +815,8 @@ const TuningGrid = ({
     handleRedo,
     clearSelection,
     focusSelectionInput,
+    copySelectionToClipboard,
+    pasteCellsFromClipboard,
   ]);
 
   const handleContextMenu = (e) => {
@@ -629,35 +953,12 @@ const TuningGrid = ({
                           {rpmAxis.map((r, i) => (
                             <th
                               key={i}
-                              onDoubleClick={() =>
-                                setEditingAxis({ type: "rpm", index: i })
-                              }
-                              className="p-2 bg-[#11131a] text-[9px] font-mono font-black text-gray-400 border-b border-white/10 min-w-[42px] cursor-ns-resize group/th hover:bg-white/5 transition-all"
+                              onClick={() => openAxisEditor("rpm")}
+                              className="p-2 bg-[#11131a] text-[9px] font-mono font-black text-gray-400 border-b border-white/10 min-w-[42px] cursor-pointer group/th hover:bg-white/5 transition-all"
                             >
-                              {editingAxis?.type === "rpm" &&
-                              editingAxis.index === i ? (
-                                <input
-                                  autoFocus
-                                  type="number"
-                                  defaultValue={r}
-                                  onBlur={(e) => {
-                                    const newAxis = [...rpmAxis];
-                                    newAxis[i] = parseInt(e.target.value);
-                                    onUpdate({ rpmAxis: newAxis });
-                                    setEditingAxis(null);
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") e.target.blur();
-                                    if (e.key === "Escape")
-                                      setEditingAxis(null);
-                                  }}
-                                  className="w-full bg-white text-black font-mono font-black text-center outline-none ring-2 ring-neon-cyan rounded-sm"
-                                />
-                              ) : (
-                                <span className="group-hover/th:text-neon-cyan transition-colors">
-                                  {r}
-                                </span>
-                              )}
+                              <span className="group-hover/th:text-neon-cyan transition-colors">
+                                {r}
+                              </span>
                             </th>
                           ))}
                         </tr>
@@ -666,35 +967,12 @@ const TuningGrid = ({
                         {values.map((row, ri) => (
                           <tr key={ri} className="h-9 group/tr">
                             <td
-                              onDoubleClick={() =>
-                                setEditingAxis({ type: "load", index: ri })
-                              }
-                              className="sticky left-0 z-20 bg-[#11131a] p-2 text-right text-[9px] font-mono font-black border-r border-white/5 text-gray-400 group-hover/tr:bg-white/5 transition-all cursor-ew-resize"
+                              onClick={() => openAxisEditor("load")}
+                              className="sticky left-0 z-20 bg-[#11131a] p-2 text-right text-[9px] font-mono font-black border-r border-white/5 text-gray-400 group-hover/tr:bg-white/5 transition-all cursor-pointer"
                             >
-                              {editingAxis?.type === "load" &&
-                              editingAxis.index === ri ? (
-                                <input
-                                  autoFocus
-                                  type="number"
-                                  defaultValue={loadAxis[ri]}
-                                  onBlur={(e) => {
-                                    const newAxis = [...loadAxis];
-                                    newAxis[ri] = parseInt(e.target.value);
-                                    onUpdate({ loadAxis: newAxis });
-                                    setEditingAxis(null);
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") e.target.blur();
-                                    if (e.key === "Escape")
-                                      setEditingAxis(null);
-                                  }}
-                                  className="w-full bg-white text-black font-mono font-black text-center outline-none ring-2 ring-neon-cyan rounded-sm"
-                                />
-                              ) : (
-                                <span className="group-hover/tr:text-neon-cyan transition-colors">
-                                  {loadAxis[ri]}
-                                </span>
-                              )}
+                              <span className="group-hover/tr:text-neon-cyan transition-colors">
+                                {loadAxis[ri]}
+                              </span>
                             </td>
                             {row.map((cell, ci) => {
                               const active = isSelected(ri, ci);
@@ -839,6 +1117,15 @@ const TuningGrid = ({
             <span className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/25">
               Esc Deselect
             </span>
+            <span className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/25">
+              Ctrl+C Copy
+            </span>
+            <span className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/25">
+              Ctrl+V Paste
+            </span>
+            <span className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/25">
+              Click Axis Edit
+            </span>
           </div>
           {selectionInfo ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-black uppercase tracking-widest text-white/35">
@@ -979,6 +1266,123 @@ const TuningGrid = ({
 
       {/* Context Menu Portal */}
       <AnimatePresence>
+        {axisEditor && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              className="w-full max-w-3xl rounded-[28px] border border-white/8 bg-[#0d1017]/95 shadow-2xl overflow-hidden"
+            >
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-white/6 bg-white/[0.03]">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-xl border border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan">
+                      <SlidersHorizontal size={14} />
+                    </div>
+                    <div>
+                      <h3 className="text-[13px] font-black uppercase tracking-[0.18em] text-white">
+                        Edit {axisEditor.type === "rpm" ? xAxisLabel : yAxisLabel}
+                      </h3>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-white/35">
+                        {axisEditor.values.length} breakpoints
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-[10px] font-bold text-white/40 max-w-xl leading-relaxed">
+                    Set each breakpoint directly, then save the full axis back into the table.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setAxisEditor(null)}
+                  className="rounded-xl border border-white/10 bg-white/[0.03] p-2 text-white/40 transition-colors hover:text-white hover:border-white/20"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="px-5 py-4 space-y-4">
+                <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-3.5">
+                  <div className="flex flex-wrap items-end gap-2.5">
+                    <div className="flex-1 min-w-[220px]">
+                      <label className="block text-[8px] font-black uppercase tracking-widest text-white/35 mb-2">
+                        Copy From Existing Axis
+                      </label>
+                      <select
+                        value={axisEditor.sourceKey}
+                        onChange={(e) => applyAxisSource(e.target.value)}
+                        className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[11px] font-bold text-white outline-none focus:border-neon-cyan"
+                      >
+                        <option value="">Select axis source</option>
+                        {axisSourceOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label}{option.isCurrentAxis ? " (Current Match)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 min-w-[160px]">
+                      <div className="flex items-center gap-2 text-neon-cyan mb-1">
+                        <Copy size={12} />
+                        <span className="text-[8px] font-black uppercase tracking-widest">
+                          Modal Hint
+                        </span>
+                      </div>
+                      <p className="text-[9px] font-bold text-white/40 leading-relaxed">
+                        Only axes with the same breakpoint count are listed here.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/8 bg-black/25 p-3.5">
+                  <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2.5">
+                    {axisEditor.values.map((value, index) => (
+                      <label key={index} className="space-y-1.5">
+                        <span className="block text-[8px] font-black uppercase tracking-widest text-white/28">
+                          Bin {index + 1}
+                        </span>
+                        <input
+                          type="number"
+                          value={value}
+                          onChange={(e) =>
+                            updateAxisEditorValue(index, e.target.value)
+                          }
+                          className="w-full rounded-xl border border-white/10 bg-[#0b0d14] px-3 py-2 text-[11px] font-mono font-black text-white outline-none focus:border-neon-cyan"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-white/6 bg-white/[0.02]">
+                <p className="text-[9px] font-black uppercase tracking-widest text-white/28">
+                  Axis updates affect table structure immediately after save
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setAxisEditor(null)}
+                    className="rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-[9px] font-black uppercase tracking-widest text-white/45 transition-colors hover:text-white hover:border-white/20"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveAxisEditor}
+                    className="rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 px-3.5 py-2.5 text-[9px] font-black uppercase tracking-widest text-neon-cyan transition-all hover:bg-neon-cyan hover:text-black"
+                  >
+                    Save Axis
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
         {showContextMenu && (
           <motion.div
             ref={contextMenuRef}
@@ -1001,6 +1405,25 @@ const TuningGrid = ({
             </div>
 
             <div className="grid grid-cols-1 gap-1">
+              <MenuButton
+                icon={Grid}
+                label="Copy Selection"
+                sub="Ctrl+C"
+                onClick={() => {
+                  copySelectionToClipboard();
+                  setShowContextMenu(null);
+                }}
+              />
+              <MenuButton
+                icon={ChevronRight}
+                label="Paste Selection"
+                sub="Ctrl+V"
+                onClick={() => {
+                  pasteCellsFromClipboard();
+                  setShowContextMenu(null);
+                }}
+              />
+              <div className="h-px bg-white/5 my-1" />
               <MenuButton
                 icon={Calculator}
                 label="Interpolate"

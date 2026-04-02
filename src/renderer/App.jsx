@@ -166,25 +166,28 @@ export default function App() {
               if (!results?.error) {
                 const matched = results.matching?.length || 0;
                 const different = results.different?.length || 0;
+                const generated = results.generated?.length || 0;
                 const missing = results.missing?.length || 0;
                 const errors = results.errors?.length || 0;
 
                 addConnectionEvent("sync", "Initial ECU comparison completed", {
                   matched,
                   different,
+                  generated,
                   missing,
                   errors,
                 });
                 notify(
-                  `CRC sync check: ${matched} match, ${different} different, ${missing} missing local`,
-                  different > 0 ? "warning" : "info",
+                  `CRC sync check: ${matched} match, ${different} different, ${generated} generated, ${missing} missing local`,
+                  different > 0 || generated > 0 ? "warning" : "info",
                   3500,
                 );
 
-                if (different > 0 || missing > 0 || errors > 0) {
+                if (different > 0 || generated > 0 || missing > 0 || errors > 0) {
                   console.warn("[App] Opening sync dialog after connect", {
                     matching: matched,
                     different,
+                    generated,
                     missing,
                     errors,
                   });

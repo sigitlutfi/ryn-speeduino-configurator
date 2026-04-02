@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, protocol, net } from "electron";
 import path from "node:path";
+import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -46,6 +47,30 @@ const closeActivePortForFlash = async () => {
     activePort = null;
     mainWindow?.webContents.send("serial:status", "disconnected");
   }
+};
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const pulsePortResetLines = async (portInstance) => {
+  if (!portInstance || typeof portInstance.set !== "function") {
+    throw new Error("Selected serial transport does not support ECU reboot control");
+  }
+
+  await new Promise((resolve, reject) => {
+    portInstance.set({ dtr: false, rts: true }, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+
+  await delay(120);
+
+  await new Promise((resolve, reject) => {
+    portInstance.set({ dtr: true, rts: false }, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 };
 
 const resolveAvrdudeTooling = () => {
@@ -102,6 +127,197 @@ const pushFirmwareLog = (phase, chunk) => {
     type: "log",
     phase,
     message: text,
+  });
+};
+
+const EEPROM_SIZE_ATMEGA2560 = 4096;
+
+const buildIntelHexRecord = (type, address, bytes = []) => {
+  const data = Array.from(bytes);
+  const length = data.length;
+  const checksumBase =
+    length +
+    ((address >> 8) & 0xff) +
+    (address & 0xff) +
+    type +
+    data.reduce((sum, value) => sum + value, 0);
+  const checksum = ((~checksumBase + 1) & 0xff);
+  const encodedData = data
+    .map((value) => value.toString(16).padStart(2, "0").toUpperCase())
+    .join("");
+
+  return `:${length.toString(16).padStart(2, "0").toUpperCase()}${address
+    .toString(16)
+    .padStart(4, "0")
+    .toUpperCase()}${type.toString(16).padStart(2, "0").toUpperCase()}${encodedData}${checksum
+    .toString(16)
+    .padStart(2, "0")
+    .toUpperCase()}`;
+};
+
+const createBlankEepromHex = () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryn-speeduino-eeprom-"));
+  const filePath = path.join(tempDir, "blank-eeprom.hex");
+  const lines = [];
+
+  for (let offset = 0; offset < EEPROM_SIZE_ATMEGA2560; offset += 16) {
+    const chunkLength = Math.min(16, EEPROM_SIZE_ATMEGA2560 - offset);
+    const bytes = new Array(chunkLength).fill(0xff);
+    lines.push(buildIntelHexRecord(0x00, offset, bytes));
+  }
+
+  lines.push(buildIntelHexRecord(0x01, 0x0000, []));
+  fs.writeFileSync(filePath, `${lines.join("\n")}\n`, "utf8");
+
+  return {
+    dirPath: tempDir,
+    filePath,
+  };
+};
+
+const runAvrdudeJob = async ({
+  port,
+  args,
+  preflightMessage,
+  startMessage,
+  progressLabel,
+  completionMessage,
+  tempArtifacts = [],
+}) => {
+  emitFirmwareStatus({
+    type: "state",
+    phase: "preflight",
+    message: preflightMessage,
+  });
+
+  return await new Promise((resolve) => {
+    let stderrBuffer = "";
+    let combinedLog = "";
+    let burnStarted = false;
+    let progressPercent = 0;
+    let settled = false;
+
+    const cleanupArtifacts = () => {
+      tempArtifacts.forEach((artifact) => {
+        if (!artifact?.dirPath) return;
+        try {
+          fs.rmSync(artifact.dirPath, { recursive: true, force: true });
+        } catch (cleanupError) {
+          console.warn("[main] Failed to remove temporary avrdude artifact", cleanupError);
+        }
+      });
+    };
+
+    const finalize = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanupArtifacts();
+      resolve(result);
+    };
+
+    try {
+      const child = spawn(resolveAvrdudeTooling().executable, args, {
+        windowsHide: true,
+      });
+
+      activeFirmwareFlash = child;
+
+      emitFirmwareStatus({
+        type: "state",
+        phase: "flashing",
+        percent: 0,
+        message: startMessage,
+      });
+
+      child.stdout.on("data", (chunk) => {
+        const text = chunk.toString();
+        combinedLog += text;
+        pushFirmwareLog("stdout", text);
+      });
+
+      child.stderr.on("data", (chunk) => {
+        const text = chunk.toString();
+        combinedLog += text;
+        stderrBuffer += text;
+        pushFirmwareLog("stderr", text);
+
+        if (!burnStarted && stderrBuffer.includes("Writing |")) {
+          burnStarted = true;
+          emitFirmwareStatus({
+            type: "state",
+            phase: "flashing",
+            percent: 0,
+            message: progressLabel,
+          });
+        }
+
+        if (burnStarted) {
+          const hashes = (text.match(/#/g) || []).length;
+          if (hashes > 0) {
+            progressPercent = Math.min(100, progressPercent + hashes);
+            emitFirmwareStatus({
+              type: "progress",
+              phase: "flashing",
+              percent: progressPercent,
+            });
+          }
+        }
+      });
+
+      child.on("error", (error) => {
+        activeFirmwareFlash = null;
+        const message =
+          error.code === "ENOENT"
+            ? "avrdude was not found. Install it or configure SPEEDUINO_AVRDUDE_PATH."
+            : error.message;
+
+        emitFirmwareStatus({
+          type: "error",
+          phase: "flashing",
+          message,
+        });
+        finalize({ ok: false, error: message, log: combinedLog });
+      });
+
+      child.on("close", (code) => {
+        activeFirmwareFlash = null;
+
+        if (code === 0) {
+          emitFirmwareStatus({
+            type: "progress",
+            phase: "flashing",
+            percent: 100,
+          });
+          emitFirmwareStatus({
+            type: "completed",
+            phase: "flashing",
+            percent: 100,
+            message: completionMessage,
+          });
+          finalize({ ok: true, code: 0, log: combinedLog });
+          return;
+        }
+
+        const errorMessage = stderrBuffer.trim() || `avrdude exited with code ${code}`;
+
+        emitFirmwareStatus({
+          type: "error",
+          phase: "flashing",
+          message: errorMessage,
+          code,
+        });
+        finalize({ ok: false, error: errorMessage, code, log: combinedLog });
+      });
+    } catch (error) {
+      activeFirmwareFlash = null;
+      const message = error.message || "Firmware operation failed";
+      emitFirmwareStatus({
+        type: "error",
+        phase: "flashing",
+        message,
+      });
+      finalize({ ok: false, error: message, log: combinedLog });
+    }
   });
 };
 
@@ -326,6 +542,7 @@ ipcMain.handle("firmware:pick-hex", async () => {
 ipcMain.handle("firmware:flash", async (_event, payload = {}) => {
   const port = payload.port;
   const hexPath = payload.hexPath;
+  const resetEeprom = payload.resetEeprom === true;
 
   if (activeFirmwareFlash) {
     return { ok: false, error: "Firmware flashing is already in progress" };
@@ -347,6 +564,7 @@ ipcMain.handle("firmware:flash", async (_event, payload = {}) => {
 
   const tooling = resolveAvrdudeTooling();
   const args = [];
+  let tempEepromArtifact = null;
   if (tooling.configPath) {
     args.push("-C", tooling.configPath);
   }
@@ -365,131 +583,157 @@ ipcMain.handle("firmware:flash", async (_event, payload = {}) => {
     `flash:w:${hexPath}:i`,
   );
 
-  emitFirmwareStatus({
-    type: "state",
-    phase: "preflight",
-    message: `Launching avrdude via ${tooling.source}`,
+  if (resetEeprom) {
+    tempEepromArtifact = createBlankEepromHex();
+    args.push("-U", `eeprom:w:${tempEepromArtifact.filePath}:i`);
+  }
+
+  return await runAvrdudeJob({
+    port,
+    args,
+    preflightMessage: resetEeprom
+      ? `Launching avrdude via ${tooling.source} with EEPROM reset`
+      : `Launching avrdude via ${tooling.source}`,
+    startMessage: resetEeprom
+      ? `Flashing ${path.basename(hexPath)} to ${port} with EEPROM reset`
+      : `Flashing ${path.basename(hexPath)} to ${port}`,
+    progressLabel: "Writing firmware to ECU",
+    completionMessage: "Firmware flashing completed",
+    tempArtifacts: tempEepromArtifact ? [tempEepromArtifact] : [],
   });
+});
 
-  return await new Promise((resolve) => {
-    let stderrBuffer = "";
-    let combinedLog = "";
-    let burnStarted = false;
-    let progressPercent = 0;
-    let settled = false;
+ipcMain.handle("firmware:reset-eeprom", async (_event, payload = {}) => {
+  const port = payload.port;
 
-    const finalize = (result) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
+  if (activeFirmwareFlash) {
+    return { ok: false, error: "Firmware operation is already in progress" };
+  }
 
-    try {
-      const child = spawn(tooling.executable, args, {
-        windowsHide: true,
+  if (!port) {
+    return { ok: false, error: "Serial port is required" };
+  }
+
+  await closeActivePortForFlash();
+
+  const tooling = resolveAvrdudeTooling();
+  const args = [];
+  const tempEepromArtifact = createBlankEepromHex();
+
+  if (tooling.configPath) {
+    args.push("-C", tooling.configPath);
+  }
+
+  args.push(
+    "-v",
+    "-p",
+    "atmega2560",
+    "-c",
+    "wiring",
+    "-b",
+    "115200",
+    "-P",
+    port,
+    "-D",
+    "-U",
+    `eeprom:w:${tempEepromArtifact.filePath}:i`,
+  );
+
+  return await runAvrdudeJob({
+    port,
+    args,
+    preflightMessage: `Launching avrdude via ${tooling.source} for EEPROM reset`,
+    startMessage: `Resetting EEPROM on ${port}`,
+    progressLabel: "Writing blank EEPROM image",
+    completionMessage: "EEPROM reset completed",
+    tempArtifacts: [tempEepromArtifact],
+  });
+});
+
+ipcMain.handle("firmware:reboot", async (_event, payload = {}) => {
+  const port = payload.port;
+  const baud = payload.baud || 115200;
+
+  if (activeFirmwareFlash) {
+    return { ok: false, error: "Firmware operation is already in progress" };
+  }
+
+  if (!port) {
+    return { ok: false, error: "Serial port is required" };
+  }
+
+  if (port === "MOCK") {
+    emitFirmwareStatus({
+      type: "completed",
+      phase: "rebooting",
+      percent: 100,
+      message: "Mock ECU reboot completed",
+    });
+    return { ok: true };
+  }
+
+  let portInstance = activePort;
+  let openedForReboot = false;
+
+  try {
+    emitFirmwareStatus({
+      type: "state",
+      phase: "preflight",
+      message: "Preparing ECU reboot",
+    });
+
+    if (!portInstance) {
+      const { SerialPort } = await import("serialport");
+      portInstance = new SerialPort({
+        path: port,
+        baudRate: baud,
+        autoOpen: false,
       });
 
-      activeFirmwareFlash = child;
-
-      emitFirmwareStatus({
-        type: "state",
-        phase: "flashing",
-        percent: 0,
-        message: `Flashing ${path.basename(hexPath)} to ${port}`,
-      });
-
-      child.stdout.on("data", (chunk) => {
-        const text = chunk.toString();
-        combinedLog += text;
-        pushFirmwareLog("stdout", text);
-      });
-
-      child.stderr.on("data", (chunk) => {
-        const text = chunk.toString();
-        combinedLog += text;
-        stderrBuffer += text;
-        pushFirmwareLog("stderr", text);
-
-        if (!burnStarted && stderrBuffer.includes("Writing |")) {
-          burnStarted = true;
-          emitFirmwareStatus({
-            type: "state",
-            phase: "flashing",
-            percent: 0,
-            message: "Writing firmware to ECU",
-          });
-        }
-
-        if (burnStarted) {
-          const hashes = (text.match(/#/g) || []).length;
-          if (hashes > 0) {
-            progressPercent = Math.min(100, progressPercent + hashes);
-            emitFirmwareStatus({
-              type: "progress",
-              phase: "flashing",
-              percent: progressPercent,
-            });
-          }
-        }
-      });
-
-      child.on("error", (error) => {
-        activeFirmwareFlash = null;
-        const message =
-          error.code === "ENOENT"
-            ? "avrdude was not found. Install it or configure SPEEDUINO_AVRDUDE_PATH."
-            : error.message;
-
-        emitFirmwareStatus({
-          type: "error",
-          phase: "flashing",
-          message,
+      await new Promise((resolve, reject) => {
+        portInstance.open((error) => {
+          if (error) reject(error);
+          else resolve();
         });
-        finalize({ ok: false, error: message, log: combinedLog });
       });
 
-      child.on("close", (code) => {
-        activeFirmwareFlash = null;
-
-        if (code === 0) {
-          emitFirmwareStatus({
-            type: "progress",
-            phase: "flashing",
-            percent: 100,
-          });
-          emitFirmwareStatus({
-            type: "completed",
-            phase: "flashing",
-            percent: 100,
-            message: "Firmware flashing completed",
-          });
-          finalize({ ok: true, code: 0, log: combinedLog });
-          return;
-        }
-
-        const errorMessage =
-          stderrBuffer.trim() ||
-          `avrdude exited with code ${code}`;
-
-        emitFirmwareStatus({
-          type: "error",
-          phase: "flashing",
-          message: errorMessage,
-          code,
-        });
-        finalize({ ok: false, error: errorMessage, code, log: combinedLog });
-      });
-    } catch (error) {
-      activeFirmwareFlash = null;
-      const message = error.message || "Firmware flash failed";
-      emitFirmwareStatus({
-        type: "error",
-        phase: "flashing",
-        message,
-      });
-      finalize({ ok: false, error: message, log: combinedLog });
+      openedForReboot = true;
     }
-  });
+
+    emitFirmwareStatus({
+      type: "state",
+      phase: "rebooting",
+      percent: 0,
+      message: `Rebooting ECU on ${port}`,
+    });
+
+    await pulsePortResetLines(portInstance);
+    await delay(250);
+
+    emitFirmwareStatus({
+      type: "completed",
+      phase: "rebooting",
+      percent: 100,
+      message: "ECU reboot pulse sent",
+    });
+
+    return { ok: true };
+  } catch (error) {
+    emitFirmwareStatus({
+      type: "error",
+      phase: "rebooting",
+      message: error.message || "ECU reboot failed",
+    });
+    return { ok: false, error: error.message || "ECU reboot failed" };
+  } finally {
+    if (openedForReboot && portInstance) {
+      try {
+        await new Promise((resolve) => {
+          portInstance.close(() => resolve());
+        });
+      } catch {}
+    }
+  }
 });
 
 ipcMain.handle("project:pick-directory", async () => {
