@@ -1,7 +1,7 @@
 {
   "name": "ryn-speeduino-configurator",
   "productName": "RYN CONFIGURATOR",
-  "version": "1.0.0",
+  "version": "1.0.0-alpha.1",
   "description": "Modern, high-performance tuning interface for Speeduino ECUs with real-time analytics and 3D visualization.",
   "main": ".vite/build/index.js",
   "private": false,

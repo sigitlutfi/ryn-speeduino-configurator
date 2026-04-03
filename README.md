@@ -10,6 +10,9 @@
   <img src="screenshots/Screenshot 2026-04-03 200811.png" width="800" alt="RYN Configurator Dashboard">
 </p>
 
+> [!CAUTION]
+> **USE AT YOUR OWN RISK (DWYOR)**. This project is a personal experiment. Calibration and tuning can cause **permanent engine damage, hardware failure, or data loss**. The author is not responsible for any consequences resulting from the use of this software. Proceed with extreme caution.
+
 ## ⚠️ Compatibility Note
 
 While **RYN Configurator** supports standard Speeduino `.ini` files, some advanced racing features (such as **Anti-Lag System**, **Rolling Pop & Bang**, and **Advanced Ignition Control**) require a **custom firmware and .ini file** provided in this repository.
