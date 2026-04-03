@@ -6,9 +6,16 @@
 
 **RYN Speeduino Configurator** is a modern, high-performance desktop application designed for tuning Speeduino ECUs (Engine Control Units). Built with Electron and React, it offers a sleek, professional interface with real-time telemetry, 3D visualizations, and robust ECU synchronization.
 
-![Speeduino Logo](speeduino_logo.png)
+<p align="center">
+  <img src="screenshots/Screenshot 2026-04-03 200811.png" width="800" alt="RYN Configurator Dashboard">
+</p>
 
-## ✨ Key Features
+## ⚠️ Compatibility Note
+
+While **RYN Configurator** supports standard Speeduino `.ini` files, some advanced racing features (such as **Anti-Lag System**, **Rolling Pop & Bang**, and **Advanced Ignition Control**) require a **custom firmware and .ini file** provided in this repository. 
+
+Using an official/standard `.ini` may result in some control modules being disabled or showing incomplete data.
+
 
 - 🚀 **Real-time Tuning**: Instant ECU synchronization with modern protocol support (CRC32 protection).
 - 📊 **Dynamic Dashboard**: High-frequency telemetry updates (10Hz+) for critical engine parameters.
@@ -19,11 +26,14 @@
 
 ## 📸 Screenshots
 
-*(Add your screenshots to the `/screenshots` folder and link them here)*
-
-| Dashboard | 3D Table Editor |
-| :--- | :--- |
-| ![Dashboard Placeholder](screenshots/dashboard_mockup.png) | ![Table Placeholder](screenshots/table_mockup.png) |
+<p align="center">
+  <img src="screenshots/Screenshot 2026-04-03 200722.png" width="400" alt="VE Table Editor">
+  <img src="screenshots/Screenshot 2026-04-03 200633.png" width="400" alt="Anti-Lag System">
+</p>
+<p align="center">
+  <img src="screenshots/Screenshot 2026-04-03 200737.png" width="400" alt="Firmware Flashing">
+  <img src="screenshots/Screenshot 2026-04-03 200811.png" width="400" alt="Project Launch Screen">
+</p>
 
 ## 🛠️ Technology Stack
 
