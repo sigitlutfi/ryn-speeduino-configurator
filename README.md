@@ -12,17 +12,23 @@
 
 ## ⚠️ Compatibility Note
 
-While **RYN Configurator** supports standard Speeduino `.ini` files, some advanced racing features (such as **Anti-Lag System**, **Rolling Pop & Bang**, and **Advanced Ignition Control**) require a **custom firmware and .ini file** provided in this repository. 
+While **RYN Configurator** supports standard Speeduino `.ini` files, some advanced racing features (such as **Anti-Lag System**, **Rolling Pop & Bang**, and **Advanced Ignition Control**) require a **custom firmware and .ini file** provided in this repository.
 
 Using an official/standard `.ini` may result in some control modules being disabled or showing incomplete data.
 
-
+- ⚒️ **Firmware Flashing**: Integrated ESP/AVR firmware deployment—no extra tools needed.
 - 🚀 **Real-time Tuning**: Instant ECU synchronization with modern protocol support (CRC32 protection).
 - 📊 **Dynamic Dashboard**: High-frequency telemetry updates (10Hz+) for critical engine parameters.
 - 🧊 **3D Visualization**: Visualize tuning tables (VE, Ignition, AFR) in 3D using React Three Fiber.
 - 📂 **Universal INI Support**: Flexible metadata parsing with embedded INI portability—open your projects anywhere.
-- 🎨 **Modern UI**: Restrained neon accents on a professional acrylic surface for a premium automotive feel.
+- 🎨 **Modern UI**: Restrained neon accents on a professional acrylic surface.
 - 🛠️ **Smart Sync**: Bidirectional synchronization between ECU RAM, EEPROM (Burn), and local project files.
+
+## 🚀 Roadmap (Future Features)
+
+- 🧪 **Auto-Tune Engine**: Advanced algorithm for real-time volumetric efficiency optimization.
+- 📉 **Advance Data Logging**: High-speed, high-resolution telemetry logging for deep analysis.
+- 🛰️ **Remote Tuning**: Over-the-air (OTA) tuning support via ESP-32 Wi-Fi bridge.
 
 ## 📸 Screenshots
 
@@ -53,12 +59,14 @@ Using an official/standard `.ini` may result in some control modules being disab
 ### Installation
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/sigitlutfi/ryn-speeduino-configurator.git
    cd ryn-speeduino-configurator
    ```
 
 2. **Install dependencies:**
+
    ```bash
    npm install
    ```
@@ -95,4 +103,5 @@ Project Link: [https://github.com/sigitlutfi/ryn-speeduino-configurator](https:/
 **Speeduino** is a trademark of its respective owners. This project is an independent open-source tool and is not officially affiliated with, endorsed by, or connected to the official Speeduino project or its creators. Use this software at your own risk. Digital tuning can cause engine damage if not handled correctly.
 
 ---
-*Built with ❤️ for the Speeduino Community.*
+
+_Built with ❤️ for the Speeduino Community._
