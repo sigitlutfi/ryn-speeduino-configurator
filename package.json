@@ -2,9 +2,9 @@
   "name": "ryn-speeduino-configurator",
   "productName": "RYN CONFIGURATOR",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "Modern, high-performance tuning interface for Speeduino ECUs with real-time analytics and 3D visualization.",
   "main": ".vite/build/index.js",
-  "private": true,
+  "private": false,
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
@@ -12,7 +12,17 @@
     "publish": "electron-forge publish",
     "lint": "echo \"No linting configured\""
   },
-  "keywords": [],
+  "keywords": [
+    "Speeduino",
+    "ECU",
+    "Tuning",
+    "Electron",
+    "React",
+    "Dashboard",
+    "Motorsport",
+    "Real-time",
+    "3D"
+  ],
   "author": {
     "name": "sigitlutfy",
     "email": "sigitlutfy@gmail.com"

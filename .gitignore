@@ -94,3 +94,8 @@ out/
 # local tune/project files
 *.rynproj
 *.msq
+
+# Allow example files in samples directory
+!samples/
+!samples/*.rynproj
+!samples/*.msq
