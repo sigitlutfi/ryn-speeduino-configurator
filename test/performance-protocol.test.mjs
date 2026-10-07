@@ -24,7 +24,7 @@ function packet() {
   return bytes
 }
 
-test('INI page sizes and fields match the performance v2 wire contract', () => {
+test('INI page sizes and fields match the performance v3 wire contract', () => {
   assert.equal(ini.constants.pageSizes[6], 143)
   assert.equal(ini.constants.pageSizes[10], 220)
   assert.equal(ini.outputChannels.ochBlockSize, 152)
@@ -86,7 +86,7 @@ test('mock ECU advertises the same signature and returns a complete output block
   const port = createMockSerial(bytes => receive(bytes))
   const send = command => new Promise(resolve => { receive = resolve; port.write(command) })
   const signature = await send(Buffer.from('Q'))
-  assert.equal(signature.toString('ascii'), 'speeduino 202504-ryn-perf-v2')
+  assert.equal(signature.toString('ascii'), 'speeduino 202504-ryn-perf-v3')
   const framed = await send(formatOutputChannelsCommand(ini.outputChannels.ochGetCommand, 0, 152))
   const parser = new ModernProtocolParser()
   let payload

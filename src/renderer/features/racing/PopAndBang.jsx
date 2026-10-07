@@ -21,6 +21,7 @@ import {
   InfoCard,
 } from "../shared/components/TuningComponents";
 import PinSelect from "../shared/components/PinSelect";
+import PerformanceStatus from "../shared/components/PerformanceStatus";
 
 const POP_AND_BANG_FIELDS = [
   "rollingPopBangEnabled",
@@ -99,15 +100,15 @@ export default function PopAndBang() {
       "Assign a valid switch pin before enabling the feature.",
     );
   }
-  if (minRpm >= maxRpm) {
-    validationErrors.push("Min RPM must be lower than Max RPM.");
+  if (isEnabled && minRpm > maxRpm) {
+    validationErrors.push("Min RPM must not exceed Max RPM.");
   }
-  if (maxTps <= 0) {
+  if (isEnabled && maxTps < 0) {
     validationErrors.push(
-      "Max TPS must be greater than 0% or the mode can never arm.",
+      "Max TPS cannot be negative. 0% permits activation at fully closed throttle.",
     );
   }
-  if (cutType > 0 && cutPattern === 0) {
+  if (isEnabled && cutType > 0 && cutPattern === 0) {
     validationErrors.push(
       "Cut Pattern must be above 0 when a cut type is enabled.",
     );
@@ -177,6 +178,7 @@ export default function PopAndBang() {
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
         <div className="max-w-[1400px] mx-auto space-y-6 pb-20">
+          <PerformanceStatus feature="popBang" />
           <div className="p-8 rounded-[40px] border border-neon-orange/30 bg-gradient-to-r from-neon-orange/10 to-neon-red/5 relative overflow-hidden">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,107,53,0.15),transparent_40%)] pointer-events-none" />
             <div className="relative z-10 flex items-start gap-6">

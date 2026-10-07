@@ -11,6 +11,8 @@ import {
   InfoCard,
 } from "../shared/components/TuningComponents";
 import PinSelect from "../shared/components/PinSelect";
+import PerformanceStatus from "../shared/components/PerformanceStatus";
+import { validatePerformanceSettings } from "../../../shared/protocol/performance-features.js";
 
 const PIT_LIMITER_FIELDS = [
   "pitLimiterEnabled",
@@ -20,6 +22,9 @@ const PIT_LIMITER_FIELDS = [
   "pitLimiterSpeed",
   "pitLimiterCutType",
   "pitLimiterSoftWindow",
+  "SoftLimitMode",
+  "SoftLimRetard",
+  "engineProtectType",
 ];
 
 export default function PitLimiter() {
@@ -62,6 +67,8 @@ export default function PitLimiter() {
 
   const validationErrors = [];
   const advisoryWarnings = [];
+  const softError = validatePerformanceSettings('pitLimiter', Object.fromEntries(PIT_LIMITER_FIELDS.map(name => [name, getValue(name)])));
+  if (softError) validationErrors.push(softError);
 
   if (isEnabled && activationPin === 0) {
     validationErrors.push(
@@ -84,7 +91,7 @@ export default function PitLimiter() {
       "RPM limit is 0, so limiter engagement depends only on vehicle speed.",
     );
   }
-  if (cutType > 0 && softWindow > 0 && softWindow < 100) {
+  if (cutType === 1 && softWindow > 0 && softWindow < 100) {
     advisoryWarnings.push(
       "A very small soft-cut window can make intervention feel abrupt near the limit.",
     );
@@ -127,6 +134,7 @@ export default function PitLimiter() {
 
       <div className="relative z-10 flex-1 overflow-y-auto custom-scrollbar p-6">
         <div className="mx-auto max-w-[1460px] space-y-6 pb-20">
+          <PerformanceStatus feature="pitLimiter" />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div
               className={`relative overflow-hidden rounded-3xl border p-4 transition-all duration-500 flex items-center justify-between ${
@@ -169,7 +177,7 @@ export default function PitLimiter() {
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${switchState ? "text-white" : "text-white/20"}`}
                 >
-                  {switchState ? "SIGNAL HIGH" : "SIGNAL LOW"}
+                  {switchState ? "INPUT ACTIVE" : "INPUT INACTIVE"}
                 </span>
               </div>
               <Target
@@ -292,8 +300,9 @@ export default function PitLimiter() {
               </div>
 
               <InfoCard title="Activation Guide" theme="yellow">
-                Limiter engages only when the switch is CLOSED and EITHER RPM or
-                Speed thresholds are exceeded.
+                Limiter requires the configured switch polarity. Hard/rolling
+                modes engage at the RPM or speed threshold. Soft mode starts at
+                RPM limit minus window, or when the speed threshold is reached.
               </InfoCard>
             </div>
 
@@ -325,8 +334,13 @@ export default function PitLimiter() {
                   onChange={(val) => updateValue("pitLimiterCutType", val)}
                   options={getFieldInfo("pitLimiterCutType")?.meta?.options}
                 />
+                <SelectRow label="Shared Engine Protection Cut Type"
+                  value={getValue("engineProtectType")}
+                  onChange={(val) => updateValue("engineProtectType", val)}
+                  options={getFieldInfo("engineProtectType")?.meta?.options}
+                  description="This also changes standard engine protection. Rolling uses this cut type; soft mode requires ignition." />
                 <div
-                  className={`transition-all duration-500 overflow-hidden ${getValue("pitLimiterCutType") > 0 ? "max-h-32 opacity-100 mt-4" : "max-h-0 opacity-0"}`}
+                  className={`transition-all duration-500 overflow-hidden ${getValue("pitLimiterCutType") === 1 ? "max-h-[600px] opacity-100 mt-4" : "max-h-0 opacity-0"}`}
                 >
                   <InputField
                     label="Soft Cut Window"
@@ -335,12 +349,24 @@ export default function PitLimiter() {
                     units="RPM"
                     description="RPM range below limit where timing retard begins"
                   />
+                  <SelectRow label="Shared Soft Limit Mode"
+                    value={getValue("SoftLimitMode")}
+                    onChange={(val) => updateValue("SoftLimitMode", val)}
+                    options={getFieldInfo("SoftLimitMode")?.meta?.options}
+                    description="Shared with the standard soft rev limiter." />
+                  <InputField label="Shared Soft Limit Timing"
+                    value={getValue("SoftLimRetard")}
+                    onChange={(val) => updateValue("SoftLimRetard", val)} units="DEG"
+                    description="Relative subtracts this amount; Fixed sets this advance angle. Shared with the standard rev limiter." />
                 </div>
               </div>
 
-              <InfoCard title="Safety Note" icon={ShieldAlert} theme="red">
-                Hard cut strategy is recommended for high-load applications to
-                prevent exhaust manifold melting.
+              <InfoCard title="Cut Strategy" icon={ShieldAlert} theme="red">
+                Hard mode cuts both fuel and ignition. Rolling mode uses a 50%
+                per-channel cut decision and the Engine Protection cut type.
+                Soft mode adjusts timing only; it does not guarantee a hard RPM
+                or speed cap. Engine Protection must include ignition for soft
+                mode and must be enabled for rolling mode.
               </InfoCard>
             </div>
           </div>

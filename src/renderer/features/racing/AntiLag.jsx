@@ -19,6 +19,8 @@ import {
   InfoCard,
 } from "../shared/components/TuningComponents";
 import PinSelect from "../shared/components/PinSelect";
+import PerformanceStatus from "../shared/components/PerformanceStatus";
+import { validatePerformanceSettings } from "../../../shared/protocol/performance-features.js";
 
 const ALS_FIELDS = [
   "alsEnabled",
@@ -36,6 +38,7 @@ const ALS_FIELDS = [
   "alsIgnCutEnable",
   "alsIgnCutPattern",
   "alsFuelCutPattern",
+  "alsTargetRPM",
 ];
 
 export default function AntiLag() {
@@ -52,7 +55,7 @@ export default function AntiLag() {
     isReady,
   } = useTuningModule(ALS_FIELDS);
 
-  const { realtime } = useStore();
+  const { realtime, notify } = useStore();
   const isActive = realtime?.performance?.alsActive;
   const activeTimeMs = realtime?.performance?.alsActiveTime ?? 0;
   const activeTimeSeconds = activeTimeMs / 1000;
@@ -70,6 +73,12 @@ export default function AntiLag() {
 
   if (!isReady) return null;
 
+  const handleValidatedSave = (burn) => {
+    const error = validatePerformanceSettings('als', Object.fromEntries(ALS_FIELDS.map(name => [name, getValue(name)])));
+    if (error) { notify(error, 'error'); return; }
+    return handleSave(burn);
+  };
+
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden animate-in fade-in duration-700">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-neon-red/18 via-neon-red/8 to-transparent" />
@@ -84,14 +93,15 @@ export default function AntiLag() {
         isSaving={isSaving}
         saveStatus={saveStatus}
         isConnected={isConnected}
-        onSave={() => handleSave(false)}
-        onBurn={() => handleSave(true)}
+        onSave={() => handleValidatedSave(false)}
+        onBurn={() => handleValidatedSave(true)}
         onDiscard={discardChanges}
         themeColor="red"
       />
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
         <div className="max-w-[1400px] mx-auto space-y-6 pb-20">
+          <PerformanceStatus feature="als" />
           {/* Critical Warnings */}
           <div className="p-8 rounded-[40px] border border-neon-red/40 bg-neon-red/5 relative overflow-hidden group">
             <div className="absolute inset-0 bg-gradient-to-r from-neon-red/10 to-transparent pointer-events-none" />
@@ -129,7 +139,7 @@ export default function AntiLag() {
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${isActive ? "text-neon-red" : "text-white/20"}`}
                 >
-                  {isActive ? "BURNING ACTIVE" : "STBY"}
+                  {isActive ? "CONDITIONS MET" : "STBY"}
                 </span>
               </div>
             </div>
@@ -151,7 +161,7 @@ export default function AntiLag() {
             <div className="p-4 rounded-3xl bg-white/5 border border-white/10">
               <div className="flex flex-col gap-1 items-center">
                 <span className="text-[7px] font-black text-white/40 uppercase tracking-widest">
-                  Ign Retard
+                  Requested Retard
                 </span>
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${isActive ? "text-neon-orange" : "text-white/20"}`}
@@ -165,12 +175,12 @@ export default function AntiLag() {
             <div className="p-4 rounded-3xl bg-white/5 border border-white/10">
               <div className="flex flex-col gap-1 items-center">
                 <span className="text-[7px] font-black text-white/40 uppercase tracking-widest">
-                  Fuel Mult
+                  Requested Fuel
                 </span>
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${isActive ? "text-neon-cyan" : "text-white/20"}`}
                 >
-                  {Math.max(100, realtime?.performance?.alsFuelCorr ?? 0)}%{" "}
+                  {realtime?.performance?.alsFuelCorr ?? 100}%{" "}
                   <span className="text-[8px] opacity-40">VE</span>
                 </span>
               </div>
@@ -221,10 +231,11 @@ export default function AntiLag() {
                       units="%"
                     />
                     <InputField
-                      label="Min Boost"
+                      label="Minimum MAP (absolute)"
                       value={getValue("alsMinBoost")}
                       onChange={(val) => updateValue("alsMinBoost", val)}
                       units="kPa"
+                      description="Absolute manifold pressure, not boost above atmosphere. 0 removes this MAP requirement."
                     />
                     <InputField
                       label="Min Speed"
@@ -305,26 +316,35 @@ export default function AntiLag() {
                   />
                 </div>
                 <div className="space-y-6">
+                  <InputField
+                    label="Cut Target RPM"
+                    value={getValue("alsTargetRPM")}
+                    onChange={(val) => updateValue("alsTargetRPM", val)}
+                    units="RPM"
+                    description="Cuts start at or above this RPM. 0 removes the cut target; timing and fuel use the activation thresholds above."
+                  />
                   <div className="flex flex-col gap-2">
                     <span className="text-[8px] font-black text-white/20 uppercase tracking-widest">
-                      Ignition Cut Pattern (Hex)
+                      Ignition Cut Pattern (decimal 0–255)
                     </span>
                     <InputField
                       label="Pattern Bitmask"
                       value={getValue("alsIgnCutPattern")}
                       onChange={(val) => updateValue("alsIgnCutPattern", val)}
-                      units="HEX"
+                      units="0–255"
+                      description="8 repeating steps at 30 steps/s; bit 0 plays first. 1 = cut, 0 = clear."
                     />
                   </div>
                   <div className="flex flex-col gap-2">
                     <span className="text-[8px] font-black text-white/20 uppercase tracking-widest">
-                      Fuel Cut Pattern (Hex)
+                      Fuel Cut Pattern (decimal 0–255)
                     </span>
                     <InputField
                       label="Pattern Bitmask"
                       value={getValue("alsFuelCutPattern")}
                       onChange={(val) => updateValue("alsFuelCutPattern", val)}
-                      units="HEX"
+                      units="0–255"
+                      description="Uses the same steps as ignition; fuel cuts do not require IGN CUT to be enabled."
                     />
                   </div>
                 </div>

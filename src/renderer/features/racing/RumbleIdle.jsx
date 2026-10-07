@@ -4,6 +4,8 @@ import { useStore } from "../../core/store.js";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
 import PinSelect from "../shared/components/PinSelect";
+import PerformanceStatus from "../shared/components/PerformanceStatus";
+import { validatePerformanceSettings } from "../../../shared/protocol/performance-features.js";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 import {
   SelectRow,
@@ -41,7 +43,7 @@ export default function RumbleIdle() {
     isReady,
   } = useTuningModule(RUMBLE_IDLE_FIELDS);
 
-  const { realtime } = useStore();
+  const { realtime, notify } = useStore();
   const isActive = realtime?.performance?.rumbleIdleActive;
   const beatState = realtime?.performance?.rumbleIdleBeat;
 
@@ -66,6 +68,12 @@ export default function RumbleIdle() {
 
   if (!isReady) return null;
 
+  const handleValidatedSave = (burn) => {
+    const error = validatePerformanceSettings('rumbleIdle', Object.fromEntries(RUMBLE_IDLE_FIELDS.map(name => [name, getValue(name)])));
+    if (error) { notify(error, 'error'); return; }
+    return handleSave(burn);
+  };
+
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden animate-in fade-in duration-700">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-neon-red/18 via-neon-red/8 to-transparent" />
@@ -80,14 +88,15 @@ export default function RumbleIdle() {
         isSaving={isSaving}
         saveStatus={saveStatus}
         isConnected={isConnected}
-        onSave={() => handleSave(false)}
-        onBurn={() => handleSave(true)}
+        onSave={() => handleValidatedSave(false)}
+        onBurn={() => handleValidatedSave(true)}
         onDiscard={discardChanges}
         themeColor="orange"
       />
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
         <div className="max-w-[1400px] mx-auto space-y-6 pb-20">
+          <PerformanceStatus feature="rumbleIdle" />
           {/* Header Status */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div
@@ -104,7 +113,7 @@ export default function RumbleIdle() {
                   <span
                     className={`text-sm font-orbitron font-black uppercase tracking-widest ${isActive ? "text-white" : "text-white/20"}`}
                   >
-                    {isActive ? "PATTERN ACTIVE" : "SYSTEM STANDBY"}
+                    {isActive ? "CONDITIONS MET" : "SYSTEM STANDBY"}
                   </span>
                 </div>
               </div>
@@ -127,7 +136,7 @@ export default function RumbleIdle() {
                   {isActive
                     ? beatState
                       ? "COMBUSTION"
-                      : "CUT ACTIVE"
+                      : "PATTERN CUT STEP"
                     : "IDLE"}
                 </span>
               </div>
@@ -252,8 +261,9 @@ export default function RumbleIdle() {
               </div>
 
               <InfoCard title="Engine Signature" theme="orange">
-                Lower frequencies (4-8Hz) create a heavy "cammed" lope, while
-                high frequencies (15-20Hz) create a faster "burble" effect.
+                Rate controls pattern steps per second, from 1 to 30.
+                An 8-step pattern at 10 steps/s repeats every 0.8 seconds.
+                Step 1 starts immediately; 1 = fire and 0 = cut.
               </InfoCard>
             </div>
 
@@ -283,10 +293,10 @@ export default function RumbleIdle() {
                   step={0.5}
                 />
                 <InputField
-                  label="Beat Freq"
+                  label="Pattern Step Rate"
                   value={getValue("rumbleIdleFrequency")}
                   onChange={(val) => updateValue("rumbleIdleFrequency", val)}
-                  units="HZ"
+                  units="STEPS/S"
                 />
                 <InputField
                   label="Min CLT"

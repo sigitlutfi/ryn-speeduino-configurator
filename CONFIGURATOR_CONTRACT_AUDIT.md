@@ -6,6 +6,10 @@ upstream `fb602718`. Configurator baseline: `53d3c63` on
 
 ## Result
 
+This report describes the v2 metadata audit. The later
+[custom behavior audit](CUSTOM_FEATURE_BEHAVIOR_AUDIT.md) supersedes its runtime
+baseline with the paired v3 firmware/INI and additional web corrections.
+
 The bundled INI and firmware reference INI are byte-identical after the fixes.
 The performance v2 signature, page 6 (143 bytes), page 10 (220 bytes), and
 output channels (152 bytes) agree. Every binary constant checked fits its
