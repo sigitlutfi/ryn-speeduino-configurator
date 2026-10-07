@@ -10,6 +10,7 @@ const OUTPUT_CHANNELS_SIZE = PACKET_SIZE;
 const FIRMWARE_SIGNATURE = 'speeduino 202504-ryn-perf-v2';
 const NUM_PAGES = 16; // Pages 0-15
 const PAGE_SIZE = 512; // Standard page size
+const PAGE_SIZES = [0, 128, 288, 288, 128, 288, 143, 240, 384, 192, 220, 288, 192, 128, 288, 256];
 
 /**
  * CRC32 calculation (must match the one in ecu-commands.js)
@@ -221,6 +222,16 @@ export function createMockSerial(onData) {
         setTimeout(() => onData(wrapResponse(response)), 5);
       }
 
+    } else if (cmd === 'd') {
+      const page = payload[2];
+      if (page > 0 && page < NUM_PAGES) {
+        const response = Buffer.alloc(5);
+        response[0] = 0x00;
+        response.writeUInt32BE(crc32(ecuMemory[page].subarray(0, PAGE_SIZES[page])), 1);
+        setTimeout(() => onData(wrapResponse(response)), 5);
+      } else {
+        setTimeout(() => onData(wrapResponse(Buffer.from([0x84]))), 5);
+      }
     } else if (cmd === 'r') {
       const subCommand = payload[2];
       const offset = payload.readUInt16LE(3);

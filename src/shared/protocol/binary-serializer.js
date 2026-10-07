@@ -149,16 +149,13 @@ export function serializeValue(buffer, offset, value, meta) {
  * @param {number} pageSize - Expected page size in bytes
  * @returns {Buffer} Serialized page data
  */
-export function serializePage(parsedConstants, pageMeta, pageSize) {
+export function serializePage(parsedConstants, pageMeta, pageSize, baseBuffer) {
   const buffer = Buffer.alloc(pageSize);
-  buffer.fill(0); // Initialize with zeros
+  if (baseBuffer) Buffer.from(baseBuffer).copy(buffer, 0, 0, pageSize);
 
   if (!pageMeta) {
     return buffer;
   }
-
-  // Debug: Check if this is Page 1 (has pinLayout)
-  const isPage1 = 'pinLayout' in pageMeta;
 
   // Iterate through all variables in pageMeta (matching binary-parser.js pattern)
   for (const [varName, varMeta] of Object.entries(pageMeta)) {
@@ -167,13 +164,6 @@ export function serializePage(parsedConstants, pageMeta, pageSize) {
 
     if (value !== undefined && offset !== undefined && varMeta.type !== "unknown") {
       try {
-        // WORKAROUND: Speeduino firmware quirk - pinLayout needs +61 offset when writing
-        // This matches TunerStudio's internal handling (undocumented in INI)
-        if (varName === 'pinLayout' && typeof value === 'number' && value <= 60) {
-          console.warn(`[Serializer] Applying pinLayout firmware quirk: ${value} → ${value + 61}`);
-          value = value + 61;
-        }
-
         serializeValue(buffer, offset, value, varMeta);
       } catch (err) {
         console.error(`[Serializer] Failed to serialize ${varName} at offset ${offset}:`, err);

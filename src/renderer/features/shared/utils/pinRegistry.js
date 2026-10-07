@@ -406,6 +406,13 @@ function normalizePinLabel(label) {
   return normalized.toLowerCase();
 }
 
+function getPhysicalClaimKey(label, policy) {
+  const pin = normalizePinLabel(label);
+  if (!pin) return null;
+  // Input/output direction does not make a digital MCU pin a different resource.
+  return `${policy.resourceClass === "analog-input" ? "analog" : "digital"}:${pin}`;
+}
+
 function classifySpecialLabel(label) {
   const normalized = String(label || "").trim();
   if (!normalized) return { kind: "unavailable", displayLabel: "Unavailable", claimable: false };
@@ -733,7 +740,7 @@ function discoverIoRows(parsedIni, decodedPages, fieldIndex = buildFieldIndex(pa
         assignment.claimable ? normalizePinLabel(assignment.displayLabel) : null;
       const configuredClaimKey =
         assignment.claimable && normalizedClaimLabel
-          ? `${direction}:${policy.resourceClass || "generic"}:${normalizedClaimLabel}`
+          ? getPhysicalClaimKey(assignment.displayLabel, policy)
           : null;
       const claimKey = activity.active ? configuredClaimKey : null;
 
@@ -836,7 +843,7 @@ function getPinOptionsForField(
       const displayLabel = formatPinOptionLabel(label, index, currentValue, fieldName, info?.meta);
       const claimKey =
         assignment.claimable
-          ? `${inferDirection(fieldName, assignment.displayLabel, policy, parsedIni)}:${policy.resourceClass || "generic"}:${normalizePinLabel(assignment.displayLabel)}`
+          ? getPhysicalClaimKey(assignment.displayLabel, policy)
           : null;
       const configuredOwners = claimKey
         ? (registry.configuredMap?.[claimKey] || []).filter((entry) => entry.field !== fieldName)
@@ -844,9 +851,6 @@ function getPinOptionsForField(
       const activeOwners = claimKey
         ? (registry.assignedMap?.[claimKey] || []).filter((entry) => entry.field !== fieldName)
         : [];
-      const disableForConfiguredOwner =
-        configuredOwners.length > 0 && policy.resourceClass !== "analog-input";
-
       return {
         index,
         label: displayLabel,
@@ -857,7 +861,7 @@ function getPinOptionsForField(
         activeOwners,
         disabled:
           index !== Number(currentValue) &&
-          (activeOwners.length > 0 || disableForConfiguredOwner),
+          activeOwners.length > 0,
       };
     })
     .filter((option) => {

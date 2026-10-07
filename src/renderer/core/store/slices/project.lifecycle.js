@@ -3,6 +3,7 @@
 import { parseIni } from "../../../../shared/ini-parser.js";
 import {
   createPageSnapshot,
+  decodePageSnapshot,
   isPageSnapshot,
   serializeDecodedPage,
 } from "../../../../shared/protocol/page-cache.js";
@@ -525,9 +526,10 @@ export function createProjectLifecycleSlice(set, get) {
         const generatedRawPages = { ...currentRawPages };
         if (parsedIni) {
           for (const [pageId, decodedPage] of Object.entries(decodedUpdates)) {
-            const pageBuffer = serializeDecodedPage(parsedIni, Number(pageId), decodedPage);
+            const previous = currentRawPages[pageId];
+            const pageBuffer = serializeDecodedPage(parsedIni, Number(pageId), decodedPage,
+              previous ? decodePageSnapshot(previous) : undefined);
             if (pageBuffer.length > 0) {
-              const previous = currentRawPages[pageId];
               generatedRawPages[pageId] = createPageSnapshot({
                 pageId: Number(pageId),
                 size: pageBuffer.length,

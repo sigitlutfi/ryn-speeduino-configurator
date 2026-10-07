@@ -1,6 +1,7 @@
 // ECU sync, burn, compare, and upload operations
 
 import { Buffer } from "buffer";
+import { assertWritableContract } from "../../../../shared/protocol/contract.js";
 import {
   createPageSnapshot,
   decodePageSnapshot,
@@ -63,6 +64,8 @@ export function createECUSyncSlice(set, get) {
       if (connection.status !== "connected") {
         return { ok: false, error: "Not connected" };
       }
+      try { assertWritableContract(get()); }
+      catch (error) { return { ok: false, error: error.message, errors: [{ error: error.message }] }; }
 
       const targetPages = (
         pageIds?.length ? pageIds : getActiveProjectPages(currentProject)
@@ -377,6 +380,7 @@ export function createECUSyncSlice(set, get) {
           };
         });
 
+        assertWritableContract(get());
         await serialService.burnPage(pageId);
         await delay(2000);
 

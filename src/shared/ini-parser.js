@@ -197,6 +197,8 @@ export function parseIni(content, preprocessorSymbols = {}) {
   let currentCurve = null;
   let currentDialog = null;
   const lastOffsetMap = {};
+  const defaultEntries = [];
+  const powerCycleFields = new Set();
 
   const lines = content.split(/\r?\n/);
 
@@ -306,6 +308,19 @@ export function parseIni(content, preprocessorSymbols = {}) {
     const name = line.slice(0, eqIdx).trim();
     const restRaw = line.slice(eqIdx + 1).trim();
     const rest = resolveMacros(restRaw);
+
+    if (currentSection === "constantsextensions" && name === 'requiresPowerCycle') {
+      powerCycleFields.add(splitTokens(rest)[0]);
+      continue;
+    }
+    if (currentSection === "constantsextensions" && ["defaultValue", "rawValue"].includes(name)) {
+      const tokens = splitTokens(rest);
+      const values = (tokens[1] || '').split(/\s+/).filter(Boolean).map(Number);
+      if (values.length && values.every(Number.isFinite)) {
+        defaultEntries.push({ name: tokens[0], values, raw: name === 'rawValue' });
+      }
+      continue;
+    }
 
     if (currentSection === "constants") {
       const pageMatch = line.match(/^page\s*=\s*(\d+)/i);
@@ -450,6 +465,18 @@ export function parseIni(content, preprocessorSymbols = {}) {
     }
   }
 
+  for (const entry of defaultEntries) {
+    for (const page of Object.values(result.constants.pages)) {
+      const meta = page[entry.name];
+      if (!meta) continue;
+      const rawValues = entry.values.map(value => entry.raw || meta.type === 'bits'
+        ? value : Math.round(value / (meta.scale || 1) - (meta.translate ?? 0)));
+      meta.defaultValue = meta.type === 'array' ? rawValues : rawValues[0];
+    }
+  }
+  for (const page of Object.values(result.constants.pages)) {
+    for (const name of powerCycleFields) if (page[name]) page[name].requiresPowerCycle = true;
+  }
   return result;
 }
 

@@ -36,7 +36,7 @@ export default function PitLimiter() {
     isReady,
   } = useTuningModule(PIT_LIMITER_FIELDS);
 
-  const { realtime } = useStore();
+  const { realtime, notify } = useStore();
   const isActive = realtime?.performance?.pitLimiterActive;
   const switchState = realtime?.performance?.pitLimiterSwitch;
 
@@ -97,6 +97,14 @@ export default function PitLimiter() {
 
   if (!isReady) return null;
 
+  const handleValidatedSave = (burn) => {
+    if (validationErrors.length) {
+      notify(validationErrors[0], "error");
+      return;
+    }
+    return handleSave(burn);
+  };
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden  select-none animate-in fade-in duration-700">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-neon-red/18 via-neon-red/8 to-transparent" />
@@ -111,8 +119,8 @@ export default function PitLimiter() {
         isSaving={isSaving}
         saveStatus={saveStatus}
         isConnected={isConnected}
-        onSave={() => handleSave(false)}
-        onBurn={() => handleSave(true)}
+        onSave={() => handleValidatedSave(false)}
+        onBurn={() => handleValidatedSave(true)}
         onDiscard={discardChanges}
         themeColor="red"
       />

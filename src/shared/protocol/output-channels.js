@@ -13,7 +13,7 @@ function toTemp(rawValue) {
 function applyMetaScale(rawValue, meta) {
   if (typeof rawValue !== "number") return 0;
   if (!meta || meta.type !== "scalar") return rawValue;
-  return rawValue * (meta.scale ?? 1) + (meta.translate ?? 0);
+  return (rawValue + (meta.translate ?? 0)) * (meta.scale ?? 1);
 }
 
 export function decodeOutputChannels(buffer, parsedIni) {

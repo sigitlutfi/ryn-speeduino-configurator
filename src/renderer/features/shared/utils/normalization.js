@@ -1,7 +1,6 @@
 /**
  * speeduino.ini formula: 
- * RealValue = (InternalValue * Multiplier) + Offset
- * In our context: Real = (Raw * scale) + translate
+ * RealValue = (InternalValue + Translate) * Scale
  */
 
 export const toDisplay = (raw, meta) => {
@@ -13,8 +12,7 @@ export const toDisplay = (raw, meta) => {
     return raw.map(v => toDisplay(v, meta));
   }
   
-  // Standard Formula: Real = (Raw * Scale) + Translate
-  const result = (raw * (scale || 1)) + (translate || 0);
+  const result = (raw + (translate ?? 0)) * (scale ?? 1);
   
   // Return formatted number based on precision
   return digits !== undefined ? parseFloat(result.toFixed(digits)) : result;
@@ -29,8 +27,8 @@ export const toRaw = (display, meta) => {
     return display.map(v => toRaw(v, meta));
   }
   
-  // Reverse Formula: Raw = (Real - Translate) / Scale
+  // Reverse Formula: Raw = Real / Scale - Translate
   // We round to nearest integer because internal values are usually bytes/ints
-  const raw = (display - (translate || 0)) / (scale || 1);
+  const raw = display / (scale || 1) - (translate ?? 0);
   return Math.round(raw);
 };

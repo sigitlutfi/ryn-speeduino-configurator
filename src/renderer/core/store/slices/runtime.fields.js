@@ -1,6 +1,7 @@
 // Runtime field read/write/verify operations
 
 import { Buffer } from "buffer";
+import { assertWritableContract } from "../../../../shared/protocol/contract.js";
 import {
   buildRuntimeFieldWrite,
   readRuntimeFieldFromBuffer,
@@ -63,6 +64,7 @@ export function createRuntimeFieldsSlice(set, get) {
           };
         }
 
+        assertWritableContract(get());
         await serialService.writePage(
           field.page,
           write.offset,

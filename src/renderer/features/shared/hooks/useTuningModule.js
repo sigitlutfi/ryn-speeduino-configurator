@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../../../core/store.js";
 import { getDecodedPages } from "../utils/projectConstants.js";
+import { validateConfigurationValues } from "../../../../shared/protocol/configuration-validation.js";
 
 /**
  * Professional Tuning Module Hook.
@@ -249,6 +250,21 @@ export function useTuningModule(targets, options = {}) {
   }, [isPageTargetMode, pagesFound, localConstants, fieldToPageMap]);
 
   const handleSave = async (isBurn = false) => {
+    const storedPages = getDecodedPages(currentProject?.constants, parsedIni);
+    const needsPowerCycle = Object.entries(buildScopedPayload()).some(([page, values]) =>
+      Object.entries(values).some(([name, value]) => parsedIni?.constants?.pages?.[page]?.[name]?.requiresPowerCycle &&
+        value !== undefined && value !== storedPages?.[page]?.[name]));
+    // An existing out-of-range value must not prevent disabling a feature.
+    // Validate edits rather than unrelated values already present in the tune.
+    const editedPages = Object.fromEntries(Object.entries(buildScopedPayload()).map(([page, values]) =>
+      [page, Object.fromEntries(Object.entries(values).filter(([name, value]) =>
+        JSON.stringify(value) !== JSON.stringify(storedPages?.[page]?.[name])))]));
+    const rangeError = validateConfigurationValues(parsedIni, editedPages);
+    if (rangeError) {
+      setSaveStatus("error");
+      notify(rangeError, "error");
+      return { ok: false, error: rangeError };
+    }
     if (isBurn && !isConnected) {
       notify("Device not connected", "error");
       return { ok: false };
@@ -286,6 +302,7 @@ export function useTuningModule(targets, options = {}) {
       const result = await saveProject();
       if (result.ok) {
         setSaveStatus("success");
+        if (needsPowerCycle) notify("Pin or hardware settings changed. Burn the page, then restart the ECU to apply them.", "info", 10000);
         if (typeof onSaveSuccess === "function") {
           onSaveSuccess(result);
         }

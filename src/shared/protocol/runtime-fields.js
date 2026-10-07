@@ -19,22 +19,6 @@ function getDataTypeSize(dataType) {
   }
 }
 
-function normalizeParsedValue(meta, value) {
-  if (meta?.name === "pinLayout" && typeof value === "number" && value > 60) {
-    return value - 61;
-  }
-
-  return value;
-}
-
-function normalizeSerializedValue(meta, value) {
-  if (meta?.name === "pinLayout" && typeof value === "number" && value <= 60) {
-    return value + 61;
-  }
-
-  return value;
-}
-
 export function getRuntimeFieldByteLength(meta) {
   if (!meta) return 0;
 
@@ -73,7 +57,7 @@ export function readRuntimeFieldFromBuffer(pageBuffer, meta) {
   }
 
   const value = parseValue(pageBuffer, meta.offset, meta);
-  return normalizeParsedValue(meta, value);
+  return value;
 }
 
 export function buildRuntimeFieldWrite(pageBuffer, meta, nextValue) {
@@ -83,9 +67,7 @@ export function buildRuntimeFieldWrite(pageBuffer, meta, nextValue) {
 
   const beforeBuffer = Buffer.from(pageBuffer);
   const afterBuffer = Buffer.from(pageBuffer);
-  const valueToSerialize = normalizeSerializedValue(meta, nextValue);
-
-  serializeValue(afterBuffer, meta.offset, valueToSerialize, meta);
+  serializeValue(afterBuffer, meta.offset, nextValue, meta);
 
   let firstDirtyByte = -1;
   let lastDirtyByte = -1;

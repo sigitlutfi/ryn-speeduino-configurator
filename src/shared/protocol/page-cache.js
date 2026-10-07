@@ -69,7 +69,7 @@ export function decodePageSnapshots(parsedIni, pageSnapshots = {}) {
   return decodedPages;
 }
 
-export function serializeDecodedPage(parsedIni, pageId, decodedPage = {}) {
+export function serializeDecodedPage(parsedIni, pageId, decodedPage = {}, baseBuffer) {
   const numericPageId = Number(pageId);
   const pageMeta = parsedIni?.constants?.pages?.[numericPageId];
   const pageSize = parsedIni?.constants?.pageSizes?.[numericPageId] || 0;
@@ -78,7 +78,7 @@ export function serializeDecodedPage(parsedIni, pageId, decodedPage = {}) {
     return Buffer.alloc(0);
   }
 
-  return serializePage(decodedPage, pageMeta, pageSize);
+  return serializePage(decodedPage, pageMeta, pageSize, baseBuffer);
 }
 
 export function replacePageRegion(buffer, offset, dataBuffer) {

@@ -1,6 +1,8 @@
 // ECU communication primitives
 
 import { Buffer } from "buffer";
+import { assertWritableContract } from "../../../../shared/protocol/contract.js";
+import { buildRuntimeFieldWrite, resolveRuntimeField } from "../../../../shared/protocol/runtime-fields.js";
 import { formatReadCommand } from "../../../../shared/protocol/ecu-commands.js";
 import { parsePage } from "../../../../shared/protocol/binary-parser.js";
 import { serialService } from "../../services/serialService.js";
@@ -60,13 +62,12 @@ export function createECUCommunicationSlice(set, get) {
       if (!meta) return;
 
       try {
-        await serialService.writePage(
-          meta.page,
-          meta.offset,
-          meta.meta.length || 1,
-          value,
-          meta.meta.dataType,
-        );
+        assertWritableContract(get());
+        const field = resolveRuntimeField(parsedIni, name);
+        const page = await get().readPageFromECU(field.page);
+        const write = buildRuntimeFieldWrite(page.buffer, field, value);
+        if (!write.changed) return;
+        await serialService.writePage(field.page, write.offset, write.length, Array.from(write.after));
 
         set((s) => {
           if (!s.currentProject) return {};

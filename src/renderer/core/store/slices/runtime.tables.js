@@ -1,6 +1,7 @@
 // Runtime table read/write/verify operations
 
 import { Buffer } from "buffer";
+import { assertWritableContract } from "../../../../shared/protocol/contract.js";
 import { getVarMetadata } from "../../../../shared/ini-parser.js";
 import { serializeValue } from "../../../../shared/protocol/binary-serializer.js";
 import { findDirtyRegion } from "../../../../shared/protocol/page-cache.js";
@@ -105,6 +106,7 @@ export function createRuntimeTablesSlice(set, get) {
         const dirtyRegion = findDirtyRegion(ecuPage.buffer, nextBuffer);
 
         if (dirtyRegion) {
+          assertWritableContract(get());
           const maxChunkLength = options.maxChunkLength ?? 32;
           for (
             let chunkOffset = 0;

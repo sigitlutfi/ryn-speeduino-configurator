@@ -254,7 +254,7 @@ export default function AntiLag() {
                     value={getValue("alsFuelModifier")}
                     onChange={(val) => updateValue("alsFuelModifier", val)}
                     units="%"
-                    description="100% = No change. 115% = +15% fuel."
+                    description="0% = no change; +15% adds fuel. Effective correction is limited to -30% through +50%."
                     icon={Thermometer}
                   />
                 </div>
@@ -273,21 +273,21 @@ export default function AntiLag() {
                     value={getValue("alsMaxDuration")}
                     onChange={(val) => updateValue("alsMaxDuration", val)}
                     units="SEC"
-                    description="Strict cycle cutout"
+                    description="0 disables activation. Maximum 30 seconds; after timeout, activation conditions must clear before rearming."
                     icon={Timer}
                   />
                   <InputField
                     label="Min CLT"
                     value={getValue("alsMinCLT")}
                     onChange={(val) => updateValue("alsMinCLT", val)}
-                    units="°C"
+                    units={getFieldInfo("alsMinCLT")?.meta?.units || "C"}
                     description="Engine must be warm"
                   />
                   <InputField
                     label="Max CLT"
                     value={getValue("alsMaxCLT")}
                     onChange={(val) => updateValue("alsMaxCLT", val)}
-                    units="°C"
+                    units={getFieldInfo("alsMaxCLT")?.meta?.units || "C"}
                     description="Hard cutout if overheating"
                   />
                 </div>

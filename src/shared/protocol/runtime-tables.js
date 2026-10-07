@@ -50,7 +50,7 @@ function toDisplayValue(raw, meta) {
   const scale = meta.scale ?? 1;
   const offset = meta.translate ?? 0;
   const digits = meta.digits ?? 0;
-  return roundDisplayValue(raw * scale + offset, digits);
+  return roundDisplayValue((raw + offset) * scale, digits);
 }
 
 function toRawValue(display, meta) {
@@ -58,7 +58,7 @@ function toRawValue(display, meta) {
   const scale = meta.scale ?? 1;
   const offset = meta.translate ?? 0;
   const safeScale = scale === 0 ? 1 : scale;
-  return Math.round((display - offset) / safeScale);
+  return Math.round(display / safeScale - offset);
 }
 
 function arrayToDisplay(rawValues = [], meta) {

@@ -234,8 +234,14 @@ export default function RumbleIdle() {
                   fieldName="rumbleIdlePin"
                   value={getValue("rumbleIdlePin")}
                   onChange={(val) => updateValue("rumbleIdlePin", val)}
-                  description="Choose a free input pin or leave the field on board-driven activation"
+                  description="Choose a free input pin or Auto Mode to activate from RPM, TPS, CLT and speed conditions"
                   icon={Gauge}
+                />
+                <SelectRow
+                  label="Pin Polarity"
+                  value={getValue("rumbleIdlePinMode")}
+                  onChange={(val) => updateValue("rumbleIdlePinMode", val)}
+                  options={getFieldInfo("rumbleIdlePinMode")?.meta?.options}
                 />
                 <SelectRow
                   label="Cut Mode"
@@ -286,7 +292,7 @@ export default function RumbleIdle() {
                   label="Min CLT"
                   value={getValue("rumbleIdleMinCLT")}
                   onChange={(val) => updateValue("rumbleIdleMinCLT", val)}
-                  units="°C"
+                  units={getFieldInfo("rumbleIdleMinCLT")?.meta?.units || "C"}
                 />
                 <SelectRow
                   label="Min Speed (km/h, 16-step)"

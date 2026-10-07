@@ -188,10 +188,6 @@ class SerialService {
         const handleData = (data) => {
           const chunk = Buffer.from(data);
 
-          if (chunk.length === 145) {
-            return;
-          }
-
           if (chunk.length >= 7) {
             const possibleLen = chunk.readUInt16BE(0);
             const totalLen = 2 + possibleLen + 4;
@@ -293,10 +289,6 @@ class SerialService {
 
         const handleData = (bytes) => {
           const chunk = Buffer.from(bytes);
-
-          if (chunk.length === 145) {
-            return;
-          }
 
           buffer = Buffer.concat([buffer, chunk]);
 
@@ -463,6 +455,7 @@ class SerialService {
   async readPageBuffer(command, pageSize, timeout = 3000) {
     return this._runCommandTransaction(async () => {
       this.parser.reset();
+      this.parser.enableRawMode(0);
 
       return new Promise((resolve, reject) => {
         let buffer = Buffer.alloc(0);
@@ -488,6 +481,9 @@ class SerialService {
         };
 
         const scheduleRawResolution = () => {
+          // Firmware modern reads are framed. Never treat a partial frame
+          // with this transaction's length header as raw page data.
+          if (buffer.length >= 2 && buffer.readUInt16BE(0) === pageSize + 1) return;
           if (buffer.length < pageSize) {
             return;
           }
@@ -506,14 +502,17 @@ class SerialService {
         const handleData = (bytes) => {
           const chunk = Buffer.from(bytes);
 
-          if (chunk.length === 145) {
-            return;
-          }
-
           buffer = Buffer.concat([buffer, chunk]);
 
           const wrapped = this._tryParseWrappedResponse(buffer);
-          if (wrapped && wrapped.status === ResponseStatus.OK && wrapped.data.length >= pageSize) {
+          if (wrapped) {
+            if (wrapped.status !== ResponseStatus.OK || wrapped.data.length < pageSize) {
+              clearTimeout(timer);
+              cleanup();
+              this.parser.reset();
+              reject(new Error(`Invalid page response: status 0x${wrapped.status.toString(16)}, bytes ${wrapped.data.length}`));
+              return;
+            }
             finish(wrapped.data.slice(0, pageSize));
             return;
           }
@@ -579,6 +578,7 @@ class SerialService {
       };
 
       const scheduleRawResolution = () => {
+        if (buffer.length >= 2 && buffer.readUInt16BE(0) === expectedBytes + 1) return;
         if (buffer.length < expectedBytes) {
           return;
         }

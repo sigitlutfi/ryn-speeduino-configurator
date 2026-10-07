@@ -428,7 +428,7 @@ export default function PopAndBang() {
                         updateValue("rollingPopBangMaxDuration", val)
                       }
                       units="SEC"
-                      description="Automatic timeout to stop long exhaust heat cycles"
+                      description="0 disables activation. Maximum 30 seconds; release the switch or clear activation conditions after timeout to rearm."
                       icon={Timer}
                     />
                   </div>

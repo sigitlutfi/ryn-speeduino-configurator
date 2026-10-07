@@ -78,14 +78,7 @@ export function parsePage(buffer, pageMeta) {
   for (const [varName, meta] of Object.entries(pageMeta)) {
     if (meta.offset !== undefined && meta.type !== "unknown") {
       try {
-        let value = parseValue(buffer, meta.offset, { ...meta, name: varName });
-
-        // WORKAROUND: Speeduino firmware quirk - pinLayout has +61 offset
-        // This matches TunerStudio's internal handling (undocumented in INI)
-        if (varName === 'pinLayout' && typeof value === 'number' && value > 60) {
-          console.warn(`[BinaryParser] Applying pinLayout firmware quirk: ${value} → ${value - 61}`);
-          value = value - 61;
-        }
+        const value = parseValue(buffer, meta.offset, { ...meta, name: varName });
 
         result[varName] = value;
       } catch (e) {
