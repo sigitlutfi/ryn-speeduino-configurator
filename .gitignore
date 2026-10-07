@@ -63,6 +63,7 @@ typings/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
+/upgrade-report.json
 
 # next.js build output
 .next

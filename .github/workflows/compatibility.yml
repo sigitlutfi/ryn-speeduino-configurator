@@ -1,0 +1,51 @@
+name: RYN configurator compatibility
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paired-contract:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      RYN_FIRMWARE_ROOT: ${{ github.workspace }}/firmware
+    defaults:
+      run:
+        working-directory: configurator
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: configurator
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: configurator/package-lock.json
+      - id: pair
+        name: Read tested firmware revision
+        run: |
+          node --input-type=module -e '
+          import fs from "node:fs";
+          const pair = JSON.parse(fs.readFileSync("compatibility/firmware.json", "utf8"));
+          if (!/^[a-f0-9]{40}$/.test(pair.firmwareRef) || !/^[\w.-]+\/[\w.-]+$/.test(pair.firmwareRepository)) throw new Error("Pair must use a repository and immutable commit SHA");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `repository=${pair.firmwareRepository}\nref=${pair.firmwareRef}\n`);
+          '
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pair.outputs.repository }}
+          ref: ${{ steps.pair.outputs.ref }}
+          path: firmware
+      - run: npm ci
+      - run: npm run upgrade:check -- --firmware ../firmware --report upgrade-report.json
+      - run: npm test
+      - run: npm run build:renderer
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: configurator-contract-report
+          path: configurator/upgrade-report.json

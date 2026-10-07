@@ -54,12 +54,14 @@ export function extractAvrPinMappings(source) {
     if (!functions[match[2]]) throw new Error(`Missing mapping: ${match[2]}`)
     layouts[match[1]] = functions[match[2]]
   }
-  return { platform: 'mega2560', sourceSha256: createHash('sha256').update(source).digest('hex'), layouts }
+  return { platform: 'mega2560', sourceSha256: createHash('sha256').update(source.replace(/\r\n?/g, '\n')).digest('hex'), layouts }
 }
+
+export const renderAvrMapping = mapping => `// Generated from firmware pinMapping.cpp by scripts/avr-pin-mapping.mjs.\nexport default ${JSON.stringify(mapping, null, 2)}\n`
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (!process.argv[2]) throw new Error('Usage: node scripts/avr-pin-mapping.mjs /path/to/speeduino/src/pins/pinMapping.cpp')
   const mapping = extractAvrPinMappings(readFileSync(process.argv[2], 'utf8'))
-  writeFileSync(new URL('../src/shared/protocol/avr-pin-mapping.js', import.meta.url), `// Generated from firmware pinMapping.cpp by scripts/avr-pin-mapping.mjs.\nexport default ${JSON.stringify(mapping, null, 2)}\n`)
+  writeFileSync(new URL('../src/shared/protocol/avr-pin-mapping.js', import.meta.url), renderAvrMapping(mapping))
   console.log(`Generated ${Object.keys(mapping.layouts).length} AVR layouts`)
 }

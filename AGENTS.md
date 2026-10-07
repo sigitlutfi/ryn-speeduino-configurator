@@ -18,6 +18,12 @@ npm run package
 # Create installers (Squirrel/Windows, Zip/macOS, Deb/Linux, RPM/Linux)
 npm run make
 
+# Run protocol, configuration, pin and upgrade-gate tests
+npm test
+
+# Compare the app to the reviewed firmware checkout
+npm run upgrade:check -- --firmware /path/to/firmware
+
 # No linting currently configured
 npm run lint
 ```
@@ -382,7 +388,10 @@ Automatically handles:
 
 ## Testing Notes
 
-- No test suite currently configured
+- Node tests are available through `npm test`; set `RYN_FIRMWARE_ROOT` to run
+  paired-checkout rejection tests as well. `upgrade:check --full` supplies it.
+- Follow `UPGRADE_WORKFLOW.md` for firmware/INI/pin changes; generated assets
+  come from `upgrade:sync` after the reviewed firmware baseline is committed.
 - Development uses mock serial (`src/shared/protocol/mock-serial.js`) for testing without hardware
 - Mock serial simulates realistic ECU responses with:
   - Modern protocol support (CRC32 validation)

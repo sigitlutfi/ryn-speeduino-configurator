@@ -1,7 +1,7 @@
 // Generated from firmware pinMapping.cpp by scripts/avr-pin-mapping.mjs.
 export default {
   "platform": "mega2560",
-  "sourceSha256": "b3d21dbb402402e5bf4f3948a1857d4c31b70afba6212984fa4a686552dfe527",
+  "sourceSha256": "5b9b08d434984a62089b14d17475ff3f9959c5aeba2457c80839c4664a8a9f2b",
   "layouts": {
     "1": {
       "injector1": 8,

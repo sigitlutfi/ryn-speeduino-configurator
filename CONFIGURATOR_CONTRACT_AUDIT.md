@@ -77,3 +77,20 @@ telemetry tests, and mock write/read/burn/CRC for pages 6 and 10.
 Vite production build passed. This is source/build verification of the web app;
 no interactive visual browser session or physical serial ECU test was performed.
 Firmware executable code did not change in this audit; its INI was corrected.
+
+## Repeatable paired upgrade gate
+
+The subsequent [upgrade workflow](UPGRADE_WORKFLOW.md) adds a reviewed firmware
+source baseline, actual-checkout INI/map checks and pinned cross-repository CI.
+The bundled schema now guards all existing ECU write entry points for the paired
+RYN signature. A project with the same signature but different field offsets,
+types, bit ranges, enums, scaling, defaults, page sizes or telemetry metadata is
+rejected until its embedded INI is explicitly updated. Help/dialog-only changes
+remain compatible. Other firmware signatures retain the previous signature
+matching behavior and are outside this paired certification.
+
+Use `npm run upgrade:check -- --firmware /path/to/firmware --full`; it runs the
+renderer and protocol tests, native firmware suites (through WSL on Windows),
+three AVR builds and compiled INI assertions. `upgrade:sync` derives the bundled
+assets only from a committed, reviewed firmware baseline. Failed commands mark
+the requested report failed, replacing any previous successful report.

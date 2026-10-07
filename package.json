@@ -6,6 +6,10 @@
   "main": ".vite/build/index.js",
   "private": false,
   "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build:renderer": "vite build --config vite.renderer.config.mjs --outDir .cache/upgrade-renderer",
+    "upgrade:check": "node scripts/upgrade-check.mjs",
+    "upgrade:sync": "node scripts/upgrade-check.mjs --sync",
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",

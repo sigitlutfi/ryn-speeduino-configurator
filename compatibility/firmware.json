@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "firmwareRepository": "sigitlutfi/speeduino",
+  "firmwareRef": "8279fc5fc7cb1ca69a21a7c6bfa31d90a0cdbcb5",
+  "signature": "speeduino 202504-ryn-perf-v3",
+  "contractSha256": "fd85c52ea15639ab9325b9921f7399c041878b4ed21df0d44895950d5d33a94f",
+  "iniSha256": "c67487f5f6558559b7e62478c6d97adfa1812741d9beb49f46e886f4dcabde62",
+  "ownershipSources": {
+    "src/shared/protocol/board-pins.js": "08b61d2d06858349ddaacbc9fa4108396dfebad5e9166680bb1476f48bb0b077",
+    "src/renderer/features/shared/utils/pinRegistry.js": "3db2663ed5544d12c415e750d15c514c48d806b54992c625c4cc513a33bb0440",
+    "src/shared/protocol/configuration-validation.js": "dac86649d440d95c49183c17cfd8fa2c6fc257928406a53af340c89f87323842"
+  }
+}
