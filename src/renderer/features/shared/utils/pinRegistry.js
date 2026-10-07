@@ -1,3 +1,5 @@
+import { boardPinContext, boardFixedClaims, physicalPinForField, fieldPinActive } from '../../../../shared/protocol/board-pins.js';
+
 const FIELD_POLICIES = {
   emappin: {
     activationField: "useEMAP",
@@ -406,7 +408,9 @@ function normalizePinLabel(label) {
   return normalized.toLowerCase();
 }
 
-function getPhysicalClaimKey(label, policy) {
+function getPhysicalClaimKey(label, policy, fieldName, rawValue, context) {
+  const physicalPin = context && physicalPinForField(fieldName, rawValue, label, context);
+  if (Number.isInteger(physicalPin)) return `mcu:${physicalPin}`;
   const pin = normalizePinLabel(label);
   if (!pin) return null;
   // Input/output direction does not make a digital MCU pin a different resource.
@@ -434,7 +438,7 @@ function classifySpecialLabel(label) {
   }
 
   if (normalized.toUpperCase() === "INVALID") {
-    return { kind: "none", displayLabel: "No Pin", claimable: false };
+    return { kind: "unavailable", displayLabel: "Invalid pin option", claimable: false };
   }
 
   return null;
@@ -591,6 +595,10 @@ function getDialogActivity(fieldName, parsedIni, decodedPages, fieldIndex) {
 }
 
 function getFieldActivity(fieldName, parsedIni, decodedPages, fieldIndex, policy) {
+  // Owning feature gates take precedence over a merely visible INI control.
+  if (policy?.activationField && !evaluateActivation(getFieldRawValue(policy.activationField, decodedPages, fieldIndex), policy.activationMode)) {
+    return { active: false, reason: `${policy.activationField} is disabled`, source: "firmware" };
+  }
   const dialogActivity = getDialogActivity(fieldName, parsedIni, decodedPages, fieldIndex);
   if (dialogActivity) {
     return dialogActivity;
@@ -724,24 +732,25 @@ function buildRowNote(assignment, activity) {
   return "Explicit active pin assignment found in project constants.";
 }
 
-function discoverIoRows(parsedIni, decodedPages, fieldIndex = buildFieldIndex(parsedIni)) {
+function discoverIoRows(parsedIni, decodedPages, fieldIndex = buildFieldIndex(parsedIni), context = boardPinContext(parsedIni, decodedPages)) {
   return Object.entries(fieldIndex)
     .filter(([fieldName, info]) => isPinAssignmentField(fieldName, info.meta))
     .map(([fieldName, info]) => {
       const pageData = getPageData(decodedPages, info.pageId);
-      const rawValue = pageData?.[fieldName];
+      const rawValue = pageData?.[fieldName] ?? info.meta.defaultValue ?? (context.verified ? 0 : undefined);
       const policy = resolveFieldPolicy(parsedIni, fieldName, info.meta);
       const assignment = resolveAssignment(fieldName, info.meta, rawValue, policy);
-      const activity = getFieldActivity(fieldName, parsedIni, decodedPages, fieldIndex, policy);
-      const status = classifyRowStatus(assignment, activity);
+      const activity = (context.verified && fieldPinActive(fieldName, context)) || getFieldActivity(fieldName, parsedIni, decodedPages, fieldIndex, policy);
+      let status = classifyRowStatus(assignment, activity);
       const displayLabel = resolveDisplayLabel(fieldName, decodedPages, fieldIndex);
       const direction = inferDirection(fieldName, assignment.displayLabel, policy, parsedIni);
       const normalizedClaimLabel =
         assignment.claimable ? normalizePinLabel(assignment.displayLabel) : null;
-      const configuredClaimKey =
-        assignment.claimable && normalizedClaimLabel
-          ? getPhysicalClaimKey(assignment.displayLabel, policy)
-          : null;
+      const physicalPin = physicalPinForField(fieldName, rawValue, assignment.displayLabel, context);
+      const missingDefault = context.verified && assignment.state === 'default' && !Number.isInteger(physicalPin);
+      if (missingDefault) status = 'unavailable';
+      const configuredClaimKey = Number.isInteger(physicalPin) ? `mcu:${physicalPin}` :
+        assignment.claimable && normalizedClaimLabel ? getPhysicalClaimKey(assignment.displayLabel, policy, fieldName, rawValue, context) : null;
       const claimKey = activity.active ? configuredClaimKey : null;
 
       return {
@@ -751,6 +760,7 @@ function discoverIoRows(parsedIni, decodedPages, fieldIndex = buildFieldIndex(pa
         pageId: info.pageId,
         rawValue,
         resolvedValue: assignment.displayLabel,
+        physicalPin,
         status,
         isActive: activity.active,
         activityReason: activity.reason,
@@ -759,7 +769,7 @@ function discoverIoRows(parsedIni, decodedPages, fieldIndex = buildFieldIndex(pa
         policy,
         configuredClaimKey,
         claimKey,
-        note: buildRowNote(assignment, activity),
+        note: missingDefault ? 'This board has no default pin for this function. Assign an explicit pin before enabling it.' : Number.isInteger(physicalPin) ? `${buildRowNote(assignment, activity)} Physical MCU pin D${physicalPin}.` : buildRowNote(assignment, activity),
       };
     })
     .sort((a, b) => {
@@ -769,9 +779,18 @@ function discoverIoRows(parsedIni, decodedPages, fieldIndex = buildFieldIndex(pa
     });
 }
 
-function buildPinRegistry(parsedIni, decodedPages) {
+function buildPinRegistry(parsedIni, decodedPages, options = {}) {
   const fieldIndex = buildFieldIndex(parsedIni);
-  const rows = discoverIoRows(parsedIni, decodedPages, fieldIndex);
+  const context = boardPinContext(parsedIni, decodedPages, options);
+  const rows = discoverIoRows(parsedIni, decodedPages, fieldIndex, context);
+  for (const fixed of boardFixedClaims(context)) rows.push({
+    field: fixed.field, displayLabel: fixed.label, direction: fixed.direction,
+    pageId: 'Board', rawValue: fixed.pin, resolvedValue: String(fixed.pin), physicalPin: fixed.pin,
+    status: 'board-default', isActive: true, assignmentState: 'default',
+    activitySource: 'firmware', activityReason: 'Fixed firmware routing',
+    configuredClaimKey: `mcu:${fixed.pin}`, claimKey: `mcu:${fixed.pin}`,
+    note: 'Fixed routing from the selected MCU and firmware channel build.',
+  });
   const assignedMap = {};
   const configuredMap = {};
 
@@ -787,10 +806,10 @@ function buildPinRegistry(parsedIni, decodedPages) {
   rows.forEach((row) => {
     const related = row.claimKey ? assignedMap[row.claimKey] || [] : [];
     const activeRelated = related.filter((entry) =>
-      ["assigned", "conflict"].includes(entry.status),
+      ["assigned", "board-default", "conflict"].includes(entry.status) && !allowedFactorySharing(row, entry, context),
     );
 
-    if (row.status === "assigned" && activeRelated.length > 1) {
+    if (["assigned", "board-default"].includes(row.status) && activeRelated.length > 1) {
       row.status = "conflict";
       row.note = `Actively shared with ${activeRelated
         .filter((entry) => entry.field !== row.field)
@@ -813,14 +832,22 @@ function buildPinRegistry(parsedIni, decodedPages) {
     rows,
     assignedMap,
     configuredMap,
+    context,
   };
+}
+
+function allowedFactorySharing(row, other, context) {
+  const fields = [row.field, other.field];
+  const vss = row.field === 'vssPin' ? row : other;
+  return fields.includes('vssPin') && fields.includes('$pinTrigger3') &&
+    vss.rawValue === 0 && context.pins?.pinVSS === context.pins?.pinTrigger3;
 }
 
 function formatPinOptionLabel(label, index, currentValue, fieldName, meta) {
   const policy = resolveFieldPolicy(null, fieldName, meta);
   const assignment = resolveAssignment(fieldName, meta, index, policy);
 
-  if (assignment.state === "unavailable") return null;
+  if (assignment.state === "unavailable") return Number(index) === Number(currentValue) ? assignment.displayLabel : null;
   if (assignment.state === "none" && Number(index) !== Number(currentValue)) return null;
   return assignment.displayLabel;
 }
@@ -842,26 +869,31 @@ function getPinOptionsForField(
       const assignment = resolveAssignment(fieldName, info?.meta, index, policy);
       const displayLabel = formatPinOptionLabel(label, index, currentValue, fieldName, info?.meta);
       const claimKey =
-        assignment.claimable
-          ? getPhysicalClaimKey(assignment.displayLabel, policy)
+        assignment.claimable || assignment.state === 'default'
+          ? getPhysicalClaimKey(assignment.displayLabel, policy, fieldName, index, registry.context)
           : null;
       const configuredOwners = claimKey
-        ? (registry.configuredMap?.[claimKey] || []).filter((entry) => entry.field !== fieldName)
+        ? (registry.configuredMap?.[claimKey] || []).filter((entry) => entry.field !== fieldName && !allowedFactorySharing({ field: fieldName, rawValue: index }, entry, registry.context))
         : [];
       const activeOwners = claimKey
-        ? (registry.assignedMap?.[claimKey] || []).filter((entry) => entry.field !== fieldName)
+        ? (registry.assignedMap?.[claimKey] || []).filter((entry) => entry.field !== fieldName && !allowedFactorySharing({ field: fieldName, rawValue: index }, entry, registry.context))
         : [];
+      const wrongKnockMode = fieldName === 'knock_pin' && registry.context.verified &&
+        ((registry.context.values.knock_mode === 1 && index >= 47) ||
+         (registry.context.values.knock_mode === 2 && index < 47));
+      const missingDefault = registry.context.verified && assignment.state === 'default' &&
+        !Number.isInteger(physicalPinForField(fieldName, index, assignment.displayLabel, registry.context));
       return {
         index,
-        label: displayLabel,
+        label: assignment.state === 'default' && Number.isInteger(physicalPinForField(fieldName, index, assignment.displayLabel, registry.context))
+          ? `${displayLabel} → D${physicalPinForField(fieldName, index, assignment.displayLabel, registry.context)}` : displayLabel,
         stateLabel: describeOptionState(assignment),
         assignmentState: assignment.state,
         claimable: assignment.claimable,
         owners: configuredOwners,
         activeOwners,
         disabled:
-          index !== Number(currentValue) &&
-          activeOwners.length > 0,
+          assignment.state === 'unavailable' || missingDefault || wrongKnockMode || (index !== Number(currentValue) && activeOwners.length > 0),
       };
     })
     .filter((option) => {
@@ -874,7 +906,19 @@ function getPinOptionsForField(
     });
 }
 
+function validateCustomPinAssignments(parsedIni, decodedPages, options = {}, fieldNames = []) {
+  const customPins = ['pitLimiterPin', 'rumbleIdlePin', 'alsSwitchPin', 'rollingPopBangPin'];
+  const registry = buildPinRegistry(parsedIni, decodedPages, options);
+  const missing = registry.rows.find(row => ['idleUpPin', 'idleUpOutputPin', 'CTPSPin'].includes(row.field) && fieldNames.includes(row.field) && row.isActive && row.rawValue === 0);
+  if (missing) return `${missing.displayLabel} requires an explicit pin; zero does not select a board default.`;
+  const missingDefault = registry.rows.find(row => fieldNames.includes(row.field) && row.isActive && row.assignmentState === 'default' && row.status === 'unavailable');
+  if (missingDefault) return `${missingDefault.displayLabel} has no default route on this board; assign an explicit pin.`;
+  const conflict = registry.rows.find(row => customPins.includes(row.field) && fieldNames.includes(row.field) && row.status === 'conflict');
+  return conflict ? `${conflict.displayLabel} conflicts with ${registry.assignedMap[conflict.claimKey].filter(row => row.field !== conflict.field).map(row => row.displayLabel).join(', ')}.` : null;
+}
+
 export {
+  validateCustomPinAssignments,
   buildFieldIndex,
   buildPinRegistry,
   discoverIoRows,

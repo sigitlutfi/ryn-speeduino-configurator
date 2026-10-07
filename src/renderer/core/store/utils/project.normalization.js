@@ -302,6 +302,10 @@ export function normalizeProjectV3(raw, parsedIni = null) {
     schemaVersion: SCHEMA_VERSION,
     projectName: raw.projectName || raw.name || "Unnamed Project",
     description: raw.description ?? "",
+    hardware: {
+      pinMapPlatform: raw.hardware?.pinMapPlatform === 'mega2560' ? 'mega2560' : '',
+      channelBuild: ['standard', '6-3', '8-1'].includes(raw.hardware?.channelBuild) ? raw.hardware.channelBuild : '',
+    },
     engine: {
       displacement: null,
       cylinders: null,

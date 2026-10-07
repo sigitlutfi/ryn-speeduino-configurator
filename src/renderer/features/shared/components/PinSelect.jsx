@@ -10,6 +10,7 @@ import { AlertTriangle, ChevronDown, Lock, Pin, Waypoints } from "lucide-react";
 import { useStore } from "../../../core/store.js";
 import { buildPinRegistry, getPinOptionsForField } from "../utils/pinRegistry";
 import { getDecodedPages } from "../utils/projectConstants.js";
+import { projectPinMapOptions } from '../../../../shared/protocol/board-pins.js';
 
 function formatOptionTitle(option) {
   if (!option) return "Unavailable";
@@ -34,8 +35,8 @@ export default function PinSelect({
   );
 
   const registry = useMemo(
-    () => buildPinRegistry(parsedIni, decodedPages),
-    [parsedIni, decodedPages],
+    () => buildPinRegistry(parsedIni, decodedPages, projectPinMapOptions(currentProject)),
+    [parsedIni, decodedPages, currentProject?.hardware],
   );
 
   const options = useMemo(
@@ -52,9 +53,9 @@ export default function PinSelect({
 
   const currentOption =
     options.find((option) => option.index === Number(value)) || options[0];
-  const currentOwners = currentOption?.owners || [];
+  const currentOwners = currentOption?.activeOwners || [];
   const availableCount = options.filter((option) => !option.disabled).length;
-  const usedOptions = options.filter((option) => option.owners.length > 0);
+  const usedOptions = options.filter((option) => option.activeOwners.length > 0);
   const reservedPreview = usedOptions.slice(0, 6);
 
   const [isOpen, setIsOpen] = useState(false);
@@ -132,7 +133,7 @@ export default function PinSelect({
     if (
       disabled ||
       option?.disabled ||
-      (option?.owners?.length > 0 && option.index !== Number(value))
+      (option?.activeOwners?.length > 0 && option.index !== Number(value))
     ) {
       return;
     }
@@ -158,6 +159,7 @@ export default function PinSelect({
               {description}
             </p>
           )}
+          {registry.context.warning && <p className="text-xs text-amber-200">{registry.context.warning}</p>}
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={`rounded-full border px-2 py-1 text-[8px] font-black uppercase tracking-[0.16em] ${selectionTone}`}
@@ -218,7 +220,7 @@ export default function PinSelect({
                   {options.map((option) => {
                     const isCurrent = option.index === Number(value);
                     const title = formatOptionTitle(option);
-                    const hasOwners = option.owners.length > 0;
+                    const hasOwners = option.activeOwners.length > 0;
                     const isLocked =
                       option.disabled || (hasOwners && !isCurrent);
                     const ownerText = option.owners
@@ -280,7 +282,7 @@ export default function PinSelect({
                             {!hasOwners &&
                               option.assignmentState === "explicit" && (
                                 <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.12em] text-[#71717a]">
-                                  Available pin
+                                  {registry.context.verified ? 'No active firmware owner detected' : 'Board availability unverified'}
                                 </div>
                               )}
                           </div>

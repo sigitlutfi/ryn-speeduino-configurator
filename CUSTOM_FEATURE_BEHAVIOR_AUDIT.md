@@ -86,3 +86,7 @@ verification was performed. Board pin reservations and analog/digital physical
 aliases remain incomplete in the web registry; firmware routing rejects occupied
 custom input pins at initialization. Confirm the actual board pinout and bench
 behavior before relying on the screen's free-pin choices.
+
+Follow-up: the [default pin audit](PIN_DEFAULT_AUDIT.md) resolves the web's AVR
+board defaults and physical aliases with explicit MCU/channel selections and
+additional firmware reservation checks. Other MCU/PCB mappings remain unverified.

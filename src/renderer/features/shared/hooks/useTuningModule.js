@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../../../core/store.js";
 import { getDecodedPages } from "../utils/projectConstants.js";
 import { validateConfigurationValues } from "../../../../shared/protocol/configuration-validation.js";
+import { projectPinMapOptions } from '../../../../shared/protocol/board-pins.js';
+import { validateCustomPinAssignments } from '../utils/pinRegistry.js';
 
 /**
  * Professional Tuning Module Hook.
@@ -264,6 +266,15 @@ export function useTuningModule(targets, options = {}) {
       setSaveStatus("error");
       notify(rangeError, "error");
       return { ok: false, error: rangeError };
+    }
+    const scoped = buildScopedPayload();
+    const candidatePages = { ...storedPages };
+    for (const [page, values] of Object.entries(scoped)) candidatePages[page] = { ...candidatePages[page], ...values };
+    const pinError = validateCustomPinAssignments(parsedIni, candidatePages, projectPinMapOptions(currentProject), Object.values(scoped).flatMap(Object.keys));
+    if (pinError) {
+      setSaveStatus('error');
+      notify(pinError, 'error');
+      return { ok: false, error: pinError };
     }
     if (isBurn && !isConnected) {
       notify("Device not connected", "error");

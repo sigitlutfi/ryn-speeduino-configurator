@@ -42,6 +42,11 @@ sections 4.4.7 and 6.1.2–6.1.3, and the formulas in the repository INI.
 
 ## Remaining limits and follow-up
 
+Follow-up: the [default pin audit](PIN_DEFAULT_AUDIT.md) resolves item 1 for
+the supported Mega/AVR layouts, with explicit MCU/channel selections. Physical
+web maps for other MCU families and connector-level PCB wiring remain outside
+that verified scope. The numbered limits below describe the original audit.
+
 1. **Board pin map coverage:** the web pin registry tracks configurable resources,
    but does not fully reserve every fixed/default injector, ignition, trigger,
    sensor and auxiliary pin for every board. Analog labels and digital aliases

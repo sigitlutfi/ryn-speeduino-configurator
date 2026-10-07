@@ -16,6 +16,7 @@ import {
   getPageData,
 } from "../shared/utils/pinRegistry";
 import { getDecodedPages } from "../shared/utils/projectConstants.js";
+import { projectPinMapOptions } from '../../../shared/protocol/board-pins.js';
 
 const STATUS_STYLES = {
   assigned: {
@@ -244,9 +245,10 @@ export default function IOSummary() {
   );
   const fieldIndex = useMemo(() => buildFieldIndex(parsedIni), [parsedIni]);
 
-  const ioRows = useMemo(() => {
-    return buildPinRegistry(parsedIni, decodedPages).rows;
-  }, [parsedIni, decodedPages]);
+  const updateProjectField = useStore(s => s.updateProjectField);
+  const registry = useMemo(() => buildPinRegistry(parsedIni, decodedPages, projectPinMapOptions(currentProject)),
+    [parsedIni, decodedPages, currentProject?.hardware]);
+  const ioRows = registry.rows;
 
   const sectionRows = useMemo(() => {
     const grouped = {};
@@ -343,6 +345,27 @@ export default function IOSummary() {
 
       <div className="flex-1 overflow-y-auto px-8 pb-10">
         <div className="mx-auto max-w-[1560px] space-y-4">
+          <div className="rounded-2xl border border-white/10 p-4 space-y-3 text-xs">
+            <p>Choose the MCU and compiled firmware channels to resolve board defaults. These project settings do not change ECU pins.</p>
+            <label className="block">MCU pin map
+              <select className="ml-3 bg-black border border-white/20 rounded p-2" value={currentProject.hardware?.pinMapPlatform || ''}
+                onChange={event => updateProjectField('hardware.pinMapPlatform', event.target.value)}>
+                <option value="">Unverified / other MCU</option>
+                <option value="mega2560">Arduino Mega 2560 (AVR)</option>
+              </select>
+            </label>
+            <label className="block">Firmware channel build
+              <select className="ml-3 bg-black border border-white/20 rounded p-2" value={currentProject.hardware?.channelBuild || ''}
+                onChange={event => updateProjectField('hardware.channelBuild', event.target.value)}>
+                <option value="">Unknown — reserve all mapped channels</option>
+                <option value="standard">Standard Mega: 4 injectors / 5 ignition</option>
+                <option value="6-3">6 injectors / 3 ignition</option>
+                <option value="8-1">8 injectors / 1 ignition</option>
+              </select>
+            </label>
+            {registry.context.warning && <p className="text-amber-200">{registry.context.warning}</p>}
+            <p className="text-white/50">Pin numbers refer to MCU pins, not connector terminals. Save the project after changing these selections.</p>
+          </div>
           <div className="grid gap-3 lg:grid-cols-5">
             <StatCard
               label="Detected I/O"
