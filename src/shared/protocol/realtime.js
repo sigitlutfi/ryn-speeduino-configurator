@@ -93,13 +93,20 @@ export function parseRealtime(bytes) {
     alsSwitch:        false,
     alsTimingCorr:    0,
     alsFuelCorr:      100,
-    alsActiveTime:    0
+    alsActiveTime:    0,
+    rollingPopBangActive: false,
+    rollingPopBangSwitch: false,
+    rollingPopBangActiveTime: 0,
+    rollingPopBangCutCounter: 0,
+    rollingPopBangTimingCorr: 0,
+    rollingPopBangFuelCorr: 100
   };
 
   if (isExtended) {
     const perfByte1 = b[139];
     const perfByte2 = b[140];
     performance = {
+      ...performance,
       pitLimiterActive: !!(perfByte1 & 0x01),
       pitLimiterSwitch: !!(perfByte1 & 0x02),
       rumbleIdleActive: !!(perfByte1 & 0x04),
@@ -110,6 +117,17 @@ export function parseRealtime(bytes) {
       alsFuelCorr:      b[142],
       alsActiveTime:    hasExtendedAlsTimer ? (b[143] | (b[144] << 8)) : b[143]
     };
+  }
+
+  if (bytes.length >= 152) {
+    Object.assign(performance, {
+      rollingPopBangActive: !!(b[145] & 0x01),
+      rollingPopBangSwitch: !!(b[145] & 0x02),
+      rollingPopBangActiveTime: b[146] | (b[147] << 8),
+      rollingPopBangCutCounter: b[148] | (b[149] << 8),
+      rollingPopBangTimingCorr: new Int8Array([b[150]])[0],
+      rollingPopBangFuelCorr: b[151],
+    });
   }
 
   const loopsPerSecond = b[26] | (b[27] << 8); // uint16

@@ -550,6 +550,9 @@ class SerialService {
 
     this.parser.reset();
 
+    // This read handles raw and wrapped responses itself until it settles.
+    // Keep the global parser from interpreting raw bytes as frame headers.
+    this.parser.enableRawMode(0);
     const outputBuffer = await new Promise((resolve, reject) => {
       let buffer = Buffer.alloc(0);
       let unsubscribe = null;
@@ -593,10 +596,6 @@ class SerialService {
 
       const handleData = (bytes) => {
         const chunk = Buffer.from(bytes);
-
-        if (chunk.length === 145) {
-          return;
-        }
 
         buffer = Buffer.concat([buffer, chunk]);
 

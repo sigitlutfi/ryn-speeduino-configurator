@@ -92,16 +92,8 @@ export class ModernProtocolParser {
    */
   _parseMessages() {
     while (this.buffer.length > 0) {
-      // Realtime packets are NOT wrapped (legacy format, broadcast at 10Hz)
-      if (this.buffer.length === 145) {
-        // This looks like a realtime packet
-        const packet = this.buffer.slice(0, this.buffer.length);
-        this._emit("realtime", packet);
-        this.buffer = Buffer.alloc(0);
-        this.expectedLength = null;
-        return; // Realtime packets arrive continuously
-      }
-
+      // Raw output-channel reads are assembled by the request's INI size.
+      // A serial chunk's length alone cannot identify a realtime packet.
       // Modern protocol: [Length 2B BE] [Payload] [CRC32 4B BE]
       // NOTE: Speeduino uses BIG ENDIAN for length and CRC!
       if (this.expectedLength === null && this.buffer.length >= 2) {

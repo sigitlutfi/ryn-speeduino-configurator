@@ -5,8 +5,9 @@
  * Supports modern protocol with CRC32 validation.
  */
 
-const PACKET_SIZE = 138;
-const OUTPUT_CHANNELS_SIZE = 130;
+const PACKET_SIZE = 152;
+const OUTPUT_CHANNELS_SIZE = PACKET_SIZE;
+const FIRMWARE_SIGNATURE = 'speeduino 202504-ryn-perf-v2';
 const NUM_PAGES = 16; // Pages 0-15
 const PAGE_SIZE = 512; // Standard page size
 
@@ -127,12 +128,15 @@ function buildRealtimePacket() {
   buf[91] = 0;                           // dwell high
   buf[102] = ve;                         // current VE
   buf[116] = iat;                        // fuelTemp (same as IAT for mock)
+  buf[139] = 0x08;                       // Rumble beat fires while inactive
+  buf[142] = 100;                        // Neutral ALS fuel correction
+  buf[151] = 100;                        // Neutral pop/bang fuel correction
 
   return buf;
 }
 
 function buildOutputChannelsBlock() {
-  return buildRealtimePacket().slice(0, OUTPUT_CHANNELS_SIZE);
+  return Buffer.from(buildRealtimePacket()).subarray(0, OUTPUT_CHANNELS_SIZE);
 }
 
 /**
@@ -246,7 +250,7 @@ export function createMockSerial(onData) {
     } else if (cmd === 'Q') {
       // Firmware signature
       console.log(`[Mock ECU] Firmware signature request`);
-      const sig = 'speeduino 202504-dev';
+      const sig = FIRMWARE_SIGNATURE;
       const response = Buffer.alloc(1 + sig.length);
       response[0] = 0x00; // OK status
       response.write(sig, 1, 'ascii');
@@ -278,12 +282,12 @@ export function createMockSerial(onData) {
     }
 
     if (cmd === "Q") {
-      setTimeout(() => onData(Buffer.from("speeduino 202501", "ascii")), 5);
+      setTimeout(() => onData(Buffer.from(FIRMWARE_SIGNATURE, "ascii")), 5);
       return true;
     }
 
     if (cmd === "S") {
-      setTimeout(() => onData(Buffer.from("Speeduino 2025.01.6", "ascii")), 5);
+      setTimeout(() => onData(Buffer.from("Speeduino 2025.04-dev", "ascii")), 5);
       return true;
     }
 
