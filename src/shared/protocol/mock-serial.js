@@ -5,9 +5,11 @@
  * Supports modern protocol with CRC32 validation.
  */
 
+import iniContract from './ini-contract.js';
+
 const PACKET_SIZE = 152;
 const OUTPUT_CHANNELS_SIZE = PACKET_SIZE;
-const FIRMWARE_SIGNATURE = 'speeduino 202504-ryn-perf-v3';
+const FIRMWARE_SIGNATURE = iniContract.signature;
 const NUM_PAGES = 16; // Pages 0-15
 const PAGE_SIZE = 512; // Standard page size
 const PAGE_SIZES = [0, 128, 288, 288, 128, 288, 143, 240, 384, 192, 220, 288, 192, 128, 288, 256];
