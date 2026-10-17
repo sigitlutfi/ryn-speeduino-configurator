@@ -2,9 +2,13 @@
 
 export function evaluateRuntimeProfileGuards(realtime, requirements = {}) {
   const reasons = [];
-  const rpm = realtime?.rpm ?? 0;
-  const tps = realtime?.tps ?? 0;
-  const cranking = !!realtime?.engine?.cranking;
+  const rpm = realtime?.rpm;
+  const tps = realtime?.tps;
+  const cranking = realtime?.engine?.cranking;
+  if (!Number.isFinite(rpm) || rpm < 0 || !Number.isFinite(tps) || tps < 0 || typeof cranking !== "boolean" || typeof realtime?.engine?.running !== "boolean") {
+    reasons.push("ECU telemetry is missing or invalid");
+  }
+  if (requirements.max_rpm === 0 && realtime?.engine?.running) reasons.push("Stop the engine before writing a profile");
 
   if (requirements.engine_not_cranking !== false && cranking) {
     reasons.push("Engine is cranking");

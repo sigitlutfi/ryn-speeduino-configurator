@@ -4,6 +4,7 @@ import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
 import PinSelect from "../shared/components/PinSelect";
 import {
+  GroupHeader,
   SelectRow,
   InputField,
   InfoCard,
@@ -22,6 +23,7 @@ const FLATSHIFT_FIELDS = [
 
 const FlatShift = () => {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -47,20 +49,6 @@ const FlatShift = () => {
 
   const flatSEnable = getValue("flatSEnable");
 
-  const SectionHeader = ({ title, icon: Icon, theme = "orange" }) => (
-    <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-2">
-      <div
-        className={`w-1 h-3 bg-neon-${theme} shadow-glow-${theme} rounded-full`}
-      />
-      <span className="text-[9px] font-black text-white/80 uppercase tracking-[0.2em]">
-        {title}
-      </span>
-      {Icon && (
-        <Icon size={12} className={`ml-auto text-neon-${theme} opacity-30`} />
-      )}
-    </div>
-  );
-
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden h-screen animate-in fade-in duration-700">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-neon-red/18 via-neon-red/8 to-transparent" />
@@ -85,13 +73,13 @@ const FlatShift = () => {
         <div className="max-w-[1400px] mx-auto space-y-6 pb-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-12 p-5 rounded-3xl glass-card border border-white/5 bg-gradient-to-r from-neon-orange/[0.02] to-transparent">
-              <SectionHeader
+              <GroupHeader
                 title="Global Hardware"
                 icon={Settings}
                 theme="orange"
               />
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                <PinSelect
+                <PinSelect decodedPages={pinPages}
                   label="Input Pin"
                   fieldName="launchPin"
                   value={getValue("launchPin")}
@@ -134,7 +122,7 @@ const FlatShift = () => {
           <div
             className={`p-6 rounded-[32px] glass-card border transition-all ${flatSEnable > 0 ? "border-neon-orange/30 bg-neon-orange/[0.01]" : "border-white/5 opacity-40 grayscale"}`}
           >
-            <SectionHeader title="Shift Strategy" icon={Zap} theme="orange" />
+            <GroupHeader title="Shift Strategy" icon={Zap} theme="orange" />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
               <div className="space-y-6">

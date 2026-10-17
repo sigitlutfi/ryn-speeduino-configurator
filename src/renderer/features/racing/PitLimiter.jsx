@@ -1,3 +1,4 @@
+import { useLiveTelemetry } from '../shared/hooks/useLiveTelemetry.js';
 import React from "react";
 import { Snail, ShieldAlert, Zap, Target, Gauge } from "lucide-react";
 import { useStore } from "../../core/store.js";
@@ -29,6 +30,7 @@ const PIT_LIMITER_FIELDS = [
 
 export default function PitLimiter() {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -41,7 +43,8 @@ export default function PitLimiter() {
     isReady,
   } = useTuningModule(PIT_LIMITER_FIELDS);
 
-  const { realtime, notify } = useStore();
+  const notify = useStore(s => s.notify);
+  const { realtime, status: telemetryStatus } = useLiveTelemetry();
   const isActive = realtime?.performance?.pitLimiterActive;
   const switchState = realtime?.performance?.pitLimiterSwitch;
 
@@ -177,7 +180,7 @@ export default function PitLimiter() {
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${switchState ? "text-white" : "text-white/20"}`}
                 >
-                  {switchState ? "INPUT ACTIVE" : "INPUT INACTIVE"}
+                  {!realtime ? 'NO LIVE DATA' : switchState ? 'INPUT ACTIVE' : 'INPUT INACTIVE'}
                 </span>
               </div>
               <Target
@@ -193,7 +196,7 @@ export default function PitLimiter() {
                   Current Speed
                 </span>
                 <span className="text-xs font-orbitron font-black text-white uppercase italic">
-                  {realtime?.vss ?? 0}{" "}
+                  {realtime?.vss ?? '—'}{" "}
                   <span className="text-[8px] opacity-40">KM/H</span>
                 </span>
               </div>
@@ -282,7 +285,7 @@ export default function PitLimiter() {
                   <h3 className="mb-6 border-l-2 border-neon-red/60 pl-4 text-[9px] font-black uppercase tracking-[0.3em] text-white/60">
                     Hardware Interface
                   </h3>
-                  <PinSelect
+                  <PinSelect decodedPages={pinPages}
                     label="Activation Pin"
                     fieldName="pitLimiterPin"
                     value={getValue("pitLimiterPin")}

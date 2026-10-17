@@ -65,8 +65,9 @@ export class ModernProtocolParser {
 
     // If in raw mode, accumulate until expected bytes received
     if (this.rawMode) {
-      console.log(`[Parser] Raw mode: received ${newData.length} bytes (total: ${this.buffer.length + newData.length}/${this.rawExpectedBytes})`);
-      this.buffer = Buffer.concat([this.buffer, newData]);
+      // Open-ended passthrough has no assembly target. Its consumer owns
+      // buffering; retaining another copy here only grows memory usage.
+      if (this.rawExpectedBytes > 0) this.buffer = Buffer.concat([this.buffer, newData]);
 
       // Emit each chunk immediately for streaming
       this._emit("rawData", newData);
@@ -218,7 +219,6 @@ export class ModernProtocolParser {
    * @param {number} expectedBytes - Number of bytes to expect
    */
   enableRawMode(expectedBytes) {
-    console.log(`[Parser] Enabling raw mode, expecting ${expectedBytes} bytes`);
     this.rawMode = true;
     this.rawExpectedBytes = expectedBytes;
     this.buffer = Buffer.alloc(0);

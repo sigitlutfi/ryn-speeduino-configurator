@@ -1,4 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { serialService } from '../../core/services/serialService.js';
+import { assertStoppedForReset, recoverECUConnection } from '../../core/services/ecuRecovery.js';
+import { assertCompatibleContract } from '../../../shared/protocol/contract.js';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   AlertTriangle,
   Cpu,
@@ -21,13 +24,18 @@ function truncatePath(value = "") {
 
 export default function FlashFirmware() {
   const currentProject = useStore((s) => s.currentProject);
-  const connectionStatus = useStore((s) => s.connection.status);
-  const setConnectionPort = useStore((s) => s.setConnectionPort);
-  const setConnectionBaud = useStore((s) => s.setConnectionBaud);
+  const connection = useStore(s => s.connection);
+  const connectionStatus = connection.status;
   const notify = useStore((s) => s.notify);
-  const setOperation = useStore((s) => s.setOperation);
+  const operation = useStore(s => s.operation);
+  const owner = useRef(`firmware-ui-${Date.now()}-${Math.random()}`);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const setOperation = value => useStore.getState().setOperation({ ...value, owner: owner.current });
   const updateOperation = useStore((s) => s.updateOperation);
-  const clearOperation = useStore((s) => s.clearOperation);
+  const clearOperation = useCallback(() => {
+    if (useStore.getState().operation?.owner === owner.current) useStore.getState().clearOperation();
+  }, []);
 
   const [ports, setPorts] = useState([]);
   const [selectedPort, setSelectedPort] = useState("");
@@ -43,18 +51,17 @@ export default function FlashFirmware() {
   const [flashError, setFlashError] = useState("");
   const [logLines, setLogLines] = useState([]);
   const [pendingReconnect, setPendingReconnect] = useState(false);
-  const [activeAction, setActiveAction] = useState("flash");
   const [confirmAction, setConfirmAction] = useState(null);
 
   const projectSignature = currentProject?.ini?.signature || "Unknown";
   const ecuSignature = currentProject?.ecu?.signature || "Unknown";
   const hasEmbeddedIni = Boolean(currentProject?.ini?.content);
-  const isBusy = isFlashing || isResettingEeprom || isRebootingEcu;
+  const isBusy = isFlashing || isResettingEeprom || isRebootingEcu || pendingReconnect || !!operation;
   const canFlash = Boolean(
     selectedPort && hexPath && hasEmbeddedIni && !isBusy,
   );
   const canResetEepromOnly = Boolean(selectedPort && hasEmbeddedIni && !isBusy);
-  const canRebootEcu = Boolean(selectedPort && !isBusy);
+  const canRebootEcu = Boolean(selectedPort && !isBusy && connectionStatus === "connected" && ["ready", "review"].includes(connection.validationStatus) && connection.port === selectedPort);
 
   const portOptions = useMemo(
     () =>
@@ -94,7 +101,7 @@ export default function FlashFirmware() {
         setSelectedPort((current) =>
           current && realPorts.some((port) => port.path === current)
             ? current
-            : realPorts[0].path,
+            : realPorts.find(port => port.path === useStore.getState().connection.port)?.path || realPorts[0].path,
         );
       } else {
         setSelectedPort("");
@@ -152,8 +159,8 @@ export default function FlashFirmware() {
 
       if (payload.type === "completed") {
         setProgress(100);
-        setPhase("completed");
-        setStatusText(payload.message || "Firmware flash complete");
+        setPhase("device-complete");
+        setStatusText("Device operation completed; connection recovery pending");
       }
 
       if (payload.type === "error") {
@@ -167,54 +174,37 @@ export default function FlashFirmware() {
     return () => unsubscribe?.();
   }, [clearOperation, updateOperation]);
 
-  useEffect(() => {
-    if (!pendingReconnect) return;
+  const captureAction = () => {
+    const state = useStore.getState();
+    if (state.operation) throw new Error('Another ECU operation is running');
+    const epoch = state.projectEpoch, ini = state.parsedIni;
+    const paused = state.connection.autoReconnectPaused;
+    const generation = state.connection.recoveryGeneration;
+    state.setAutoReconnectPaused(true);
+    return { release: () => {
+      if (useStore.getState().connection.recoveryGeneration === generation) useStore.getState().setAutoReconnectPaused(paused);
+    }, check: () => {
+      const current = useStore.getState();
+      if (current.connection.recoveryGeneration !== generation || !alive.current || current.projectEpoch !== epoch || current.parsedIni !== ini) throw new Error('Project changed or firmware view closed; recovery cancelled');
+    } };
+  };
 
-    if (connectionStatus === "connected") {
-      setPendingReconnect(false);
-      setPhase("validated");
-      setStatusText("ECU reconnected and handshake completed");
-      clearOperation();
-      notify(
-        activeAction === "reset-eeprom"
-          ? "EEPROM reset completed and ECU reconnected"
-          : activeAction === "reboot-ecu"
-            ? "ECU reboot completed and connection restored"
-            : "Firmware flashed and ECU reconnected",
-        "success",
-        3000,
-      );
-      return;
-    }
-
-    if (connectionStatus === "error") {
-      setPendingReconnect(false);
-      setPhase("error");
-      setStatusText(
-        activeAction === "reset-eeprom"
-          ? "EEPROM reset succeeded, but ECU reconnect failed"
-          : activeAction === "reboot-ecu"
-            ? "ECU reboot succeeded, but reconnect failed"
-            : "Flash succeeded, but ECU reconnect failed",
-      );
-      clearOperation();
-      notify(
-        activeAction === "reset-eeprom"
-          ? "EEPROM reset completed, but reconnect failed"
-          : activeAction === "reboot-ecu"
-            ? "ECU reboot completed, but reconnect failed"
-            : "Firmware flashed, but reconnect failed",
-        "warning",
-        4000,
-      );
-    }
-  }, [
-    activeAction,
-    clearOperation,
-    connectionStatus,
-    notify,
-    pendingReconnect,
-  ]);
+  const restoreECUConnection = async context => {
+    context.check();
+    setPendingReconnect(true);
+    setPhase('reconnecting');
+    // The global connect validator owns its own compare operation.
+    clearOperation();
+    const result = await recoverECUConnection({ serial: window.serial, getState: useStore.getState,
+      port: selectedPort, check: context.check, onStage: setStatusText });
+    context.check();
+    if (!result.ok) throw new Error(result.error);
+    setPendingReconnect(false);
+    setProgress(100);
+    setPhase(result.review ? 'review' : 'validated');
+    setStatusText(result.review ? 'ECU online with fresh telemetry. Review tune differences before use.' : 'ECU recovered: handshake, configuration and fresh telemetry verified');
+    notify(result.review ? 'ECU recovered; tune differences require review' : 'ECU recovery verified', result.review ? 'warning' : 'success', 4500);
+  };
 
   const handlePickHex = async () => {
     const picked = await window.firmware.pickHex();
@@ -228,8 +218,10 @@ export default function FlashFirmware() {
   const handleFlash = async () => {
     if (!canFlash) return;
 
+    let context;
+    try { context = captureAction(); } catch (error) { notify(error.message, "error"); return; }
+
     setIsFlashing(true);
-    setActiveAction("flash");
     setProgress(0);
     setPhase("preflight");
     setStatusText("Preparing firmware flash");
@@ -246,12 +238,14 @@ export default function FlashFirmware() {
       scope: "firmware",
     });
 
+    let deviceActionComplete = false;
     try {
       if (connectionStatus === "connected") {
         appendLog("Disconnecting active ECU session before flash");
         await window.serial.disconnect();
       }
 
+      context.check();
       const result = await window.firmware.flash({
         port: selectedPort,
         hexPath,
@@ -262,35 +256,20 @@ export default function FlashFirmware() {
         throw new Error(result?.error || "Firmware flash failed");
       }
 
-      setPhase("reconnecting");
-      setStatusText("Firmware flashed. Reconnecting to ECU...");
-      updateOperation({
-        type: "firmware-flash",
-        stage: "reconnecting",
-        label: "Reconnecting to ECU",
-        current: 100,
-        total: 100,
-        scope: "firmware",
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 1800));
-
-      setConnectionPort(selectedPort);
-      setConnectionBaud(115200);
-      setPendingReconnect(true);
-
-      const reconnectResult = await window.serial.connect(selectedPort, 115200);
-      if (!reconnectResult?.ok) {
-        throw new Error(reconnectResult?.error || "Reconnect request failed");
-      }
+      deviceActionComplete = true;
+      await new Promise(resolve => setTimeout(resolve, 1400));
+      context.check();
+      await restoreECUConnection(context);
     } catch (error) {
       setPhase("error");
       setFlashError(error.message || "Firmware flash failed");
-      setStatusText("Flash failed");
+      setStatusText(deviceActionComplete ? "Firmware flash completed; recovery failed" : "Flash failed");
       setPendingReconnect(false);
       clearOperation();
-      notify(`Firmware flash failed: ${error.message}`, "error", 4500);
+      notify(`${deviceActionComplete ? "Firmware flash completed; recovery failed" : "Firmware flash failed"}: ${error.message}`, "error", 4500);
     } finally {
+      clearOperation();
+      context.release();
       setIsFlashing(false);
     }
   };
@@ -298,8 +277,10 @@ export default function FlashFirmware() {
   const handleResetEepromOnly = async () => {
     if (!canResetEepromOnly) return;
 
+    let context;
+    try { context = captureAction(); } catch (error) { notify(error.message, "error"); return; }
+
     setIsResettingEeprom(true);
-    setActiveAction("reset-eeprom");
     setProgress(0);
     setPhase("preflight");
     setStatusText("Preparing EEPROM reset");
@@ -316,12 +297,14 @@ export default function FlashFirmware() {
       scope: "firmware",
     });
 
+    let deviceActionComplete = false;
     try {
       if (connectionStatus === "connected") {
         appendLog("Disconnecting active ECU session before EEPROM reset");
         await window.serial.disconnect();
       }
 
+      context.check();
       const result = await window.firmware.resetEeprom({
         port: selectedPort,
       });
@@ -330,35 +313,20 @@ export default function FlashFirmware() {
         throw new Error(result?.error || "EEPROM reset failed");
       }
 
-      setPhase("reconnecting");
-      setStatusText("EEPROM reset complete. Reconnecting to ECU...");
-      updateOperation({
-        type: "firmware-flash",
-        stage: "reconnecting",
-        label: "Reconnecting to ECU",
-        current: 100,
-        total: 100,
-        scope: "firmware",
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 1800));
-
-      setConnectionPort(selectedPort);
-      setConnectionBaud(115200);
-      setPendingReconnect(true);
-
-      const reconnectResult = await window.serial.connect(selectedPort, 115200);
-      if (!reconnectResult?.ok) {
-        throw new Error(reconnectResult?.error || "Reconnect request failed");
-      }
+      deviceActionComplete = true;
+      await new Promise(resolve => setTimeout(resolve, 1400));
+      context.check();
+      await restoreECUConnection(context);
     } catch (error) {
       setPhase("error");
       setFlashError(error.message || "EEPROM reset failed");
-      setStatusText("EEPROM reset failed");
+      setStatusText(deviceActionComplete ? "EEPROM reset completed; recovery failed" : "EEPROM reset failed");
       setPendingReconnect(false);
       clearOperation();
-      notify(`EEPROM reset failed: ${error.message}`, "error", 4500);
+      notify(`${deviceActionComplete ? "EEPROM reset completed; recovery failed" : "EEPROM reset failed"}: ${error.message}`, "error", 4500);
     } finally {
+      clearOperation();
+      context.release();
       setIsResettingEeprom(false);
     }
   };
@@ -366,8 +334,10 @@ export default function FlashFirmware() {
   const handleRebootEcu = async () => {
     if (!canRebootEcu) return;
 
+    let context;
+    try { context = captureAction(); } catch (error) { notify(error.message, "error"); return; }
+
     setIsRebootingEcu(true);
-    setActiveAction("reboot-ecu");
     setProgress(0);
     setPhase("preflight");
     setStatusText("Preparing ECU reboot");
@@ -384,7 +354,34 @@ export default function FlashFirmware() {
       scope: "firmware",
     });
 
+    let deviceActionComplete = false, resetSession = null, resetPrepared = false;
     try {
+      const initial = useStore.getState();
+      assertCompatibleContract(initial);
+      if (initial.connection.status !== 'connected' || initial.connection.handshakeStatus !== 'ok' || !['ready', 'review'].includes(initial.connection.validationStatus) || initial.connection.port !== selectedPort) {
+        throw new Error('Connect and verify the selected ECU before reset');
+      }
+      if (Object.values(initial.currentProject?.constants?.pages || {}).some(page => ['burn-pending', 'write-pending'].includes(page.syncState))) {
+        throw new Error('Burn pending tune changes before ECU reset');
+      }
+      const session = initial.connection.sessionId;
+      resetSession = session;
+      const pollingSession = serialService.sessionGeneration;
+      try {
+        await serialService.enterExclusiveMode();
+        const telemetry = await serialService.readOutputChannels(initial.parsedIni);
+        context.check();
+        if (useStore.getState().connection.sessionId !== session) throw new Error('ECU connection changed before reset');
+        assertStoppedForReset(telemetry);
+      } catch (error) {
+        serialService.resumeOutputChannelsPolling(pollingSession);
+        throw error;
+      }
+      // Reset cancels all parser transactions and hides pre-reset samples.
+      serialService.reset();
+      resetPrepared = true;
+      initial.clearRealtime();
+      context.check();
       const result = await window.firmware.reboot({
         port: selectedPort,
         baud: 115200,
@@ -394,36 +391,23 @@ export default function FlashFirmware() {
         throw new Error(result?.error || "ECU reboot failed");
       }
 
-      setPhase("reconnecting");
-      setStatusText("ECU reboot pulse sent. Reconnecting...");
-      updateOperation({
-        type: "firmware-flash",
-        stage: "reconnecting",
-        label: "Reconnecting to ECU",
-        current: 100,
-        total: 100,
-        scope: "firmware",
-      });
-
-      await window.serial.disconnect();
-      await new Promise((resolve) => setTimeout(resolve, 1400));
-
-      setConnectionPort(selectedPort);
-      setConnectionBaud(115200);
-      setPendingReconnect(true);
-
-      const reconnectResult = await window.serial.connect(selectedPort, 115200);
-      if (!reconnectResult?.ok) {
-        throw new Error(reconnectResult?.error || "Reconnect request failed");
-      }
+      deviceActionComplete = true;
+      await new Promise(resolve => setTimeout(resolve, 1400));
+      context.check();
+      await restoreECUConnection(context);
     } catch (error) {
+      if (resetPrepared && useStore.getState().connection.sessionId === resetSession) {
+        try { await window.serial.disconnect(); } catch (closeError) { appendLog(`Port close failed: ${closeError.message}`); }
+      }
       setPhase("error");
       setFlashError(error.message || "ECU reboot failed");
-      setStatusText("ECU reboot failed");
+      setStatusText(deviceActionComplete ? "USB reset completed; recovery failed" : "ECU reboot failed");
       setPendingReconnect(false);
       clearOperation();
-      notify(`ECU reboot failed: ${error.message}`, "error", 4500);
+      notify(`${deviceActionComplete ? "USB reset completed; recovery failed" : "USB reset failed"}: ${error.message}`, "error", 4500);
     } finally {
+      clearOperation();
+      context.release();
       setIsRebootingEcu(false);
     }
   };
@@ -479,9 +463,9 @@ export default function FlashFirmware() {
       action: handleResetEepromOnly,
     },
     "reboot-ecu": {
-      title: "Confirm Reboot ECU",
-      body: "This will restart the ECU and temporarily interrupt the serial connection. No firmware or EEPROM data will be changed.",
-      confirmLabel: "Reboot ECU",
+      title: "Confirm ECU USB Reset",
+      body: "Sends a USB reset pulse after checking that the engine is stopped, output tests are disabled and EEPROM is idle. Burn pending tune changes first. Reconnect, configuration checks and fresh telemetry must pass before recovery is confirmed. This does not switch ECU power off/on.",
+      confirmLabel: "Reset and Verify",
       tone: "cyan",
       action: handleRebootEcu,
     },
@@ -792,9 +776,8 @@ export default function FlashFirmware() {
 
             {phase === "validated" && (
               <InfoCard title="Validation" icon={CheckCircle2} theme="green">
-                ECU handshake completed after flashing. If the signature differs
-                from the project INI, the mismatch dialog will guide the next
-                step.
+                Handshake completed, configuration compared and fresh telemetry
+                received. USB reset does not confirm a physical power cycle.
               </InfoCard>
             )}
 

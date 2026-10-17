@@ -17,6 +17,9 @@ export function performanceFeatureState(feature, performance = {}) {
 }
 
 export function validatePerformanceSettings(feature, values) {
+  if (feature === 'pitLimiter' && values.pitLimiterEnabled && values.pitLimiterRPM <= 0 && values.pitLimiterSpeed <= 0) {
+    return 'Pit limiter requires an RPM or speed limit.'
+  }
   if (feature === 'pitLimiter' && values.pitLimiterEnabled && values.pitLimiterCutType === 2 && !values.engineProtectType) {
     return 'Pit rolling mode requires an enabled Engine Protection cut type.'
   }
@@ -32,6 +35,10 @@ export function validatePerformanceSettings(feature, values) {
   if (feature === 'pitLimiter' && values.pitLimiterEnabled && values.pitLimiterCutType === 1) {
     if (values.pitLimiterRPM <= 0) return 'Pit soft mode requires an RPM limit. Use hard or rolling mode for a speed-only limit.'
     if (![1, 3].includes(values.engineProtectType)) return 'Pit soft mode requires Engine Protection to include ignition.'
+  }
+  if (feature === 'popBang' && values.rollingPopBangEnabled) {
+    if (values.rollingPopBangMinRPM > values.rollingPopBangMaxRPM) return 'Pop & bang Min RPM must not exceed Max RPM.'
+    if (values.rollingPopBangCutType > 0 && values.rollingPopBangCutPattern === 0) return 'Pop & bang cut mode requires a nonzero cut pattern.'
   }
   return null
 }

@@ -98,6 +98,9 @@ function parseShape(token) {
  */
 function parseVarEntry(tokens) {
   const type = tokens[0]?.toLowerCase();
+  const expressions = (offset) => Object.fromEntries(['scale', 'translate', 'lo', 'hi', 'digits']
+    .flatMap((name, index) => /^\{.*\}$/.test(tokens[offset + index] || '')
+      ? [[`${name}Expression`, tokens[offset + index]]] : []));
 
   if (type === "scalar") {
     return {
@@ -110,6 +113,7 @@ function parseVarEntry(tokens) {
       lo: tokens[6] !== undefined ? parseFloat(tokens[6]) : null,
       hi: tokens[7] !== undefined ? parseFloat(tokens[7]) : null,
       digits: tokens[8] !== undefined ? parseInt(tokens[8], 10) : 0,
+      ...expressions(4),
     };
   }
 
@@ -125,6 +129,7 @@ function parseVarEntry(tokens) {
       lo: tokens[7] !== undefined ? parseFloat(tokens[7]) : null,
       hi: tokens[8] !== undefined ? parseFloat(tokens[8]) : null,
       digits: tokens[9] !== undefined ? parseInt(tokens[9], 10) : 0,
+      ...expressions(5),
     };
   }
 
@@ -146,7 +151,9 @@ function parseVarEntry(tokens) {
       labelStart = 4;
     }
 
-    const labels = tokens.slice(labelStart).map(unquote).filter(Boolean);
+    // Empty enum labels reserve encoded values; removing them shifts every
+    // later pin/enum index away from the firmware's binary representation.
+    const labels = tokens.slice(labelStart).map(unquote);
     return {
       type: "bits",
       dataType,
@@ -480,7 +487,7 @@ export function parseIni(content, preprocessorSymbols = {}) {
   return result;
 }
 
-export function getTableMetadata(parsedIni, tableId) {
+export function getTableMetadata(parsedIni, tableId, { strict = false } = {}) {
   if (!parsedIni || !parsedIni.tables || typeof tableId !== "string")
     return null;
   let table = parsedIni.tables[tableId];
@@ -491,6 +498,15 @@ export function getTableMetadata(parsedIni, tableId) {
     if (key) table = parsedIni.tables[key];
   }
   if (!table) return null;
+  for (const binding of [table.xBins, table.yBins, table.zBins]) {
+    const field = binding?.varName && getVarMetadata(parsedIni, binding.varName);
+    if (!field || field.page !== table.page) {
+      if (strict) throw new Error(`INI table '${tableId}' has an incompatible page binding for '${binding?.varName || "missing field"}'`);
+      // Keep legacy projects openable so their embedded INI can be replaced.
+      // An invalid binding is unavailable to readers and writers alike.
+      return null;
+    }
+  }
   return {
     title: table.title,
     xLabel: table.xyLabels?.[0] ?? "",

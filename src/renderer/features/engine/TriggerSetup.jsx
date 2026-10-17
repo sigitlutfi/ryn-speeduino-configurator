@@ -16,6 +16,11 @@ import {
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
+import {
+  GroupHeader,
+  SelectRow,
+  InputField,
+} from "../shared/components/TuningComponents";
 import { evaluateCondition } from "../shared/utils/evaluator";
 import { triggerSetupSchema } from "../shared/schemas";
 
@@ -132,94 +137,42 @@ export default function TriggerSetup() {
     return evaluateCondition(meta.condition, context);
   };
 
-  const renderField = (name, customLabel = null, theme = "cyan") => {
+  const renderField = (name, customLabel = null) => {
     const def = getConstantDef(name);
     if (!def) return null;
 
     const currentValue = getValue(name);
     const error = validationErrors[name];
     const disabled = getIsFieldEnabled(name) === false;
+    const label = customLabel || def.label || name;
+
+    if (def.type === "bits") {
+      return (
+        <SelectRow
+          key={name}
+          label={label}
+          value={currentValue}
+          onChange={(val) => handleFieldChange(name, val)}
+          options={def.options || def.labels || []}
+          disabled={disabled}
+          error={error}
+        />
+      );
+    }
 
     return (
-      <div
+      <InputField
         key={name}
-        className={`group py-4 px-2 hover:bg-white/[0.03] rounded-2xl transition-all duration-300 ${disabled ? "opacity-20 pointer-events-none" : "opacity-100"}`}
-      >
-        <div className="flex flex-col gap-1 mb-3 px-2">
-          <div className="flex justify-between items-start">
-            <label className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">
-              {customLabel || def.label || name}
-            </label>
-            {def.units && (
-              <span className="text-[8px] text-white/20 font-black uppercase">
-                {def.units}
-              </span>
-            )}
-          </div>
-          {error && (
-            <span className="text-[8px] text-neon-red font-black uppercase animate-pulse">
-              {error}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          {def.type === "bits" ? (
-            <div className="flex-1 relative">
-              <select
-                value={currentValue}
-                onChange={(e) =>
-                  handleFieldChange(name, parseInt(e.target.value))
-                }
-                className={`w-full bg-black/60 border rounded-xl px-4 py-3 text-[11px] font-bold transition-all cursor-pointer appearance-none hover:bg-black/80 ${
-                  error
-                    ? "border-neon-red text-neon-red shadow-glow-red/20"
-                    : `border-white/10 text-white focus:border-neon-${theme} shadow-inner`
-                }`}
-              >
-                {def.options?.map((opt, idx) => (
-                  <option key={idx} value={idx} className="bg-bg-card">
-                    {opt}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-20">
-                <ChevronRight size={14} className="rotate-90" />
-              </div>
-            </div>
-          ) : (
-            <input
-              type="number"
-              step={def.scale || 1}
-              value={currentValue}
-              onChange={(e) =>
-                handleFieldChange(name, parseFloat(e.target.value))
-              }
-              className={`w-full bg-black/60 border rounded-xl px-4 py-3 text-[11px] font-mono font-black transition-all ${
-                error
-                  ? "border-neon-red text-neon-red shadow-glow-red/20"
-                  : `border-white/10 text-white focus:border-neon-${theme} shadow-inner`
-              }`}
-            />
-          )}
-        </div>
-      </div>
+        label={label}
+        value={currentValue}
+        onChange={(val) => handleFieldChange(name, val)}
+        step={def.scale || 1}
+        units={def.units}
+        disabled={disabled}
+        error={error}
+      />
     );
   };
-
-  const GroupHeader = ({ title, icon: Icon, theme = "cyan" }) => (
-    <div className="flex items-center gap-4 mb-8">
-      <div
-        className={`w-1.5 h-6 bg-neon-${theme} rounded-full shadow-glow-${theme}`}
-      />
-      <h3 className="font-orbitron text-[11px] font-black text-white uppercase tracking-[0.3em]">
-        {title}
-      </h3>
-      {Icon && (
-        <Icon className={`ml-auto text-neon-${theme} opacity-40`} size={20} />
-      )}
-    </div>
-  );
 
   return (
     <div className="flex flex-col h-full bg-transparent select-none animate-in fade-in duration-700">

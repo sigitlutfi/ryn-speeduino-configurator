@@ -1,17 +1,18 @@
+import { parseDriveStatus } from './drive-modes.js'
 import { Buffer } from "buffer";
 import { parsePage } from "./binary-parser.js";
 
 function toBool(value) {
-  return !!value;
+  return typeof value === 'boolean' ? value : typeof value === 'number' && Number.isFinite(value) ? value !== 0 : null;
 }
 
 function toTemp(rawValue) {
-  if (typeof rawValue !== "number") return 0;
+  if (typeof rawValue !== "number") return null;
   return rawValue - 40;
 }
 
 function applyMetaScale(rawValue, meta) {
-  if (typeof rawValue !== "number") return 0;
+  if (typeof rawValue !== "number") return null;
   if (!meta || meta.type !== "scalar") return rawValue;
   return (rawValue + (meta.translate ?? 0)) * (meta.scale ?? 1);
 }
@@ -22,14 +23,22 @@ export function decodeOutputChannels(buffer, parsedIni) {
   }
 
   const raw = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  const expected = parsedIni.outputChannels.ochBlockSize;
+  if (!Number.isInteger(expected) || expected <= 0 || raw.length !== expected) {
+    throw new Error(`Invalid telemetry size: expected ${expected}, received ${raw.length}`);
+  }
   const channels = parsePage(raw, parsedIni.outputChannels.channels);
   const channelMeta = parsedIni.outputChannels.channels;
   const scaled = (name) => applyMetaScale(channels[name], channelMeta[name]);
   const firstDefined = (...values) => values.find((value) => value !== undefined);
 
   const realtime = {
-    rpm: channels.rpm ?? 0,
+    driveMode: raw.length >= 167 && channelMeta.driveVersion ? parseDriveStatus(raw.subarray(152, 167)) : null,
+    rpm: channels.rpm ?? null,
     map: scaled("map"),
+    emap: channelMeta.emap ? scaled('emap') : null,
+    fuelLoadRaw: channels.fuelLoad ?? null,
+    ignLoadRaw: channels.ignLoad ?? null,
     tps: scaled("tps"),
     coolant: toTemp(channels.coolantRaw),
     clt: toTemp(channels.coolantRaw),
@@ -37,22 +46,23 @@ export function decodeOutputChannels(buffer, parsedIni) {
     battery: scaled("batteryVoltage"),
     vbatt: scaled("batteryVoltage"),
     afr: scaled("afr"),
-    ve: channels.veCurr ?? channels.VE1 ?? 0,
-    ve1: channels.VE1 ?? 0,
+    ve: channels.veCurr ?? channels.VE1 ?? null,
+    ve1: channels.VE1 ?? null,
     advance: scaled("advance"),
-    corrections: channels.gammaEnrich ?? 0,
+    corrections: channels.gammaEnrich ?? null,
     pw1: scaled("pulseWidth"),
-    dwell: channels.dwellActual !== undefined ? scaled("dwellActual") : scaled("dwell"),
+    dwell: scaled('dwell'),
+    dwellActual: channelMeta.dwellActual ? scaled('dwellActual') : null,
     baro: scaled("baro"),
     vss: scaled("vss"),
-    gear: channels.gear ?? 0,
-    ethanolPct: channels.flex ?? 0,
-    flexCorr: channels.flexFuelCor ?? 0,
+    gear: channels.gear ?? null,
+    ethanolPct: channels.flex ?? null,
+    flexCorr: channels.flexFuelCor ?? null,
     fuelTemp: toTemp(channels.fuelTempRaw),
-    tpsADC: channels.tpsADC ?? 0,
-    loopsPerSecond: channels.loopsPerSecond ?? 0,
-    freeRAM: channels.freeRAM ?? 0,
-    syncLossCounter: channels.syncLossCounter ?? 0,
+    tpsADC: channels.tpsADC ?? null,
+    loopsPerSecond: channels.loopsPerSecond ?? null,
+    freeRAM: channels.freeRAM ?? null,
+    syncLossCounter: channels.syncLossCounter ?? null,
     engine: {
       running: toBool(channels.running),
       cranking: toBool(channels.crank),
@@ -93,18 +103,18 @@ export function decodeOutputChannels(buffer, parsedIni) {
       pitLimiterActive: toBool(channels.pitLimiterActive),
       pitLimiterSwitch: toBool(channels.pitLimiterSwitchState),
       rumbleIdleActive: toBool(channels.rumbleIdleActive),
-      rumbleIdleBeat: toBool(firstDefined(channels.rumbleIdleBeatState, true)),
+      rumbleIdleBeat: toBool(firstDefined(channels.rumbleIdleBeatState, null)),
       alsActive: toBool(channels.alsActive),
       alsSwitch: toBool(channels.alsSwitchState),
-      alsTimingCorr: firstDefined(channels.alsTimingCorrection, 0),
-      alsFuelCorr: firstDefined(channels.alsFuelCorrection, 100),
-      alsActiveTime: firstDefined(channels.alsActiveTime, 0),
+      alsTimingCorr: firstDefined(channels.alsTimingCorrection, null),
+      alsFuelCorr: firstDefined(channels.alsFuelCorrection, null),
+      alsActiveTime: firstDefined(channels.alsActiveTime, null),
       rollingPopBangActive: toBool(channels.rollingPopBangActive),
       rollingPopBangSwitch: toBool(channels.rollingPopBangSwitchState),
-      rollingPopBangActiveTime: firstDefined(channels.rollingPopBangActiveTime, 0),
-      rollingPopBangCutCounter: firstDefined(channels.rollingPopBangCutCounter, 0),
-      rollingPopBangTimingCorr: firstDefined(channels.rollingPopBangTimingCorrection, 0),
-      rollingPopBangFuelCorr: firstDefined(channels.rollingPopBangFuelCorrection, 100),
+      rollingPopBangActiveTime: firstDefined(channels.rollingPopBangActiveTime, null),
+      rollingPopBangCutCounter: firstDefined(channels.rollingPopBangCutCounter, null),
+      rollingPopBangTimingCorr: firstDefined(channels.rollingPopBangTimingCorrection, null),
+      rollingPopBangFuelCorr: firstDefined(channels.rollingPopBangFuelCorrection, null),
     },
     outputChannels: channels,
   };

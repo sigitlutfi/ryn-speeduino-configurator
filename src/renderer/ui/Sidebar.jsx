@@ -48,7 +48,7 @@ const NAV_CONFIG = [
       { path: ROUTES.DASHBOARD, label: "Realtime View", icon: Activity },
       {
         path: ROUTES.RACING_PROFILES,
-        label: "Runtime Profiles",
+        label: "Drive Mode",
         icon: ShieldAlert,
         theme: "cyan",
       },

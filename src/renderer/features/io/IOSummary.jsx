@@ -314,8 +314,7 @@ export default function IOSummary() {
                   I/O Summary
                 </h1>
                 <p className="text-[10px] uppercase tracking-[0.14em] text-white/40">
-                  Auto-discovered pin assignments from INI metadata and project
-                  constants
+                  {currentProject.hardware?.restartRequired ? 'Target pin mapping — ECU power cycle belum diverifikasi' : 'Pin assignments from INI metadata and project constants'}
                 </p>
               </div>
             </div>
@@ -346,7 +345,11 @@ export default function IOSummary() {
       <div className="flex-1 overflow-y-auto px-8 pb-10">
         <div className="mx-auto max-w-[1560px] space-y-4">
           <div className="rounded-2xl border border-white/10 p-4 space-y-3 text-xs">
-            <p>Choose the MCU and compiled firmware channels to resolve board defaults. These project settings do not change ECU pins.</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-semibold text-zinc-100">Board mapping · Project preview</p>
+              <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-cyan-200">Target: standard 4-cylinder build</span>
+            </div>
+            <p className="text-zinc-400">Match these settings to the firmware installed on the ECU. They control the mapping preview; live configuration is checked when writing.</p>
             <label className="block">MCU pin map
               <select className="ml-3 bg-black border border-white/20 rounded p-2" value={currentProject.hardware?.pinMapPlatform || ''}
                 onChange={event => updateProjectField('hardware.pinMapPlatform', event.target.value)}>
@@ -354,17 +357,32 @@ export default function IOSummary() {
                 <option value="mega2560">Arduino Mega 2560 (AVR)</option>
               </select>
             </label>
-            <label className="block">Firmware channel build
+            <label className="block">Firmware profile
               <select className="ml-3 bg-black border border-white/20 rounded p-2" value={currentProject.hardware?.channelBuild || ''}
                 onChange={event => updateProjectField('hardware.channelBuild', event.target.value)}>
-                <option value="">Unknown — reserve all mapped channels</option>
-                <option value="standard">Standard Mega: 4 injectors / 5 ignition</option>
-                <option value="6-3">6 injectors / 3 ignition</option>
-                <option value="8-1">8 injectors / 1 ignition</option>
+                <option value="">Choose installed build — reserve all until confirmed</option>
+                <option value="standard">Standard Mega · 4-cylinder project</option>
+                {currentProject.hardware?.channelBuild === '6-3' && <option value="6-3">Imported profile · 6 injectors / 3 ignition</option>}
+                {currentProject.hardware?.channelBuild === '8-1' && <option value="8-1">Imported profile · 8 injectors / 1 ignition</option>}
               </select>
             </label>
+            {currentProject.hardware?.channelBuild === 'standard' && <p className="text-zinc-400">Compiled capacity: 4 injector / 5 ignition channels. Channel capacity is separate from the engine's cylinder count.</p>}
+            <details className="rounded-lg border border-white/10 p-2.5">
+              <summary className="cursor-pointer text-zinc-400">Advanced · other compiled channel profiles</summary>
+              <p className="my-2 text-zinc-400">For an existing tune using a different firmware build. Current validation targets the standard four-cylinder project.</p>
+              <label>Compiled channels
+                <select aria-label="Advanced firmware channel build" className="ml-3 rounded border border-white/20 bg-black p-2"
+                  value={currentProject.hardware?.channelBuild || ''}
+                  onChange={event => updateProjectField('hardware.channelBuild', event.target.value)}>
+                  <option value="">Unknown — reserve all mapped channels</option>
+                  <option value="standard">Standard · 4 injectors / 5 ignition</option>
+                  <option value="6-3">6 injectors / 3 ignition</option>
+                  <option value="8-1">8 injectors / 1 ignition</option>
+                </select>
+              </label>
+            </details>
             {registry.context.warning && <p className="text-amber-200">{registry.context.warning}</p>}
-            <p className="text-white/50">Pin numbers refer to MCU pins, not connector terminals. Save the project after changing these selections.</p>
+            <p className="text-zinc-400">D/A numbers identify MCU pins. Check your board's wiring diagram for connector terminals. Save the project after changing the preview settings.</p>
           </div>
           <div className="grid gap-3 lg:grid-cols-5">
             <StatCard

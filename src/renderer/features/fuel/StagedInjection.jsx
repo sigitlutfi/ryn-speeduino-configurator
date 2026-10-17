@@ -64,11 +64,13 @@ export default function StagedInjection() {
       if (JSON.stringify(matrix) !== JSON.stringify(stagingMatrix)) {
         updates.values = matrix;
       }
-      if (Array.isArray(xBins) && JSON.stringify(xBins) !== JSON.stringify(rpmAxis)) {
-        updates.rpmAxis = xBins;
+      const displayX = toDisplay(xBins, getFieldInfo('rpmBinsStaging')?.meta);
+      const displayY = toDisplay(yBins, getFieldInfo('loadBinsStaging')?.meta);
+      if (Array.isArray(displayX) && JSON.stringify(displayX) !== JSON.stringify(rpmAxis)) {
+        updates.rpmAxis = displayX;
       }
-      if (Array.isArray(yBins) && JSON.stringify(yBins) !== JSON.stringify(loadAxis)) {
-        updates.loadAxis = yBins;
+      if (Array.isArray(displayY) && JSON.stringify(displayY) !== JSON.stringify(loadAxis)) {
+        updates.loadAxis = displayY;
       }
 
       if (Object.keys(updates).length > 0) {
@@ -82,12 +84,12 @@ export default function StagedInjection() {
     if (newXAxis) updates.rpmAxis = newXAxis;
     if (newYAxis) updates.loadAxis = newYAxis;
     
-    updateTable("staging", updates);
+    updateTable("staging", updates, true);
     
     // Push back to constants for dirty tracking and saving
     setFieldValue("stagingTable", newMatrix.flat());
-    if (newXAxis) setFieldValue("rpmBinsStaging", newXAxis);
-    if (newYAxis) setFieldValue("loadBinsStaging", newYAxis);
+    if (newXAxis) setFieldValue("rpmBinsStaging", toRaw(newXAxis, getFieldInfo('rpmBinsStaging')?.meta));
+    if (newYAxis) setFieldValue("loadBinsStaging", toRaw(newYAxis, getFieldInfo('loadBinsStaging')?.meta));
   };
 
   const getValue = (name) => {

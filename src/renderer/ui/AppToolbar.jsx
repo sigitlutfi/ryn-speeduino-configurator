@@ -1,10 +1,12 @@
+import { serialService } from '../core/services/serialService.js';
+import { disconnectECU } from '../core/services/ecuRecovery.js';
 import { useLocation } from "wouter";
 import { useStore } from "../core/store.js";
 import { ROUTES } from "../routes.js";
 import {
   FileText,
   Layout,
-  Github,
+  GitBranch,
   Settings,
   Power,
   RefreshCcw,
@@ -157,10 +159,7 @@ export default function AppToolbar() {
     closeMenus();
     const filePath = await window.projects.pickExisting();
     if (filePath) {
-      const proj = await window.projects.loadFile(filePath);
-      if (proj && !proj.error) {
-        useStore.getState().setProject({ ...proj, filePath });
-      }
+      await useStore.getState().openProject(filePath);
     }
   };
 
@@ -188,7 +187,9 @@ export default function AppToolbar() {
     closeMenus();
     if (!currentProject) return;
     const confirmed = window.confirm(
-      "Restore this project back to its base tune snapshot?",
+      currentProject.initialization?.restorePoints?.baseTune?.origin === 'recovered-current-tune'
+        ? 'Restore the tune captured when this legacy project was opened? Its historical base tune snapshot was missing.'
+        : 'Restore this project back to its base tune snapshot?',
     );
     if (!confirmed) return;
     await restoreProjectToBaseTune();
@@ -308,14 +309,7 @@ export default function AppToolbar() {
                         key={p.filePath}
                         label={p.projectName}
                         onClick={async () => {
-                          const proj = await window.projects.loadFile(
-                            p.filePath,
-                          );
-                          if (proj && !proj.error)
-                            useStore.getState().setProject({
-                              ...proj,
-                              filePath: p.filePath,
-                            });
+                          await useStore.getState().openProject(p.filePath);
                           closeMenus();
                         }}
                       />
@@ -348,7 +342,7 @@ export default function AppToolbar() {
                 </div>
                 <MenuItem
                   icon={RefreshCcw}
-                  label="Restore Base Tune"
+                  label={currentProject.initialization?.restorePoints?.baseTune?.origin === 'recovered-current-tune' ? 'Restore Recovered Tune' : 'Restore Base Tune'}
                   onClick={handleRestoreBaseTune}
                   disabled={!hasBaseTuneSnapshot || isCommBusy}
                 />
@@ -468,7 +462,8 @@ export default function AppToolbar() {
                   label="Disconnect"
                   danger
                   onClick={async () => {
-                    await window.serial.disconnect();
+                    try { await disconnectECU({ serial: window.serial, getState: useStore.getState, reset: () => serialService.reset() }); }
+                    catch (error) { notify(`Disconnect failed: ${error.message}`, 'error'); }
                     closeMenus();
                   }}
                 />
@@ -541,7 +536,7 @@ export default function AppToolbar() {
               }}
             />
             <MenuItem
-              icon={Github}
+              icon={GitBranch}
               label="Source Code (GitHub)"
               onClick={() => {
                 window.open(

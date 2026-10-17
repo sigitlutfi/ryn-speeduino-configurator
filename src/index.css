@@ -1,7 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&family=Inter:wght@300;400;500;600;700;800&display=swap");
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 :root {
   --accent-color: #00d4ff;
@@ -34,7 +33,13 @@ body {
   input[type="number"],
   input[type="text"],
   select {
-    @apply bg-black/50 border-white/20 text-white font-medium focus:border-neon-cyan focus:bg-black/80 transition-all placeholder-white/20;
+    @apply bg-black/50 border-white/20 text-white font-medium focus:bg-black/80 transition-all placeholder-white/20;
+  }
+
+  input[type="number"]:focus,
+  input[type="text"]:focus,
+  select:focus {
+    border-color: var(--accent-color);
   }
 
   button {

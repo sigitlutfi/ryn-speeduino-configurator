@@ -54,6 +54,18 @@ export function decodePageSnapshot(snapshot) {
   return decodePageBuffer(snapshot.rawData);
 }
 
+export function validatePageSnapshot(snapshot, expectedSize) {
+  if (!isPageSnapshot(snapshot) || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(snapshot.rawData)) {
+    throw new Error('Invalid page snapshot base64')
+  }
+  const buffer = decodePageSnapshot(snapshot)
+  if (!Number.isInteger(expectedSize) || expectedSize <= 0 || buffer.length !== expectedSize || snapshot.size !== expectedSize) {
+    throw new Error(`Page ${snapshot.pageId} size does not match the INI (${expectedSize} bytes)`)
+  }
+  // rawData is authoritative; never trust a saved CRC cache.
+  return { buffer, crc32: formatCRC32Hex(calculatePageCRC(buffer)) }
+}
+
 export function decodePageSnapshots(parsedIni, pageSnapshots = {}) {
   const decodedPages = {};
 

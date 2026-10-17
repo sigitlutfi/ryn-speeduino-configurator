@@ -18,7 +18,12 @@ import {
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
-import CurveEditor from "../../ui/CurveEditor";
+import {
+  GroupHeader,
+  StatField,
+  SelectField,
+} from "../shared/components/TuningComponents";
+import IniCurvePanel from "../shared/components/IniCurvePanel.jsx";
 import { createIniSchema } from "../shared/utils/validation";
 import { useStore } from "../../core/store";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
@@ -50,7 +55,6 @@ const EngineProtection = () => {
   const {
     localConstants,
     setLocalField,
-    setLocalPage,
     handleSave,
     discardChanges,
     isSaving,
@@ -84,7 +88,8 @@ const EngineProtection = () => {
 
       const errors = {};
       Object.entries(schemas).forEach(([page, schema]) => {
-        const res = schema.safeParse(data[page] || {});
+        const displayData = Object.fromEntries(Object.entries(data[page] || {}).map(([name, value]) => [name, toDisplay(value, parsedIni.constants.pages[page]?.[name])]));
+        const res = schema.safeParse(displayData);
         if (!res.success) {
           res.error.issues.forEach((issue) => {
             errors[`${page}_${issue.path[0]}`] = issue.message;
@@ -122,124 +127,13 @@ const EngineProtection = () => {
     return meta?.defaultValue ?? 0;
   };
 
-  const getCurveValues = (page, xName, yName) => {
-    const rawX = getValue(page, xName);
-    const rawY = getValue(page, yName);
-    const x = Array.isArray(rawX)
-      ? rawX
-      : rawX === undefined || rawX === null
-        ? []
-        : [rawX];
-    const y = Array.isArray(rawY)
-      ? rawY
-      : rawY === undefined || rawY === null
-        ? []
-        : [rawY];
-    const pointCount = Math.min(x.length, y.length);
-
-    if (pointCount > 0) {
-      return {
-        x: x.slice(0, pointCount),
-        y: y.slice(0, pointCount),
-      };
-    }
-
-    return {
-      x: DEFAULT_CURVES[xName] || [],
-      y: DEFAULT_CURVES[yName] || [],
-    };
-  };
-
   const updateValue = (page, name, val) => {
     const meta = getMetadata(name);
     const rawVal = toRaw(val, meta);
     setLocalField(page, name, rawVal);
   };
 
-  const GroupHeader = ({ title, icon: Icon, colorClass = "bg-neon-cyan" }) => (
-    <div className="flex items-center gap-4 mb-6">
-      <div
-        className={`w-1.5 h-6 ${colorClass} rounded-full shadow-glow-cyan`}
-      />
-      <h3 className="font-orbitron text-[11px] font-black text-white uppercase tracking-[0.3em]">
-        {title}
-      </h3>
-      {Icon && <Icon className="ml-auto text-white/20" size={18} />}
-    </div>
-  );
-
-  const StatField = ({
-    page,
-    name,
-    label,
-    icon: Icon,
-    unit,
-    step = 1,
-    disabled = false,
-  }) => {
-    const val = getValue(page, name);
-    const hasError = validationErrors[`${page}_${name}`];
-
-    return (
-      <div
-        className={`p-6 rounded-3xl glass-card border transition-all ${hasError ? "border-neon-red shadow-glow-red/20" : "border-white/10"} ${disabled ? "opacity-40 grayscale pointer-events-none" : ""}`}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-            {Icon && <Icon size={12} className="text-neon-cyan opacity-40" />}
-            {label}
-          </span>
-          {unit && (
-            <span className="text-[8px] font-black text-white/20 uppercase">
-              {unit}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="number"
-            step={step}
-            value={val}
-            onChange={(e) =>
-              updateValue(page, name, parseFloat(e.target.value))
-            }
-            className="w-full bg-black/40 border-none text-2xl font-mono font-black text-white focus:text-neon-cyan outline-none transition-colors"
-          />
-        </div>
-        {hasError && (
-          <p className="mt-2 text-[7px] font-black text-neon-red uppercase">
-            {hasError}
-          </p>
-        )}
-      </div>
-    );
-  };
-
-  const SelectField = ({ page, name, label, icon: Icon, options }) => {
-    const val = getValue(page, name);
-
-    return (
-      <div className="p-6 rounded-3xl glass-card border border-white/10 transition-all">
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-            {Icon && <Icon size={12} className="text-neon-cyan opacity-40" />}
-            {label}
-          </span>
-        </div>
-        <select
-          value={val}
-          onChange={(e) => updateValue(page, name, parseInt(e.target.value))}
-          className="w-full bg-black/40 border-none text-sm font-orbitron font-black text-neon-cyan outline-none py-2 px-1 appearance-none cursor-pointer"
-        >
-          {options.map((opt, i) => (
-            <option key={i} value={i} className="bg-bg-deep text-white">
-              {opt}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  };
+  const fieldProps = { getValue, updateValue };
 
   const StatusBadge = ({ label, active, warning = false }) => (
     <div
@@ -261,9 +155,6 @@ const EngineProtection = () => {
   );
 
   const isRolling = getValue(P1, "hardCutType") === 1;
-  const rollingCurve = getCurveValues(P15, "rollingProtRPMDelta", "rollingProtCutPercent");
-  const coolantCurve = getCurveValues(P9, "coolantProtTemp", "coolantProtRPM");
-  const oilCurve = getCurveValues(P10, "oilPressureProtRPM", "oilPressureProtMins");
 
   return (
     <div className="flex flex-col h-full bg-transparent select-none animate-in fade-in duration-700">
@@ -315,6 +206,7 @@ const EngineProtection = () => {
               <GroupHeader title="Global Method" icon={Settings} />
               <div className="space-y-4">
                 <SelectField
+                  {...fieldProps}
                   page={P6}
                   name="engineProtectType"
                   label="Protection Cut"
@@ -322,6 +214,7 @@ const EngineProtection = () => {
                   options={["Off", "Spark Cut", "Fuel Cut", "Both"]}
                 />
                 <SelectField
+                  {...fieldProps}
                   page={P1}
                   name="hardCutType"
                   label="Cut Strategy"
@@ -329,11 +222,13 @@ const EngineProtection = () => {
                   options={["Full Cut", "Rolling Cut"]}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P4}
                   name="engineProtectMaxRPM"
                   label="Limp Home Limit"
                   unit="RPM"
                   icon={ShieldAlert}
+                  error={validationErrors[`${P4}_engineProtectMaxRPM`]}
                 />
               </div>
             </div>
@@ -343,20 +238,25 @@ const EngineProtection = () => {
               <GroupHeader title="RPM Limiter" icon={Clock} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <StatField
+                  {...fieldProps}
                   page={P4}
                   name="SoftRevLim"
                   label="Soft Limit Start"
                   unit="RPM"
                   icon={Activity}
+                  error={validationErrors[`${P4}_SoftRevLim`]}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P4}
                   name="hardRevLim"
                   label="Hard Limit Floor"
                   unit="RPM"
                   icon={AlertTriangle}
+                  error={validationErrors[`${P4}_hardRevLim`]}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P4}
                   name="SoftLimRetard"
                   label="Timing Retard"
@@ -364,6 +264,7 @@ const EngineProtection = () => {
                   icon={Zap}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P4}
                   name="SoftLimMax"
                   label="Max Permitted RPM"
@@ -388,25 +289,8 @@ const EngineProtection = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-              <div className="h-[200px]">
-                <CurveEditor
-                  xValues={rollingCurve.x}
-                  yValues={rollingCurve.y}
-                  theme="cyan"
-                  xLabel="RPM Delta"
-                  yLabel="Event Cut (%)"
-                  xRange={{ min: -400, max: 0 }}
-                  yRange={{ min: 0, max: 100 }}
-                  precision={0}
-                  onChange={(newX, newY) => {
-                    const metaX = getMetadata("rollingProtRPMDelta");
-                    const metaY = getMetadata("rollingProtCutPercent");
-                    setLocalPage(P15, {
-                      rollingProtRPMDelta: toRaw(newX, metaX),
-                      rollingProtCutPercent: toRaw(newY, metaY),
-                    });
-                  }}
-                />
+              <div className="min-w-0">
+                <IniCurvePanel xName="rollingProtRPMDelta" yName="rollingProtCutPercent" title="Rolling Cut" theme="cyan" layout="stacked" />
               </div>
               <div className="space-y-4 flex flex-col justify-center">
                 <div className="p-6 rounded-3xl bg-black/40 border border-white/5">
@@ -436,17 +320,20 @@ const EngineProtection = () => {
               <GroupHeader title="Boost Protection" icon={Wind} />
               <div className="space-y-6">
                 <SelectField
+                  {...fieldProps}
                   page={P6}
                   name="boostCutEnabled"
                   label="Boost Cut State"
                   options={["Disabled", "Enabled"]}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P6}
                   name="boostLimit"
                   label="Maximum Boost"
                   unit="kPa"
                   icon={Gauge}
+                  error={validationErrors[`${P6}_boostLimit`]}
                 />
               </div>
             </div>
@@ -457,6 +344,7 @@ const EngineProtection = () => {
               <div className="grid grid-cols-2 gap-6">
                 <div className="col-span-2">
                   <SelectField
+                    {...fieldProps}
                     page={P9}
                     name="afrProtectEnabled"
                     label="AFR Protection Mode"
@@ -464,24 +352,31 @@ const EngineProtection = () => {
                   />
                 </div>
                 <StatField
+                  {...fieldProps}
                   page={P9}
                   name="afrProtectMAP"
                   label="Min MAP"
                   unit="kPa"
+                  error={validationErrors[`${P9}_afrProtectMAP`]}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P9}
                   name="afrProtectRPM"
                   label="Min RPM"
                   unit="RPM"
+                  error={validationErrors[`${P9}_afrProtectRPM`]}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P9}
                   name="afrProtectTPS"
                   label="Min TPS"
                   unit="%"
+                  error={validationErrors[`${P9}_afrProtectTPS`]}
                 />
                 <StatField
+                  {...fieldProps}
                   page={P9}
                   name="afrProtectDeviation"
                   label="Max Deviation"
@@ -495,49 +390,15 @@ const EngineProtection = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
             <div className="p-8 rounded-[40px] glass-card border border-white/10 relative overflow-hidden bg-black/20 min-h-[500px]">
               <GroupHeader title="CLT Protection RPM" icon={Thermometer} />
-              <div className="h-[250px]">
-                <CurveEditor
-                  xValues={coolantCurve.x}
-                  yValues={coolantCurve.y}
-                  theme="cyan"
-                  xLabel="Temp (C)"
-                  yLabel="Limit (RPM)"
-                  xRange={{ min: -40, max: 150 }}
-                  yRange={{ min: 0, max: 10000 }}
-                  precision={0}
-                  onChange={(newX, newY) => {
-                    const metaX = getMetadata("coolantProtTemp");
-                    const metaY = getMetadata("coolantProtRPM");
-                    setLocalPage(P9, {
-                      coolantProtTemp: toRaw(newX, metaX),
-                      coolantProtRPM: toRaw(newY, metaY),
-                    });
-                  }}
-                />
+              <div className="min-w-0">
+                <IniCurvePanel xName="coolantProtTemp" yName="coolantProtRPM" title="Coolant Protection" theme="cyan" layout="stacked" />
               </div>
             </div>
 
             <div className="p-8 rounded-[40px] glass-card border border-white/10 relative overflow-hidden bg-black/20 min-h-[500px]">
               <GroupHeader title="Min Oil Pressure" icon={Activity} />
-              <div className="h-[250px]">
-                <CurveEditor
-                  xValues={oilCurve.x}
-                  yValues={oilCurve.y}
-                  theme="cyan"
-                  xLabel="RPM"
-                  yLabel="Min PSI"
-                  xRange={{ min: 0, max: 10000 }}
-                  yRange={{ min: 0, max: 100 }}
-                  precision={1}
-                  onChange={(newX, newY) => {
-                    const metaX = getMetadata("oilPressureProtRPM");
-                    const metaY = getMetadata("oilPressureProtMins");
-                    setLocalPage(P10, {
-                      oilPressureProtRPM: toRaw(newX, metaX),
-                      oilPressureProtMins: toRaw(newY, metaY),
-                    });
-                  }}
-                />
+              <div className="min-w-0">
+                <IniCurvePanel xName="oilPressureProtRPM" yName="oilPressureProtMins" title="Oil Pressure Protection" theme="cyan" layout="stacked" />
               </div>
             </div>
           </div>

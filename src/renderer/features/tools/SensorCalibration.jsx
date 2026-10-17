@@ -1,3 +1,6 @@
+import { CalibrationTable } from './CalibrationTables.jsx';
+import { useLiveTelemetry } from '../shared/hooks/useLiveTelemetry.js';
+import { liveTpsADC } from '../../../shared/protocol/tuning-live.js';
 import React, { useState } from "react";
 import {
   Wrench,
@@ -16,6 +19,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
+import FilterControl from "../../ui/FilterControl.jsx";
 import TuningHeader from "../shared/components/TuningHeader";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 import { useStore } from "../../core/store";
@@ -40,49 +44,21 @@ const SENSOR_FIELDS = [
   "batVoltCorrect",
 ];
 
-const THERMISTOR_PRESETS = {
-  GM: { bias: 2490, t1: -40, r1: 100700, t2: 30, r2: 2238, t3: 99, r3: 177 },
-  Ford: { bias: 2490, t1: 0, r1: 94000, t2: 50, r2: 11000, t3: 98, r3: 2370 },
-  Mazda: {
-    bias: 50000,
-    t1: -40,
-    r1: 2022088,
-    t2: 21,
-    r2: 68273,
-    t3: 99,
-    r3: 3715,
-  },
-  Toyota: {
-    bias: 2490,
-    t1: -40,
-    r1: 101890,
-    t2: 30,
-    r2: 2268,
-    t3: 99,
-    r3: 156,
-  },
-  Bosch: { bias: 2490, t1: -30, r1: 26144, t2: 20, r2: 2500, t3: 110, r3: 144 },
-};
-
-const O2_PRESETS = {
-  "Innovate LC-1/LC-2": { vMin: 0, afrMin: 7.35, vMax: 5, afrMax: 22.39 },
-  "AEM Linear (30-42xx)": { vMin: 0, afrMin: 9.72, vMax: 5, afrMax: 19.6 },
-  "AEM Linear (30-2310)": { vMin: 0, afrMin: 7.31, vMax: 5, afrMax: 19.18 },
-  "14Point7 Spartan 2": { vMin: 0, afrMin: 10.0, vMax: 5, afrMax: 20.0 },
-  "PLX iMFD": { vMin: 0, afrMin: 10.0, vMax: 5, afrMax: 20.0 },
-  "Ballenger AFR500": { vMin: 0, afrMin: 9.0, vMax: 5, afrMax: 16.0 },
-};
-
 const SensorCalibration = () => {
   const [activeTab, setActiveTab] = useState("filters");
-  const tpsADC = useStore((s) => s.realtime?.tpsADC ?? 0);
-  const clt = useStore((s) => s.realtime?.clt ?? 0);
-  const iat = useStore((s) => s.realtime?.iat ?? 0);
-  const afr = useStore((s) => s.realtime?.afr ?? 0);
-  const vbatt = useStore((s) => s.realtime?.vbatt ?? 0);
-
-  // Speeduino usually puts TPS ADC in a field like tpsADC or just adc1.
-  // We'll fallback to tps (percent) if ADC isn't explicitly in the slice yet.
+  const { realtime, status: telemetryStatus, issues } = useLiveTelemetry();
+  const tpsADC = realtime?.tpsADC ?? null;
+  const clt = realtime?.clt ?? '—', iat = realtime?.iat ?? '—';
+  const afr = realtime?.afr ?? '—', vbatt = realtime?.vbatt ?? null;
+  const captureTPS = field => {
+    const state = useStore.getState();
+    const value = liveTpsADC(state);
+    if (value === null) {
+      state.notify('Wait for a fresh ECU TPS ADC reading before capturing calibration.', 'warning');
+      return;
+    }
+    setFieldValue(field, value);
+  };
 
   const {
     getFieldValue,
@@ -105,12 +81,6 @@ const SensorCalibration = () => {
     );
   }
 
-  const updateFilter = (name, val) => {
-    // Clamp to 0-240 as per INI warning
-    const clamped = Math.max(0, Math.min(240, Math.round(val)));
-    setFieldValue(name, clamped);
-  };
-
   const getVal = (name) => getFieldValue(name) ?? 0;
 
   const TabButton = ({ id, label, icon: Icon }) => (
@@ -127,71 +97,6 @@ const SensorCalibration = () => {
       {label}
     </button>
   );
-
-  const MixerFader = ({ name, label, icon: Icon, color = "cyan" }) => {
-    const value = getVal(name);
-    // 0 is strong filtering, 240 is less?
-    // Wait, INI says: "Higher values result in stronger filtering, but slower response times"
-    // So 255 is strongest? INI says max is 240.
-
-    return (
-      <div className="flex flex-col items-center gap-6 group scale-95 hover:scale-100 transition-all duration-300">
-        <div className="relative h-64 w-12 bg-black/60 rounded-2xl border border-white/5 p-1.5 flex flex-col justify-end overflow-hidden glass-card group-hover:border-neon-cyan/20 transition-shadow">
-          {/* Fader Track (Decorative lines) */}
-          <div className="absolute inset-0 flex flex-col items-center justify-between py-6 pointer-events-none opacity-10">
-            {[...Array(11)].map((_, i) => (
-              <div
-                key={i}
-                className={`w-4 h-[1px] ${i % 5 === 0 ? "bg-white w-6" : "bg-white/50"}`}
-              />
-            ))}
-          </div>
-
-          {/* Level Fill Visual */}
-          <div
-            className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-neon-${color}/60 to-neon-${color}/20 border-t border-neon-${color}/50 shadow-glow-${color} transition-all duration-150 pointer-events-none`}
-            style={{ height: `${(value / 240) * 100}%` }}
-          />
-
-          {/* Actual Native Input (Invisible but functional) */}
-          <input
-            type="range"
-            orient="vertical"
-            min="0"
-            max="240"
-            value={value}
-            onChange={(e) => updateFilter(name, e.target.value)}
-            className="absolute inset-x-0 inset-y-0 w-full h-full opacity-0 cursor-ns-resize z-20"
-            style={{
-              WebkitAppearance: "slider-vertical",
-              writingMode: "bt-lr", // Bottom to Top
-              margin: 0,
-            }}
-          />
-
-          {/* Custom Fader Handle (Follows input) */}
-          <div
-            className="absolute z-10 left-1 right-1 h-6 bg-gradient-to-b from-white/40 to-white/10 rounded-md border border-white/40 shadow-2xl pointer-events-none flex items-center justify-center backdrop-blur-md"
-            style={{ bottom: `calc(${(value / 240) * 100}% - 12px)` }}
-          >
-            <div className="w-full h-[1px] bg-black/30" />
-          </div>
-        </div>
-
-        <div className="flex flex-col items-center gap-1">
-          <div className={`p-2 rounded-lg bg-neon-${color}/10 transition-all`}>
-            <Icon size={14} className={`text-neon-${color}`} />
-          </div>
-          <span className="text-[7px] font-black text-white/30 uppercase tracking-[0.2em] w-16 text-center leading-tight">
-            {label}
-          </span>
-          <span className="text-[10px] font-mono font-black text-white mt-2">
-            {value}%
-          </span>
-        </div>
-      </div>
-    );
-  };
 
   const CalibrationRow = ({
     label,
@@ -230,146 +135,6 @@ const SensorCalibration = () => {
     );
   };
 
-  const ThermistorCal = ({ title, sensorKey }) => {
-    const [preset, setPreset] = useState("Custom");
-    const [params, setParams] = useState(THERMISTOR_PRESETS["GM"]); // Default to GM for UI
-
-    const applyPreset = (pName) => {
-      if (pName === "Custom") return;
-      setPreset(pName);
-      setParams(THERMISTOR_PRESETS[pName]);
-    };
-
-    return (
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in slide-in-from-bottom-4 duration-500">
-        <div className="lg:col-span-4 space-y-6">
-          <div className="p-10 rounded-[40px] glass-card border border-white/5 space-y-6">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-12 h-12 rounded-2xl bg-neon-orange/10 flex items-center justify-center border border-neon-orange/20">
-                <Thermometer className="text-neon-orange" size={24} />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-lx font-black text-white uppercase italic tracking-tighter">
-                  {title}
-                </h3>
-                <p className="text-[8px] text-white/30 uppercase tracking-[0.3em]">
-                  Live Feed:{" "}
-                  {sensorKey === "clt" ? clt : iat}°C
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <label className="text-[8px] font-black text-white/30 uppercase tracking-widest pl-2">
-                Select Preset
-              </label>
-              <select
-                value={preset}
-                onChange={(e) => applyPreset(e.target.value)}
-                className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-[10px] font-bold text-white uppercase tracking-widest outline-none focus:border-neon-orange transition-all"
-              >
-                <option value="Custom">-- Custom Sensor --</option>
-                {Object.keys(THERMISTOR_PRESETS).map((k) => (
-                  <option key={k} value={k}>
-                    {k} Sensor
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="p-6 rounded-3xl border border-dashed border-white/10 space-y-4 text-center">
-              <span className="text-[7px] font-black text-white/20 uppercase tracking-[0.2em] block">
-                Bias Resistor Value
-              </span>
-              <input
-                type="number"
-                value={params.bias}
-                onChange={(e) =>
-                  setParams({ ...params, bias: parseInt(e.target.value) })
-                }
-                className="bg-transparent text-center text-3xl font-mono font-black text-white outline-none w-full"
-              />
-              <span className="text-[8px] font-bold text-neon-orange uppercase tracking-widest">
-                OHMS (Ω)
-              </span>
-            </div>
-          </div>
-
-          <button className="w-full p-6 rounded-[30px] bg-neon-orange/10 border border-neon-orange/30 text-neon-orange font-black uppercase tracking-[0.2em] text-[10px] hover:bg-neon-orange hover:text-black transition-all shadow-glow-orange/20">
-            Write Lookup Table to ECU
-          </button>
-        </div>
-
-        <div className="lg:col-span-8 flex flex-col gap-6">
-          <div className="p-10 rounded-[40px] glass-card border border-white/5 grid grid-cols-3 gap-8">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="space-y-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-[10px] font-black text-white/30">
-                    {i}
-                  </div>
-                  <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">
-                    Point {i}
-                  </span>
-                </div>
-                <div className="space-y-4">
-                  <div className="p-4 rounded-2xl border border-white/5">
-                    <span className="text-[7px] text-white/20 uppercase block mb-1">
-                      Temperature (°C)
-                    </span>
-                    <input
-                      type="number"
-                      value={params[`t${i}`]}
-                      onChange={(e) =>
-                        setParams({
-                          ...params,
-                          [`t${i}`]: parseFloat(e.target.value),
-                        })
-                      }
-                      className="bg-transparent text-xl font-mono font-black text-white outline-none w-full"
-                    />
-                  </div>
-                  <div className="p-4 rounded-2xl border border-white/5">
-                    <span className="text-[7px] text-white/20 uppercase block mb-1">
-                      Resistance (Ω)
-                    </span>
-                    <input
-                      type="number"
-                      value={params[`r${i}`]}
-                      onChange={(e) =>
-                        setParams({
-                          ...params,
-                          [`r${i}`]: parseFloat(e.target.value),
-                        })
-                      }
-                      className="bg-transparent text-xl font-mono font-black text-white outline-none w-full"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex-1 p-10 rounded-[40px] border border-dashed border-white/5 flex flex-col items-center justify-center gap-6 text-center">
-            <div className="flex items-center gap-4">
-              {[...Array(5)].map((_, i) => (
-                <div
-                  key={i}
-                  className={`w-8 bg-white/5 rounded-full`}
-                  style={{ height: `${20 + i * 15}px`, opacity: 0.1 + i * 0.1 }}
-                />
-              ))}
-            </div>
-            <p className="text-[10px] text-white/40 uppercase tracking-widest leading-relaxed max-w-sm">
-              Steinhart-Hart calculation is used to generate a 32-point lookup
-              table. Ensure your sensor is at ambient temperature for Point 2 to
-              get the best accuracy.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="relative flex flex-col h-full min-h-0 animate-in fade-in duration-700">
@@ -387,6 +152,8 @@ const SensorCalibration = () => {
         themeColor="cyan"
       />
 
+      {telemetryStatus !== 'live' && <div role="status" className="px-6 py-3 text-sm text-neon-yellow">Telemetry: {telemetryStatus}</div>}
+      {issues.length > 0 && <div role="alert" className="px-6 py-3 text-sm text-neon-yellow">{issues.join(' ')}</div>}
       {/* Internal Navigation */}
       <div
         className="relative z-20 flex bg-white/5 border-b border-white/10 px-6 backdrop-blur-xl shrink-0 pointer-events-auto"
@@ -403,85 +170,33 @@ const SensorCalibration = () => {
       <div className="relative z-0 flex-1 min-h-0 overflow-y-auto custom-scrollbar p-10">
         <div className="max-w-[1400px] mx-auto">
           {activeTab === "filters" && (
-            <div className="space-y-12 animate-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-center justify-between border-b border-white/5 pb-6">
-                <div className="space-y-1">
-                  <h3 className="text-sm font-black text-white uppercase tracking-[0.3em]">
-                    Signal Mixing Console
-                  </h3>
-                  <p className="text-[9px] text-white/30 uppercase tracking-widest">
-                    Control alpha-beta smoothing factors for analog acquisition.
-                  </p>
-                </div>
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-2">
+                <h3 className="text-base font-semibold text-white">Sensor signal filtering</h3>
+                <p className="text-sm text-white/60 leading-relaxed max-w-3xl">
+                  Higher coefficients smooth signal noise but slow the response to changes.
+                  Zero applies no smoothing. These are filter coefficients, not percentages.
+                </p>
+                <p className="text-xs text-neon-cyan/80">Edits are staged. Use Save to apply your changes; Burn stores them in the ECU.</p>
               </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-8 justify-items-center p-10 rounded-[40px] glass-card border border-white/5">
-                <MixerFader
-                  name="ADCFILTER_TPS"
-                  label="TPS Sensor"
-                  icon={MousePointer2}
-                  color="cyan"
-                />
-                <MixerFader
-                  name="ADCFILTER_MAP"
-                  label="MAP Sensor"
-                  icon={Wind}
-                  color="blue"
-                />
-                <MixerFader
-                  name="ADCFILTER_BARO"
-                  label="Baro Sensor"
-                  icon={Wind}
-                  color="indigo"
-                />
-                <MixerFader
-                  name="ADCFILTER_CLT"
-                  label="Coolant Sensor"
-                  icon={Thermometer}
-                  color="emerald"
-                />
-                <MixerFader
-                  name="ADCFILTER_IAT"
-                  label="Air Temp Sensor"
-                  icon={Thermometer}
-                  color="orange"
-                />
-                <MixerFader
-                  name="ADCFILTER_O2"
-                  label="O2 Sensor"
-                  icon={Activity}
-                  color="rose"
-                />
-                <MixerFader
-                  name="ADCFILTER_BAT"
-                  label="Battery Voltage"
-                  icon={Zap}
-                  color="amber"
-                />
-                <MixerFader
-                  name="FILTER_FLEX"
-                  label="Flex Fuel Sensor"
-                  icon={Activity}
-                  color="purple"
-                />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {[
+                  ['ADCFILTER_TPS', 'Throttle position', 'TPS · Keep enough response for throttle changes.', MousePointer2],
+                  ['ADCFILTER_MAP', 'Manifold pressure', 'MAP · Used for instantaneous MAP sampling.', Wind],
+                  ['ADCFILTER_CLT', 'Coolant temperature', 'CLT · Smooth temperature sensor readings.', Thermometer],
+                  ['ADCFILTER_IAT', 'Intake air temperature', 'IAT · Smooth temperature sensor readings.', Thermometer],
+                  ['ADCFILTER_O2', 'Oxygen sensor', 'O2 · Filtering also applies to the second O2 input.', Activity],
+                  ['ADCFILTER_BAT', 'Battery voltage', 'Battery · Smooth supply voltage readings.', Zap],
+                  ['ADCFILTER_BARO', 'Barometric pressure', 'Baro · Used when an external barometric sensor is enabled.', Wind],
+                  ['FILTER_FLEX', 'Flex fuel sensor', 'Flex · Affects ethanol content and fuel temperature response.', Activity],
+                ].map(([name, label, detail, icon]) => <FilterControl key={name}
+                  label={label} detail={detail} icon={icon} value={getFieldValue(name)}
+                  meta={getFieldInfo(name)?.meta} onChange={value => setFieldValue(name, value)} />)}
               </div>
-
-              <div className="p-8 rounded-3xl border border-white/5 flex items-start gap-6 border-dashed">
-                <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center shrink-0">
-                  <Activity size={24} className="text-white/20" />
-                </div>
-                <div className="space-y-2">
-                  <h4 className="text-[10px] font-black text-white/80 uppercase tracking-widest">
-                    Tuning Insight
-                  </h4>
-                  <p className="text-[9px] text-white/40 leading-relaxed uppercase tracking-wider">
-                    Most sensor issues are related to grounding or electrical
-                    interference. Use "Strong Filtering" (values above 180) as a
-                    temporary fix, but investigate wiring if signals jump more
-                    than 5% at idle.
-                  </p>
-                </div>
-              </div>
+              <p className="text-xs text-white/50 leading-relaxed px-1">
+                Increase filtering only as needed. Check sensor wiring and grounding when signals are noisy.
+                Defaults come from the project INI and can differ between firmware versions.
+              </p>
             </div>
           )}
 
@@ -506,15 +221,15 @@ const SensorCalibration = () => {
                   <div className="relative h-64 rounded-3xl border border-white/5 p-8 flex flex-col items-center justify-center overflow-hidden group">
                     <div className="absolute inset-0 bg-neon-cyan/5 opacity-0 group-hover:opacity-100 transition-opacity" />
                     <span className="text-6xl font-mono font-black text-neon-cyan drop-shadow-glow-cyan animate-in zoom-in duration-300">
-                      {tpsADC}
+                      {tpsADC ?? '—'}
                     </span>
                     <span className="text-[10px] font-bold text-white/20 uppercase tracking-widest mt-4">
-                      RAW ADC UNITS (0-1023)
+                      ECU ADC UNITS (0–255)
                     </span>
                     <div className="absolute bottom-10 inset-x-10 h-2 bg-white/5 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-neon-cyan shadow-glow-cyan transition-all duration-200"
-                        style={{ width: `${(tpsADC / 1023) * 100}%` }}
+                        style={{ width: `${((tpsADC ?? 0) / 255) * 100}%` }}
                       />
                     </div>
                   </div>
@@ -522,7 +237,8 @@ const SensorCalibration = () => {
 
                 <div className="grid grid-cols-2 gap-6 mt-10">
                   <button
-                    onClick={() => setFieldValue("tpsMin", tpsADC)}
+                    disabled={telemetryStatus !== 'live' || !Number.isFinite(tpsADC)}
+                    onClick={() => captureTPS('tpsMin')}
                     className="p-6 rounded-3xl bg-white/5 border border-white/10 hover:bg-neon-cyan/[0.15] hover:border-neon-cyan/50 group transition-all"
                   >
                     <h4 className="text-[9px] font-black text-white/40 group-hover:text-neon-cyan uppercase mb-2">
@@ -533,7 +249,8 @@ const SensorCalibration = () => {
                     </span>
                   </button>
                   <button
-                    onClick={() => setFieldValue("tpsMax", tpsADC)}
+                    disabled={telemetryStatus !== 'live' || !Number.isFinite(tpsADC)}
+                    onClick={() => captureTPS('tpsMax')}
                     className="p-6 rounded-3xl bg-white/5 border border-white/10 hover:bg-neon-cyan/[0.15] hover:border-neon-cyan/50 group transition-all"
                   >
                     <h4 className="text-[9px] font-black text-white/40 group-hover:text-neon-cyan uppercase mb-2">
@@ -598,167 +315,18 @@ const SensorCalibration = () => {
             </div>
           )}
 
-          {activeTab === "o2" && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in slide-in-from-bottom-4 duration-500">
-              <div className="lg:col-span-4 space-y-6">
-                <div className="p-10 rounded-[40px] glass-card border border-white/5 space-y-8">
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 rounded-2xl bg-neon-red/10 flex items-center justify-center border border-neon-red/20">
-                      <Activity className="text-neon-red" size={24} />
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="text-lx font-black text-white uppercase italic tracking-tighter">
-                        O2 Sensor Cal
-                      </h3>
-                      <p className="text-[8px] text-white/30 uppercase tracking-[0.3em]">
-                        Live Feed: {afr} AFR
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <label className="text-[8px] font-black text-white/30 uppercase tracking-widest pl-2">
-                      Controller Preset
-                    </label>
-                    <select className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-[10px] font-bold text-white uppercase tracking-widest outline-none focus:border-neon-red transition-all">
-                      <option value="Custom">-- Custom Linear WB --</option>
-                      {Object.keys(O2_PRESETS).map((k) => (
-                        <option key={k} value={k}>
-                          {k}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="p-8 rounded-3xl border border-white/5 flex flex-col items-center justify-center gap-4 text-center">
-                    <span className="text-[8px] text-white/20 uppercase font-black tracking-widest leading-relaxed">
-                      Wideband sensors require a controller with a 0-5V analog
-                      output for Speeduino to read AFR.
-                    </span>
-                  </div>
-                </div>
-
-                <button className="w-full p-6 rounded-[30px] bg-neon-red/10 border border-neon-red/30 text-neon-red font-black uppercase tracking-[0.2em] text-[10px] hover:bg-neon-red hover:text-white transition-all shadow-glow-red/20">
-                  Write AFR Table to ECU
-                </button>
-              </div>
-
-              <div className="lg:col-span-8 space-y-6">
-                <div className="p-10 rounded-[40px] glass-card border border-white/5 grid grid-cols-2 gap-10">
-                  <div className="space-y-8">
-                    <div className="flex items-center gap-3">
-                      <div className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-[10px] font-black text-white/30">
-                        L
-                      </div>
-                      <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">
-                        Low Point (0V default)
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-4 rounded-2xl bg-black/40 border border-white/5">
-                        <span className="text-[7px] text-white/20 uppercase block mb-1">
-                          Voltage (V)
-                        </span>
-                        <input
-                          type="number"
-                          defaultValue={0}
-                          className="bg-transparent text-xl font-mono font-black text-white outline-none w-full"
-                        />
-                      </div>
-                      <div className="p-4 rounded-2xl bg-black/40 border border-white/5">
-                        <span className="text-[7px] text-white/20 uppercase block mb-1">
-                          λ / AFR
-                        </span>
-                        <input
-                          type="number"
-                          defaultValue={10.0}
-                          className="bg-transparent text-xl font-mono font-black text-white outline-none w-full"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-8">
-                    <div className="flex items-center gap-3">
-                      <div className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-[10px] font-black text-white/30">
-                        H
-                      </div>
-                      <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">
-                        High Point (5V default)
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-4 rounded-2xl bg-black/40 border border-white/5">
-                        <span className="text-[7px] text-white/20 uppercase block mb-1">
-                          Voltage (V)
-                        </span>
-                        <input
-                          type="number"
-                          defaultValue={5.0}
-                          className="bg-transparent text-xl font-mono font-black text-white outline-none w-full"
-                        />
-                      </div>
-                      <div className="p-4 rounded-2xl bg-black/40 border border-white/5">
-                        <span className="text-[7px] text-white/20 uppercase block mb-1">
-                          λ / AFR
-                        </span>
-                        <input
-                          type="number"
-                          defaultValue={20.0}
-                          className="bg-transparent text-xl font-mono font-black text-white outline-none w-full"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-10 rounded-[40px] border border-dashed border-white/5 flex flex-col gap-6">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black text-white uppercase tracking-widest italic">
-                        Calibration Curve Graph
-                      </h4>
-                      <p className="text-[8px] text-white/30 uppercase tracking-widest">
-                        Generated Response Curve
-                      </p>
-                    </div>
-                    <div className="px-4 py-2 rounded-xl bg-neon-red/10 border border-neon-red/20 text-[8px] font-bold text-neon-red uppercase">
-                      Linear Scaled
-                    </div>
-                  </div>
-                  <div className="h-48 w-full rounded-3xl border border-white/5 relative overflow-hidden flex items-center justify-center">
-                    <div className="absolute inset-0 opacity-10">
-                      <svg viewBox="0 0 100 100" className="w-full h-full">
-                        <line
-                          x1="10"
-                          y1="90"
-                          x2="90"
-                          y2="10"
-                          stroke="#f43f5e"
-                          strokeWidth="2"
-                          strokeDasharray="4 4"
-                        />
-                      </svg>
-                    </div>
-                    <span className="text-[10px] text-white/10 uppercase font-black tracking-[1em]">
-                      Dynamic Curve Preview
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeTab === "o2" && <CalibrationTable sensor="o2" title="O₂ controller" />}
 
           {activeTab === "temp" && (
             <div className="space-y-20">
-              <ThermistorCal
+              <CalibrationTable
                 title="Coolant Temperature (CLT)"
-                sensorKey="clt"
+                sensor="clt"
               />
               <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-              <ThermistorCal
+              <CalibrationTable
                 title="Intake Air Temperature (IAT)"
-                sensorKey="iat"
+                sensor="iat"
               />
             </div>
           )}
@@ -895,7 +463,7 @@ const SensorCalibration = () => {
                     <div className="absolute inset-0 bg-neon-yellow/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-[40px]" />
                     <div className="relative">
                       <div className="text-[100px] font-mono font-black text-white leading-none tracking-tighter glow-yellow">
-                        {vbatt ?? "0.0"}
+                        {vbatt ?? '—'}
                       </div>
                       <span className="text-[12px] font-black text-neon-yellow absolute -right-10 top-4 uppercase tracking-widest">
                         VOLTS

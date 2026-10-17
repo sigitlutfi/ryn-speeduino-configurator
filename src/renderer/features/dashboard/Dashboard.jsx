@@ -1,344 +1,125 @@
-import React, { useMemo, useState } from "react";
-import { useStore } from "../../core/store.js";
-import { getAccent } from "../../core/theme.js";
-import {
-  normalizeRealtimeDashboard,
-} from "./widgets/widgetPresets.js";
-import { createRealtimeChannelRegistry, getChannelOptions } from "./widgets/channelRegistry.js";
-import WidgetTile from "./widgets/WidgetTile.jsx";
-import { Plus, Pencil, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import React, { useMemo, useState } from 'react'
+import { Plus, Pencil, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { useStore } from '../../core/store.js'
+import { ACCENT_COLORS, getAccent } from '../../core/theme.js'
+import { normalizeRealtimeDashboard } from './widgets/widgetPresets.js'
+import { createRealtimeChannelRegistry, getChannelOptions, resolveWidget } from './widgets/channelRegistry.js'
+import WidgetTile from './widgets/WidgetTile.jsx'
+import { useLiveTelemetry } from '../shared/hooks/useLiveTelemetry.js'
 
-const WIDGET_TYPES = ["gauge", "digital", "status", "trace"];
-
-function DashboardToolbar({ activePreset, presets, onPresetChange, editing, onToggleEditing }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <h1 className="text-sm font-orbitron font-bold uppercase tracking-[0.28em] text-white">
-          Realtime Dashboard
-        </h1>
-        <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">
-          Dynamic telemetry widgets
-        </p>
-      </div>
-
-      <div className="flex items-center gap-2 rounded-2xl border border-white/5 bg-white/5 p-1">
-        {presets.map((preset) => {
-          const isActive = preset.id === activePreset?.id;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => onPresetChange(preset.id)}
-              className={`rounded-xl px-3 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] transition-all ${
-                isActive
-                  ? "bg-neon-cyan/15 text-neon-cyan border border-neon-cyan/30"
-                  : "text-white/35 border border-transparent hover:text-white hover:bg-white/5"
-              }`}
-            >
-              {preset.name}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={onToggleEditing}
-          className={`ml-2 rounded-xl px-3 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] transition-all ${
-            editing
-              ? "bg-neon-cyan/15 text-neon-cyan border border-neon-cyan/30"
-              : "text-white/40 hover:text-white hover:bg-white/5 border border-transparent"
-          }`}
-        >
-          {editing ? "Done" : "Edit Layout"}
-        </button>
-      </div>
-    </div>
-  );
-}
+const control = 'rounded-lg border border-white/15 bg-slate-900 px-2 py-2 text-xs text-slate-200 focus-visible:outline focus-visible:outline-cyan-300'
 
 export default function Dashboard() {
-  const currentProject = useStore((s) => s.currentProject);
-  const realtime = useStore((s) => s.realtime);
-  const settings = useStore((s) => s.settings);
-  const connectionStatus = useStore((s) => s.connection.status);
-  const updateRealtimeDashboard = useStore((s) => s.updateRealtimeDashboard);
-  const convertTemp = useStore((s) => s.convertTemp);
-  const convertPress = useStore((s) => s.convertPress);
-  const convertSpeed = useStore((s) => s.convertSpeed);
-  const tempUnit = useStore((s) => s.tempUnit);
-  const pressUnit = useStore((s) => s.pressUnit);
-  const speedUnit = useStore((s) => s.speedUnit);
-  const [editing, setEditing] = useState(false);
+  const project = useStore(s => s.currentProject), settings = useStore(s => s.settings)
+  const updateDashboard = useStore(s => s.updateRealtimeDashboard)
+  const { realtime, status, receivedAt, error, sourceKey, issues } = useLiveTelemetry()
+  const rate = useStore(s => s.realtimeRateHz), packetSize = useStore(s => s.parsedIni?.outputChannels?.ochBlockSize)
+  const convertTemp = useStore(s => s.convertTemp), convertPress = useStore(s => s.convertPress), convertSpeed = useStore(s => s.convertSpeed)
+  const tempUnit = useStore(s => s.tempUnit), pressUnit = useStore(s => s.pressUnit), speedUnit = useStore(s => s.speedUnit)
+  const [editing, setEditing] = useState(false)
+  const config = useMemo(() => normalizeRealtimeDashboard(settings?.realtimeDashboard), [settings?.realtimeDashboard])
+  const preset = config.presets.find(p => p.id === config.activePresetId) || config.presets[0]
+  const pages = project?.constants?.decodedPages
+  const configuration = useMemo(() => Object.assign({}, ...Object.values(pages || {})), [pages])
+  const registry = useMemo(() => createRealtimeChannelRegistry({ convertTemp, convertPress, convertSpeed, tempUnit, pressUnit, speedUnit,
+    configuration, mapMax: configuration.mapMax }), [convertTemp, convertPress, convertSpeed, tempUnit, pressUnit, speedUnit, configuration])
+  const options = useMemo(() => getChannelOptions(registry), [registry])
+  const changePreset = updater => updateDashboard(current => ({ ...current,
+    presets: current.presets.map(p => p.id === preset.id ? updater(p) : p) }))
+  const changeWidget = (id, patch) => changePreset(p => ({ ...p, widgets: p.widgets.map(w => w.id === id ? { ...w, ...patch } : w) }))
+  const move = (id, direction) => changePreset(p => {
+    const widgets = [...p.widgets], index = widgets.findIndex(w => w.id === id), next = index + direction
+    if (index < 0 || next < 0 || next >= widgets.length) return p
+    ;[widgets[index], widgets[next]] = [widgets[next], widgets[index]]
+    return { ...p, widgets }
+  })
+  const add = () => changePreset(p => ({ ...p, widgets: [...p.widgets,
+    { id: `widget-${Date.now()}-${p.widgets.length}`, channelKey: 'rpm', type: 'digital', color: 'cyan', enabled: true, span: 1 }] }))
+  if (!project) return <div className="p-6 text-sm text-slate-400">Open a project to configure telemetry widgets.</div>
+  const widgets = preset.widgets.filter(w => editing || w.enabled)
+  const age = Number.isFinite(receivedAt) ? Math.max(0, Date.now() - receivedAt) : null
+  const live = status === 'live'
+  const statusColor = live ? 'text-emerald-300' : status === 'blocked' ? 'text-rose-300' : 'text-slate-300'
+  const counts = widgets.reduce((result, w) => {
+    const d = registry[w.channelKey]?.getDisplay(realtime)
+    if (d?.quality === 'check') result.check++
+    if (d?.available === false) result.unavailable++
+    return result
+  }, { check: 0, unavailable: 0 })
 
-  const accent = getAccent(settings?.accentColor);
-  const isConnected = connectionStatus === "connected";
-
-  const dashboardConfig = useMemo(
-    () => normalizeRealtimeDashboard(settings?.realtimeDashboard),
-    [settings?.realtimeDashboard],
-  );
-
-  const activePreset = dashboardConfig.presets.find(
-    (preset) => preset.id === dashboardConfig.activePresetId,
-  ) || dashboardConfig.presets[0];
-
-  const registry = useMemo(
-    () =>
-      createRealtimeChannelRegistry({
-        convertTemp,
-        convertPress,
-        convertSpeed,
-        tempUnit,
-        pressUnit,
-        speedUnit,
-      }),
-    [convertTemp, convertPress, convertSpeed, tempUnit, pressUnit, speedUnit],
-  );
-
-  const getRealtimeValue = (channelKey) => {
-    const entry = registry[channelKey];
-    return entry?.getDisplay(realtime)?.value ?? 0;
-  };
-
-  const handlePresetChange = (presetId) => {
-    updateRealtimeDashboard((current) => ({
-      ...current,
-      activePresetId: presetId,
-    }));
-  };
-
-  const channelOptions = useMemo(() => getChannelOptions(registry), [registry]);
-
-  const updateActivePreset = (updater) => {
-    if (!activePreset) return;
-    updateRealtimeDashboard((current) => ({
-      ...current,
-      presets: current.presets.map((preset) => {
-        if (preset.id !== activePreset.id) return preset;
-        return updater(preset);
-      }),
-    }));
-  };
-
-  const moveWidget = (widgetId, direction) => {
-    updateActivePreset((preset) => {
-      const widgets = [...preset.widgets];
-      const index = widgets.findIndex((widget) => widget.id === widgetId);
-      if (index === -1) return preset;
-      const nextIndex = direction === "left" ? index - 1 : index + 1;
-      if (nextIndex < 0 || nextIndex >= widgets.length) return preset;
-      [widgets[index], widgets[nextIndex]] = [widgets[nextIndex], widgets[index]];
-      return { ...preset, widgets };
-    });
-  };
-
-  const removeWidget = (widgetId) => {
-    updateActivePreset((preset) => ({
-      ...preset,
-      widgets: preset.widgets.filter((widget) => widget.id !== widgetId),
-    }));
-  };
-
-  const updateWidget = (widgetId, patch) => {
-    updateActivePreset((preset) => ({
-      ...preset,
-      widgets: preset.widgets.map((widget) =>
-        widget.id === widgetId ? { ...widget, ...patch } : widget,
-      ),
-    }));
-  };
-
-  const addWidget = () => {
-    const defaultChannel = channelOptions[0];
-    if (!defaultChannel) return;
-    updateActivePreset((preset) => ({
-      ...preset,
-      widgets: [
-        ...preset.widgets,
-        {
-          id: `${preset.id}-widget-${Date.now()}`,
-          type: defaultChannel.defaultWidget,
-          channelKey: defaultChannel.key,
-          color: "cyan",
-          enabled: true,
-        },
-      ],
-    }));
-  };
-
-  if (!currentProject) return null;
-
-  const widgets = (activePreset?.widgets || []).filter((widget) => widget.enabled !== false);
-
-  return (
-    <div className="h-full overflow-y-auto custom-scrollbar p-6 space-y-6">
-      <DashboardToolbar
-        activePreset={activePreset}
-        presets={dashboardConfig.presets}
-        onPresetChange={handlePresetChange}
-        editing={editing}
-        onToggleEditing={() => setEditing((value) => !value)}
-      />
-
-      <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-orbitron font-bold uppercase tracking-[0.22em] text-white/35">
-            {isConnected ? "Live" : "Offline"}
-          </span>
-          <span
-            className={`h-2 w-2 rounded-full ${isConnected ? "animate-pulse" : ""}`}
-            style={{ backgroundColor: isConnected ? accent.main : "rgba(255,255,255,0.22)" }}
-          />
-          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">
-            {widgets.length} widgets loaded
-          </span>
-          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/25">
-            preset: {activePreset?.name || "Tune"}
-          </span>
-          {editing ? (
-            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-neon-cyan">
-              edit mode
-            </span>
-          ) : null}
-        </div>
+  return <div className="h-full overflow-y-auto bg-slate-950/45 p-4 sm:p-6 space-y-5 custom-scrollbar">
+    <header className="flex flex-wrap items-start justify-between gap-4">
+      <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300/80">{project.projectName || 'ECU workspace'}</p>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-100">Realtime telemetry</h1>
+        <p className="mt-1 text-xs text-slate-400">Engine data, sensor quality and operating state.</p>
       </div>
-
-      {editing ? (
-        <div className="rounded-2xl border border-white/5 bg-white/5 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-[11px] font-orbitron font-bold uppercase tracking-[0.22em] text-white">
-                Layout Editor
-              </h2>
-              <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">
-                Move, change, add, or remove dashboard widgets
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={addWidget}
-              className="inline-flex items-center gap-2 rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 px-3 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] text-neon-cyan transition-all hover:bg-neon-cyan hover:text-black"
-            >
-              <Plus size={14} />
-              Add Widget
-            </button>
-          </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="tablist" aria-label="Dashboard presets" className="flex gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
+          {config.presets.map(p => <button key={p.id} type="button" role="tab" aria-selected={p.id === preset.id}
+            onClick={() => updateDashboard(current => ({ ...current, activePresetId: p.id }))}
+            className={`rounded-lg px-3 py-2 text-xs font-medium ${p.id === preset.id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>{p.name}</button>)}
         </div>
-      ) : null}
-
-      <div className="relative">
-        <div className={`${isConnected ? "" : "pointer-events-none opacity-45 saturate-0 brightness-[0.42] transition-all duration-500"}`}>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 auto-rows-fr">
-            {widgets.map((widget) => {
-              const channel = registry[widget.channelKey];
-              if (!channel) return null;
-              const display = channel.getDisplay(realtime);
-              return (
-                <div key={widget.id} className="h-full flex flex-col gap-2">
-                  {editing ? (
-                    <div className="rounded-2xl border border-white/5 bg-black/30 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="inline-flex items-center gap-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] text-white/55">
-                          <Pencil size={12} />
-                          Widget Controls
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeWidget(widget.id)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-neon-red/25 bg-neon-red/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-neon-red"
-                        >
-                          <Trash2 size={12} />
-                          Remove
-                        </button>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <label className="space-y-1">
-                          <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/30">
-                            Channel
-                          </span>
-                          <select
-                            value={widget.channelKey}
-                            onChange={(e) => {
-                              const nextChannel = channelOptions.find((option) => option.key === e.target.value);
-                              updateWidget(widget.id, {
-                                channelKey: e.target.value,
-                                type: nextChannel?.supportedWidgets.includes(widget.type)
-                                  ? widget.type
-                                  : nextChannel?.defaultWidget || "digital",
-                              });
-                            }}
-                            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white outline-none"
-                          >
-                            {channelOptions.map((option) => (
-                              <option key={option.key} value={option.key}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="space-y-1">
-                          <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/30">
-                            Widget Type
-                          </span>
-                          <select
-                            value={widget.type}
-                            onChange={(e) => updateWidget(widget.id, { type: e.target.value })}
-                            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white outline-none"
-                          >
-                            {(channel.supportedWidgets || WIDGET_TYPES).map((type) => (
-                              <option key={type} value={type}>
-                                {type}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => moveWidget(widget.id, "left")}
-                          className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 hover:text-white"
-                        >
-                          <ChevronLeft size={12} />
-                          Left
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveWidget(widget.id, "right")}
-                          className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 hover:text-white"
-                        >
-                          Right
-                          <ChevronRight size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex-1 min-h-0">
-                    <WidgetTile
-                      widget={widget}
-                      display={display}
-                      color={accent.main}
-                      getRealtimeValue={getRealtimeValue}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {!isConnected ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="rounded-full border border-white/8 bg-black/35 px-4 py-2 text-[10px] font-orbitron font-bold uppercase tracking-[0.22em] text-white/45 backdrop-blur-sm">
-              Cluster offline
-            </div>
-          </div>
-        ) : null}
+        <button type="button" aria-pressed={editing} onClick={() => setEditing(v => !v)} className={`${control} inline-flex items-center gap-2`}>
+          <Pencil size={13} />{editing ? 'Done editing' : 'Edit layout'}
+        </button>
       </div>
+    </header>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-900/65 px-4 py-3 text-xs">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span role="status" className={`inline-flex items-center gap-2 font-medium ${statusColor}`}>
+          <span className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-300' : status === 'blocked' ? 'bg-rose-300' : 'bg-slate-500'}`} />{status.toUpperCase()}
+        </span>
+        <span className="font-mono text-slate-400">{live && Number.isFinite(rate) ? `${rate.toFixed(1)} Hz` : '— Hz'}</span>
+        <span className="font-mono text-slate-400">{age === null ? 'No packet yet' : status === 'offline' ? `Last packet ${new Date(receivedAt).toLocaleTimeString()}` : age < 1000 ? `Packet age ${age} ms` : `Packet age ${(age / 1000).toFixed(1)} s`}</span>
+        {Number.isFinite(packetSize) && <span className="font-mono text-slate-500">{packetSize} B</span>}
+      </div>
+      <span className="text-slate-400">{live && (counts.check || counts.unavailable) ? `${counts.check} to check · ${counts.unavailable} unavailable` : `${preset.widgets.filter(w => w.enabled).length} widgets`}</span>
     </div>
-  );
+    {!live && <div className="rounded-xl border border-white/10 px-4 py-3 text-sm text-slate-300">
+      {error || ({ offline: 'ECU offline. You can still edit the layout.', waiting: 'Connected. Waiting for the first telemetry packet.', stale: 'No fresh ECU packet. Values are hidden until telemetry resumes.', blocked: 'Telemetry is blocked. Check the firmware/INI connection.' })[status]}
+    </div>}
+    {issues.length > 0 && <details className="rounded-xl border border-amber-300/25 bg-amber-300/5 px-4 py-3" open>
+      <summary className="cursor-pointer text-xs font-semibold text-amber-200">{issues.length} configuration or sensor checks</summary>
+      <ul role="alert" className="mt-2 list-disc space-y-1 pl-4 text-xs leading-relaxed text-amber-100/80">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>
+    </details>}
+    {editing && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-4">
+      <p className="text-xs text-slate-300">Change channels, size and color. Hidden widgets stay editable. Layout saves automatically.</p>
+      <button type="button" onClick={add} className={`${control} inline-flex items-center gap-2`}><Plus size={14} />Add widget</button>
+    </div>}
+    {!widgets.length && <div className="rounded-2xl border border-dashed border-white/15 px-6 py-12 text-center text-sm text-slate-400">
+      No visible widgets in this preset. <button type="button" onClick={() => setEditing(true)} className="text-cyan-300 underline">Edit layout</button>
+    </div>}
+    <div className="grid grid-cols-1 items-stretch gap-3 md:grid-cols-2 lg:grid-cols-3 min-[68.75rem]:grid-cols-4">
+      {widgets.map(raw => {
+        const widget = resolveWidget(raw, registry), channel = registry[widget.channelKey]
+        const display = channel?.getDisplay(realtime) || { label: raw.channelKey, available: false, reason: 'Unsupported channel. Choose another channel in Edit layout.' }
+        const index = preset.widgets.findIndex(w => w.id === raw.id)
+        return <div key={raw.id} className={`flex min-w-0 flex-col gap-2 ${raw.span === 2 ? 'md:col-span-2 lg:col-span-3 min-[68.75rem]:col-span-2' : ''} ${raw.enabled ? '' : 'opacity-60'}`}>
+          {editing && <div className="space-y-2 rounded-xl border border-white/15 bg-slate-950 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={raw.enabled} onChange={e => changeWidget(raw.id, { enabled: e.target.checked })} />Visible</label>
+              <div className="flex gap-1">
+                <button type="button" aria-label={`Move ${display.label} left`} disabled={index === 0} onClick={() => move(raw.id, -1)} className="rounded p-1 text-slate-400 hover:text-white disabled:opacity-25"><ChevronLeft size={15} /></button>
+                <button type="button" aria-label={`Move ${display.label} right`} disabled={index === preset.widgets.length - 1} onClick={() => move(raw.id, 1)} className="rounded p-1 text-slate-400 hover:text-white disabled:opacity-25"><ChevronRight size={15} /></button>
+                <button type="button" aria-label={`Remove ${display.label}`} onClick={() => changePreset(p => ({ ...p, widgets: p.widgets.filter(w => w.id !== raw.id) }))} className="rounded p-1 text-rose-300"><Trash2 size={14} /></button>
+              </div>
+            </div>
+            <label className="block text-[10px] text-slate-400">Channel<select aria-label={`Channel for ${raw.id}`} value={raw.channelKey} className={`${control} mt-1 w-full`}
+              onChange={e => { const next = registry[e.target.value]; changeWidget(raw.id, { channelKey: e.target.value, type: next.supportedWidgets.includes(raw.type) ? raw.type : next.defaultWidget }) }}>
+              {!channel && <option value={raw.channelKey}>{raw.channelKey} (unavailable)</option>}
+              {options.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select></label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-[10px] text-slate-400">Style<select aria-label={`Style for ${raw.id}`} value={widget.type} onChange={e => changeWidget(raw.id, { type: e.target.value })} className={`${control} mt-1 w-full`}>
+                {(channel?.supportedWidgets || ['digital']).map(type => <option key={type} value={type}>{type}</option>)}</select></label>
+              <label className="text-[10px] text-slate-400">Width<select aria-label={`Width for ${raw.id}`} value={raw.span} onChange={e => changeWidget(raw.id, { span: Number(e.target.value) })} className={`${control} mt-1 w-full`}><option value={1}>Standard</option><option value={2}>Wide</option></select></label>
+            </div>
+            <label className="block text-[10px] text-slate-400">Color<select aria-label={`Color for ${raw.id}`} value={raw.color} onChange={e => changeWidget(raw.id, { color: e.target.value })} className={`${control} mt-1 w-full`}>
+              {Object.keys(ACCENT_COLORS).map(color => <option key={color}>{color}</option>)}</select></label>
+          </div>}
+          <WidgetTile widget={widget} display={display} color={getAccent(raw.color).main} telemetryStatus={status} receivedAt={receivedAt} sourceKey={sourceKey} />
+        </div>
+      })}
+    </div>
+  </div>
 }

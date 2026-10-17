@@ -1,54 +1,24 @@
-# Contributing to RYN Speeduino Configurator 🤝
+# Contributing
 
-First off, thank you for considering contributing to the **RYN Speeduino Configurator**! It's people like you that make the open-source tuning community great.
+Report bugs and feature requests through [GitHub issues](https://github.com/sigitlutfi/ryn-speeduino-configurator/issues). Include reproduction steps, expected/actual behavior, OS, firmware signature, INI pairing, and relevant logs. Remove personal paths and private tune data before sharing.
 
-## How Can I Contribute?
+## Setup
 
-### Reporting Bugs 🐛
-- Search the [Issues](https://github.com/sigitlutfi/ryn-speeduino-configurator/issues) to see if the bug has already been reported.
-- If not, create a new issue. Include steps to reproduce, what you expected to happen, and what actually happened.
-- Provide your Environment details (OS, ECU Firmware version, Serial interface).
+Use Bun 1.4.0 and Node 24 or newer.
 
-### Suggesting Features 💡
-- Open a new issue and describe the feature you'd like to see.
-- Explain the use case and why it would be beneficial for the community.
-- If possible, include sketches or UI ideas.
+```sh
+bun install --frozen-lockfile
+bun run start
+```
 
-### Code Contributions 💻
+Read [AGENTS.md](AGENTS.md) for source layout, style and transaction rules, and [docs/README.md](docs/README.md) for application behavior.
 
-1. **Fork the repository.**
-2. **Create a new branch** for your feature or bugfix:
-   ```bash
-   git checkout -b feature/my-cool-feature
-   ```
-3. **Write code following our style guides.**
-   - JavaScript (Standard Code Style)
-   - React 19 (Hooks, Functional Components)
-   - Zustand for State
-   - 2-space indentation
-4. **Test your changes.**
-   - Run the app and verify the behavior.
-   - Use Mock Serial if you don't have hardware access.
-5. **Commit your changes:**
-   ```bash
-   git commit -m "Add: my cool feature description"
-   ```
-6. **Push to your fork:**
-   ```bash
-   git push origin feature/my-cool-feature
-   ```
-7. **Submit a Pull Request.**
+## Changes and review
 
-## Development Setup
+Create a focused branch, preserve unrelated changes, and describe the concrete behavior changed in the pull request. Follow existing JavaScript/React conventions. Keep Save, RAM upload and EEPROM Burn semantics distinct.
 
-To set up your development environment:
-1. Fork and clone the repo.
-2. Run `npm install`.
-3. Run `npm start` to launch the dev environment.
+Run the relevant tests with `bun run test` and renderer validation with `bun run build:renderer` for UI changes. Package/native-runtime changes also need `bun run package` and `bun run test:package`. The lint script is currently a placeholder.
 
-## Code of Conduct
+For firmware, INI, pin contracts or dependency changes, follow [UPGRADE_WORKFLOW.md](UPGRADE_WORKFLOW.md). Use a reviewed firmware checkout and record pairing. A mock test does not establish hardware compatibility.
 
-Help us keep this community professional and welcoming. Please treat everyone with respect and focus on constructive feedback.
-
----
-*Happy Tuning!*
+Update maintained docs and fixtures when public behavior or contracts change. Explain validation performed and any remaining hardware/platform limitations. Keep discussion professional, respectful and focused on constructive feedback.

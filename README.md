@@ -1,110 +1,45 @@
-# RYN Speeduino Configurator 🏎️⚡
+# RYN Speeduino Configurator
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![Electron](https://img.shields.io/badge/Electron-41.0.3-blue)
-![React](https://img.shields.io/badge/React-19-blue)
+Aplikasi desktop Electron untuk konfigurasi dan tuning Speeduino: project portabel, editor tabel/kurva, kalibrasi sensor, sinkronisasi ECU, telemetry dan dashboard widget.
 
-**RYN Speeduino Configurator** is a modern, high-performance desktop application designed for tuning Speeduino ECUs (Engine Control Units). Built with Electron and React, it offers a sleek, professional interface with real-time telemetry, 3D visualizations, and robust ECU synchronization.
+## Dokumentasi
 
-<p align="center">
-  <img src="screenshots/Screenshot 2026-04-03 200811.png" width="800" alt="RYN Configurator Dashboard">
-</p>
+Mulai dari [panduan pengembang dan replikasi Flutter](docs/README.md). Untuk menyerahkan pekerjaan kepada tim mobile, ikuti [checklist handoff](docs/HANDOFF_CHECKLIST.md). Kontrak protokol, alur pengguna, format project, recovery, fitur custom, fixture dan acceptance tersedia di sana.
 
-> [!CAUTION]
-> **USE AT YOUR OWN RISK (DWYOR)**. This project is a personal experiment. Calibration and tuning can cause **permanent engine damage, hardware failure, or data loss**. The author is not responsible for any consequences resulting from the use of this software. Proceed with extreme caution.
+Baseline yang didokumentasikan memakai firmware `speeduino 202504-ryn-perf-v5`, project schema **5**, halaman konfigurasi **1–15**, serta paket telemetry **167 byte**. Pairing firmware/INI dicatat pada [firmware contract](compatibility/firmware.json). Source working tree dan tes menjadi acuan implementasi; HEAD saja belum mencakup semua perubahan baseline handoff.
 
-## ⚠️ Compatibility Note
+## Development
 
-While **RYN Configurator** supports standard Speeduino `.ini` files, some advanced racing features (such as **Anti-Lag System**, **Rolling Pop & Bang**, and **Advanced Ignition Control**) require a **custom firmware and .ini file** provided in this repository.
+Gunakan **Bun 1.4.0** dan **Node 24 atau lebih baru**, sesuai package.json.
 
-Using an official/standard `.ini` may result in some control modules being disabled or showing incomplete data.
+```sh
+bun install --frozen-lockfile
+bun run start
+bun run test
+bun run build:renderer
+```
 
-- ⚒️ **Firmware Flashing**: Integrated ESP/AVR firmware deployment—no extra tools needed.
-- 🚀 **Real-time Tuning**: Instant ECU synchronization with modern protocol support (CRC32 protection).
-- 📊 **Dynamic Dashboard**: High-frequency telemetry updates (10Hz+) for critical engine parameters.
-- 🧊 **3D Visualization**: Visualize tuning tables (VE, Ignition, AFR) in 3D using React Three Fiber.
-- 📂 **Universal INI Support**: Flexible metadata parsing with embedded INI portability—open your projects anywhere.
-- 🎨 **Modern UI**: Restrained neon accents on a professional acrylic surface.
-- 🛠️ **Smart Sync**: Bidirectional synchronization between ECU RAM, EEPROM (Burn), and local project files.
+Packaging dan pemeriksaan native runtime Windows:
 
-## 🚀 Roadmap (Future Features)
+```sh
+bun run package
+bun run test:package -- "out/RYN CONFIGURATOR-win32-x64"
+```
 
-- 🧪 **Auto-Tune Engine**: Advanced algorithm for real-time volumetric efficiency optimization.
-- 📉 **Advance Data Logging**: High-speed, high-resolution telemetry logging for deep analysis.
-- 🛰️ **Remote Tuning**: Over-the-air (OTA) tuning support via ESP-32 Wi-Fi bridge.
+Baca [kontribusi](CONTRIBUTING.md) dan [panduan repository](AGENTS.md). Untuk perubahan firmware, INI, pin atau dependency, ikuti [upgrade workflow](UPGRADE_WORKFLOW.md). Perintah lint saat ini masih placeholder.
 
-## 📸 Screenshots
+## Perilaku utama
 
-<p align="center">
-  <img src="screenshots/Screenshot 2026-04-03 200722.png" width="400" alt="VE Table Editor">
-  <img src="screenshots/Screenshot 2026-04-03 200633.png" width="400" alt="Anti-Lag System">
-</p>
-<p align="center">
-  <img src="screenshots/Screenshot 2026-04-03 200737.png" width="400" alt="Firmware Flashing">
-  <img src="screenshots/Screenshot 2026-04-03 200811.png" width="400" alt="Project Launch Screen">
-</p>
+- Project `.rynproj` menyimpan embedded INI, raw page buffers, integritas file dan metadata project.
+- Save project, upload ke RAM ECU, dan Burn ke EEPROM memiliki makna terpisah.
+- Koneksi melewati handshake, pemeriksaan kontrak dan sinkronisasi sebelum operasi tuning diizinkan.
+- Telemetry menampilkan kualitas/freshness data; status tersambung saja tidak menjamin data LIVE.
+- Lima fitur custom: Pit Limiter, Rumble Idle, Anti-Lag, Rolling Pop & Bang, dan Drive Mode. Modul Launch, Flat Shift, Nitrous dan WMI juga tersedia.
 
-## 🛠️ Technology Stack
+Dukungan transport, flashing dan board mengikuti implementasi serta pairing yang diuji; lihat [batas platform](docs/11_MOBILE_PLATFORM_AND_FIRMWARE.md).
 
-- **Core**: Electron, Node.js
-- **Frontend**: React 19, TailwindCSS, Framer Motion
-- **State Management**: Zustand (Multi-slice architecture)
-- **Visualization**: Three.js (React Three Fiber), uPlot
-- **Hardware Communication**: Node-SerialPort (Modern CRC32 Protocol)
+## Proyek
 
-## 🚀 Getting Started
+Repository: [ryn-speeduino-configurator](https://github.com/sigitlutfi/ryn-speeduino-configurator). Lisensi yang dinyatakan package.json: MIT.
 
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (Version 20 or later recommended)
-- [npm](https://www.npmjs.com/)
-
-### Installation
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/sigitlutfi/ryn-speeduino-configurator.git
-   cd ryn-speeduino-configurator
-   ```
-
-2. **Install dependencies:**
-
-   ```bash
-   npm install
-   ```
-
-3. **Start the application:**
-   ```bash
-   npm start
-   ```
-
-### Hardware Connection
-
-Connect your Speeduino ECU via USB. The application will automatically attempt to detect common serial ports. For development without hardware, the app includes a **Mock Serial** mode.
-
-## 🤝 Contributing
-
-We welcome contributions from the community! Whether it's reporting bugs, suggesting features, or submitting pull requests, your help is appreciated.
-
-Please check out our [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
-
-## ⚖️ License
-
-Distributed under the **MIT License**. See `LICENSE` for more information.
-
-## 📧 Contact
-
-**Sigit Lutfy** - [sigitlutfy@gmail.com](mailto:sigitlutfy@gmail.com)
-
-Project Link: [https://github.com/sigitlutfi/ryn-speeduino-configurator](https://github.com/sigitlutfi/ryn-speeduino-configurator)
-
----
-
-## ⚖️ Disclaimer
-
-**Speeduino** is a trademark of its respective owners. This project is an independent open-source tool and is not officially affiliated with, endorsed by, or connected to the official Speeduino project or its creators. Use this software at your own risk. Digital tuning can cause engine damage if not handled correctly.
-
----
-
-_Built with ❤️ for the Speeduino Community._
+RYN Configurator adalah proyek independen untuk ekosistem Speeduino dan tidak menyatakan afiliasi resmi dengan Speeduino. Pengujian software tidak menggantikan validasi tune dan perangkat keras.

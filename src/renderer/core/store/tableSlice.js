@@ -1,3 +1,5 @@
+import { applyTableDrafts, displayTablesFromPages } from './utils/table.drafts.js';
+
 function makeDefaultTable(baseValue) {
   return Array.from({ length: 16 }, (_, row) =>
     Array.from({ length: 16 }, (_, col) =>
@@ -67,8 +69,23 @@ export const INITIAL_TABLES = {
   },
 };
 
+function markDraft(state, key, tables) {
+  const tableDrafts = { ...state.tableDrafts, [key]: true };
+  if (key === 'afr' || key === 'lambda') {
+    const alias = key === 'afr' ? 'lambda' : 'afr';
+    try {
+      const prepared = applyTableDrafts(state.currentProject, tables, state.parsedIni, { [key]: true });
+      const views = displayTablesFromPages(state.parsedIni, prepared.constants.decodedPages, tables);
+      tables = { ...tables, [alias]: views[alias] };
+      delete tableDrafts[alias];
+    } catch { /* Keep invalid input editable; Save reports the validation error. */ }
+  }
+  return { tables, tableDrafts };
+}
+
 export const createTableSlice = (set) => ({
   tables: INITIAL_TABLES,
+  tableDrafts: {},
 
   setTableCell: (tableName, row, col, value) =>
     set((s) => {
@@ -76,11 +93,12 @@ export const createTableSlice = (set) => ({
       const newValues = table.values.map((r, ri) =>
         ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r
       );
-      return { tables: { ...s.tables, [tableName]: { ...table, values: newValues } } };
+      return markDraft(s, tableName, { ...s.tables, [tableName]: { ...table, values: newValues } });
     }),
 
-  updateTable: (tableName, tableData) =>
-    set((s) => ({
-      tables: { ...s.tables, [tableName]: { ...s.tables[tableName], ...tableData } }
-    })),
+  updateTable: (tableName, tableData, draft = false) =>
+    set((s) => {
+      const tables = { ...s.tables, [tableName]: { ...s.tables[tableName], ...tableData } };
+      return draft ? markDraft(s, tableName, tables) : { tables };
+    }),
 });

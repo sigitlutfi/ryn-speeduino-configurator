@@ -1,4 +1,7 @@
+import { createSerialQueue, closeSerialPort, writeSerialPort } from './serial-lifecycle.js';
 import { app, BrowserWindow, ipcMain, protocol, net } from "electron";
+import { atomicWriteFile, loadProjectFile, saveProjectFile } from './project-files.js';
+import { normalizeRecentProjects, recentProjectDescriptor } from '../shared/project-format.js';
 import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
@@ -12,41 +15,25 @@ if (started) {
 }
 
 // --- Serial state ---
+const serialQueue = createSerialQueue();
 let activePort = null; // serialport instance or mock
+let serialConnectGeneration = 0;
 let mainWindow = null;
 let activeFirmwareFlash = null;
+let activeECUReset = false;
+let firmwareOperationReserved = false;
 
 const emitFirmwareStatus = (payload) => {
   mainWindow?.webContents.send("firmware:status", payload);
 };
 
 const closeActivePortForFlash = async () => {
-  if (!activePort) return;
-
-  try {
-    if (typeof activePort.close === "function") {
-      await new Promise((resolve) => {
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-
-        try {
-          activePort.close(() => finish());
-          setTimeout(finish, 250);
-        } catch {
-          finish();
-        }
-      });
-    }
-  } catch (error) {
-    console.warn("[main] Failed to close active port before flash", error);
-  } finally {
+  ++serialConnectGeneration;
+  await serialQueue(async () => {
+    await closeSerialPort(activePort);
     activePort = null;
-    mainWindow?.webContents.send("serial:status", "disconnected");
-  }
+    mainWindow?.webContents.send('serial:status', 'disconnected');
+  });
 };
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -328,113 +315,129 @@ ipcMain.handle("serial:listPorts", async () => {
     const { SerialPort } = await import("serialport");
     const ports = await SerialPort.list();
     return [{ path: "MOCK", manufacturer: "Simulation" }, ...ports];
-  } catch {
+  } catch (error) {
+    console.error('[Serial] Failed to enumerate physical ports', error);
     return [{ path: "MOCK", manufacturer: "Simulation" }];
   }
 });
 
 ipcMain.handle("serial:connect", async (_event, portPath, baud) => {
+  if (firmwareOperationReserved) return { ok: false, error: 'Firmware/reset operation owns the serial port' };
+  const generation = ++serialConnectGeneration;
+  mainWindow?.webContents.send('serial:status', 'connecting');
   console.log("[main] serial:connect requested", { portPath, baud });
-  if (activePort) {
+  return serialQueue(async () => {
+    if (generation !== serialConnectGeneration) return { ok: false, error: 'Connection cancelled' };
+    if (activeFirmwareFlash) return { ok: false, error: 'Firmware flash is running' };
+    try { await closeSerialPort(activePort); }
+    catch (error) { return { ok: false, error: error.message }; }
+    activePort = null;
+
+    if (portPath === "MOCK") {
+      console.log("[main] Opening mock serial transport");
+      activePort = createMockSerial((data) => {
+        if (generation !== serialConnectGeneration) return;
+        mainWindow?.webContents.send("serial:data", Array.from(data));
+      });
+      mainWindow?.webContents.send("serial:status", "connected");
+      return { ok: true };
+    }
+
     try {
-      activePort.close();
-    } catch {}
-    activePort = null;
-  }
-
-  if (portPath === "MOCK") {
-    console.log("[main] Opening mock serial transport");
-    activePort = createMockSerial((data) => {
-      mainWindow?.webContents.send("serial:data", Array.from(data));
-    });
-    mainWindow?.webContents.send("serial:status", "connected");
-    return { ok: true };
-  }
-
-  try {
-    const { SerialPort } = await import("serialport");
-    const port = new SerialPort({
-      path: portPath,
-      baudRate: baud || 115200,
-      autoOpen: false,
-    });
-
-    port.on("data", (data) => {
-      mainWindow?.webContents.send("serial:data", Array.from(data));
-    });
-
-    port.on("error", (err) => {
-      console.error("[main] Serial port error", {
-        portPath,
-        message: err.message,
+      const { SerialPort } = await import("serialport");
+      if (generation !== serialConnectGeneration) return { ok: false, error: 'Connection cancelled' };
+      const port = new SerialPort({
+        path: portPath,
+        baudRate: baud || 115200,
+        autoOpen: false,
       });
-      mainWindow?.webContents.send("serial:status", "error:" + err.message);
-    });
 
-    port.on("close", () => {
-      console.log("[main] Serial port closed", { portPath });
-      mainWindow?.webContents.send("serial:status", "disconnected");
-      activePort = null;
-    });
-
-    await new Promise((resolve, reject) => {
-      port.open((err) => {
-        if (err) reject(err);
-        else resolve();
+      port.on("data", (data) => {
+        if (activePort !== port || generation !== serialConnectGeneration) return;
+        mainWindow?.webContents.send("serial:data", Array.from(data));
       });
-    });
 
-    activePort = port;
-    console.log("[main] Serial port opened", { portPath, baud: baud || 115200 });
-    mainWindow?.webContents.send("serial:status", "connected");
-    return { ok: true };
-  } catch (err) {
-    console.error("[main] serial:connect failed", {
-      portPath,
-      baud,
-      message: err.message,
-    });
-    return { ok: false, error: err.message };
-  }
-});
+      port.on("error", (err) => {
+        if (generation !== serialConnectGeneration) return;
+        console.error("[main] Serial port error", {
+          portPath,
+          message: err.message,
+        });
+        mainWindow?.webContents.send("serial:status", "error:" + err.message);
+      });
 
-ipcMain.handle("serial:disconnect", async () => {
-  if (!activePort) return { ok: true };
-  try {
-    activePort.close();
-    activePort = null;
-  } catch {}
-  mainWindow?.webContents.send("serial:status", "disconnected");
-  return { ok: true };
-});
+      port.on("close", () => {
+        if (activePort !== port || generation !== serialConnectGeneration) return;
+        console.log("[main] Serial port closed", { portPath });
+        mainWindow?.webContents.send("serial:status", "disconnected");
+        activePort = null;
+      });
 
-ipcMain.handle("serial:sendCommand", async (_event, cmd) => {
-  if (!activePort) return { ok: false, error: "Not connected" };
-  try {
-    const buf =
-      typeof cmd === "string" ? Buffer.from(cmd, "ascii") : Buffer.from(cmd);
-    activePort.write(buf);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
-
-ipcMain.handle("serial:flush", async () => {
-  if (!activePort) return { ok: false, error: "Not connected" };
-  try {
-    if (typeof activePort.flush === "function") {
       await new Promise((resolve, reject) => {
-        activePort.flush((err) => {
+        port.open((err) => {
           if (err) reject(err);
           else resolve();
         });
       });
+
+      if (generation !== serialConnectGeneration) {
+        await closeSerialPort(port);
+        return { ok: false, error: 'Connection cancelled' };
+      }
+      activePort = port;
+      console.log("[main] Serial port opened", { portPath, baud: baud || 115200 });
+      mainWindow?.webContents.send("serial:status", "connected");
+      return { ok: true };
+    } catch (err) {
+      console.error("[main] serial:connect failed", {
+        portPath,
+        baud,
+        message: err.message,
+      });
+      return { ok: false, error: err.message };
     }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  });
+});
+
+ipcMain.handle('serial:disconnect', async () => {
+  if (firmwareOperationReserved) throw new Error('Firmware/reset operation owns the serial port');
+  ++serialConnectGeneration;
+  return serialQueue(async () => {
+    try {
+      await closeSerialPort(activePort);
+      activePort = null;
+      mainWindow?.webContents.send('serial:status', 'disconnected');
+      return { ok: true };
+    } catch (error) {
+      mainWindow?.webContents.send('serial:status', `error:${error.message}`);
+      throw error;
+    }
+  });
+});
+
+ipcMain.handle('serial:sendCommand', async (_event, cmd) => {
+  const generation = serialConnectGeneration;
+  return serialQueue(async () => {
+    try {
+      if (firmwareOperationReserved || generation !== serialConnectGeneration) throw new Error('Connection changed or ECU reset is running');
+      const buf = typeof cmd === 'string' ? Buffer.from(cmd, 'ascii') : Buffer.from(cmd);
+      await writeSerialPort(activePort, buf);
+      return { ok: true };
+    } catch (error) { return { ok: false, error: error.message }; }
+  });
+});
+
+ipcMain.handle('serial:flush', async () => {
+  const generation = serialConnectGeneration;
+  return serialQueue(async () => {
+    try {
+      if (firmwareOperationReserved || !activePort || generation !== serialConnectGeneration) throw new Error('Not connected or connection changed');
+      if (typeof activePort.flush === 'function') await new Promise((resolve, reject) => {
+        activePort.flush(error => error ? reject(error) : resolve());
+      });
+      return { ok: true };
+    } catch (error) { return { ok: false, error: error.message }; }
+  });
 });
 
 // --- Persistence ---
@@ -446,7 +449,8 @@ const loadConfig = () => {
     return { recentProjects: [], settings: { theme: "neon" } };
   }
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    const config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    return { ...config, recentProjects: normalizeRecentProjects(config.recentProjects) };
   } catch {
     return { recentProjects: [], settings: { theme: "neon" } };
   }
@@ -454,7 +458,7 @@ const loadConfig = () => {
 
 const saveConfig = (config) => {
   const fs = require("node:fs");
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  atomicWriteFile(CONFIG_FILE, JSON.stringify({ ...config, recentProjects: normalizeRecentProjects(config.recentProjects) }, null, 2));
 };
 
 ipcMain.handle("config:get", async () => loadConfig());
@@ -468,16 +472,8 @@ ipcMain.handle("config:save-settings", async (event, settings) => {
 ipcMain.handle("project:add-recent", async (event, project) => {
   const config = loadConfig();
   // Filter out the same project if it exists and add it to the top
-  const recent = config.recentProjects.filter(
-    (p) => p.filePath !== project.filePath,
-  );
-  // Migrate old data if it doesn't have a color
-  recent.unshift({ 
-    ...project, 
-    lastOpened: new Date().toISOString(),
-    color: project.color || 'cyan' 
-  });
-  config.recentProjects = recent.slice(0, 10); // Keep last 10
+  const descriptor = recentProjectDescriptor({ ...project, lastOpened: new Date().toISOString() });
+  config.recentProjects = normalizeRecentProjects([descriptor, ...config.recentProjects]);
   saveConfig(config);
   return config.recentProjects;
 });
@@ -507,7 +503,7 @@ ipcMain.handle("project:pick-save", async (event, projectName) => {
   const { dialog } = require("electron");
   const result = await dialog.showSaveDialog(mainWindow, {
     title: "Save Ryn Project",
-    defaultPath: `${projectName.toLowerCase().replace(/\s+/g, "_")}.rynproj`,
+    defaultPath: `${String(projectName || 'new_project').trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/[. ]+$/g, '') || 'new_project'}.rynproj`,
     filters: [{ name: "Ryn Project", extensions: ["rynproj"] }],
   });
 
@@ -544,7 +540,7 @@ ipcMain.handle("firmware:flash", async (_event, payload = {}) => {
   const hexPath = payload.hexPath;
   const resetEeprom = payload.resetEeprom === true;
 
-  if (activeFirmwareFlash) {
+  if (activeFirmwareFlash || firmwareOperationReserved) {
     return { ok: false, error: "Firmware flashing is already in progress" };
   }
 
@@ -560,53 +556,62 @@ ipcMain.handle("firmware:flash", async (_event, payload = {}) => {
     return { ok: false, error: "Selected HEX file does not exist" };
   }
 
-  await closeActivePortForFlash();
+  firmwareOperationReserved = true;
+  try {
+    await closeActivePortForFlash();
 
-  const tooling = resolveAvrdudeTooling();
-  const args = [];
-  let tempEepromArtifact = null;
-  if (tooling.configPath) {
-    args.push("-C", tooling.configPath);
+    const tooling = resolveAvrdudeTooling();
+    const args = [];
+    let tempEepromArtifact = null;
+    if (tooling.configPath) {
+      args.push("-C", tooling.configPath);
+    }
+    args.push(
+      "-v",
+      "-p",
+      "atmega2560",
+      "-c",
+      "wiring",
+      "-b",
+      "115200",
+      "-P",
+      port,
+      "-D",
+      "-U",
+      `flash:w:${hexPath}:i`,
+    );
+
+    if (resetEeprom) {
+      tempEepromArtifact = createBlankEepromHex();
+      args.push("-U", `eeprom:w:${tempEepromArtifact.filePath}:i`);
+    }
+
+    return await runAvrdudeJob({
+      port,
+      args,
+      preflightMessage: resetEeprom
+        ? `Launching avrdude via ${tooling.source} with EEPROM reset`
+        : `Launching avrdude via ${tooling.source}`,
+      startMessage: resetEeprom
+        ? `Flashing ${path.basename(hexPath)} to ${port} with EEPROM reset`
+        : `Flashing ${path.basename(hexPath)} to ${port}`,
+      progressLabel: "Writing firmware to ECU",
+      completionMessage: "Firmware flashing completed",
+      tempArtifacts: tempEepromArtifact ? [tempEepromArtifact] : [],
+    });
+  } catch (error) {
+    emitFirmwareStatus({ type: 'error', phase: 'preflight', message: error.message });
+    return { ok: false, error: error.message };
+  } finally {
+    firmwareOperationReserved = false;
   }
-  args.push(
-    "-v",
-    "-p",
-    "atmega2560",
-    "-c",
-    "wiring",
-    "-b",
-    "115200",
-    "-P",
-    port,
-    "-D",
-    "-U",
-    `flash:w:${hexPath}:i`,
-  );
 
-  if (resetEeprom) {
-    tempEepromArtifact = createBlankEepromHex();
-    args.push("-U", `eeprom:w:${tempEepromArtifact.filePath}:i`);
-  }
-
-  return await runAvrdudeJob({
-    port,
-    args,
-    preflightMessage: resetEeprom
-      ? `Launching avrdude via ${tooling.source} with EEPROM reset`
-      : `Launching avrdude via ${tooling.source}`,
-    startMessage: resetEeprom
-      ? `Flashing ${path.basename(hexPath)} to ${port} with EEPROM reset`
-      : `Flashing ${path.basename(hexPath)} to ${port}`,
-    progressLabel: "Writing firmware to ECU",
-    completionMessage: "Firmware flashing completed",
-    tempArtifacts: tempEepromArtifact ? [tempEepromArtifact] : [],
-  });
 });
 
 ipcMain.handle("firmware:reset-eeprom", async (_event, payload = {}) => {
   const port = payload.port;
 
-  if (activeFirmwareFlash) {
+  if (activeFirmwareFlash || firmwareOperationReserved) {
     return { ok: false, error: "Firmware operation is already in progress" };
   }
 
@@ -614,125 +619,92 @@ ipcMain.handle("firmware:reset-eeprom", async (_event, payload = {}) => {
     return { ok: false, error: "Serial port is required" };
   }
 
-  await closeActivePortForFlash();
+  firmwareOperationReserved = true;
+  try {
+    await closeActivePortForFlash();
 
-  const tooling = resolveAvrdudeTooling();
-  const args = [];
-  const tempEepromArtifact = createBlankEepromHex();
+    const tooling = resolveAvrdudeTooling();
+    const args = [];
+    const tempEepromArtifact = createBlankEepromHex();
 
-  if (tooling.configPath) {
-    args.push("-C", tooling.configPath);
+    if (tooling.configPath) {
+      args.push("-C", tooling.configPath);
+    }
+
+    args.push(
+      "-v",
+      "-p",
+      "atmega2560",
+      "-c",
+      "wiring",
+      "-b",
+      "115200",
+      "-P",
+      port,
+      "-D",
+      "-U",
+      `eeprom:w:${tempEepromArtifact.filePath}:i`,
+    );
+
+    return await runAvrdudeJob({
+      port,
+      args,
+      preflightMessage: `Launching avrdude via ${tooling.source} for EEPROM reset`,
+      startMessage: `Resetting EEPROM on ${port}`,
+      progressLabel: "Writing blank EEPROM image",
+      completionMessage: "EEPROM reset completed",
+      tempArtifacts: [tempEepromArtifact],
+    });
+  } catch (error) {
+    emitFirmwareStatus({ type: 'error', phase: 'preflight', message: error.message });
+    return { ok: false, error: error.message };
+  } finally {
+    firmwareOperationReserved = false;
   }
 
-  args.push(
-    "-v",
-    "-p",
-    "atmega2560",
-    "-c",
-    "wiring",
-    "-b",
-    "115200",
-    "-P",
-    port,
-    "-D",
-    "-U",
-    `eeprom:w:${tempEepromArtifact.filePath}:i`,
-  );
-
-  return await runAvrdudeJob({
-    port,
-    args,
-    preflightMessage: `Launching avrdude via ${tooling.source} for EEPROM reset`,
-    startMessage: `Resetting EEPROM on ${port}`,
-    progressLabel: "Writing blank EEPROM image",
-    completionMessage: "EEPROM reset completed",
-    tempArtifacts: [tempEepromArtifact],
-  });
 });
 
 ipcMain.handle("firmware:reboot", async (_event, payload = {}) => {
   const port = payload.port;
   const baud = payload.baud || 115200;
-
-  if (activeFirmwareFlash) {
-    return { ok: false, error: "Firmware operation is already in progress" };
-  }
-
-  if (!port) {
-    return { ok: false, error: "Serial port is required" };
-  }
-
-  if (port === "MOCK") {
-    emitFirmwareStatus({
-      type: "completed",
-      phase: "rebooting",
-      percent: 100,
-      message: "Mock ECU reboot completed",
-    });
-    return { ok: true };
-  }
-
-  let portInstance = activePort;
-  let openedForReboot = false;
-
+  if (activeFirmwareFlash || firmwareOperationReserved || activeECUReset) return { ok: false, error: 'Another firmware/reset operation is running' };
+  if (!port || port === 'MOCK') return { ok: false, error: 'A physical serial port is required for USB reset' };
+  // Reserve synchronously, before entering the queue, so another flash/reset
+  // cannot slip between draining writes and acquiring the port.
+  activeECUReset = true;
+  firmwareOperationReserved = true;
+  const reservation = { type: 'usb-reset' };
+  activeFirmwareFlash = reservation;
   try {
-    emitFirmwareStatus({
-      type: "state",
-      phase: "preflight",
-      message: "Preparing ECU reboot",
-    });
-
-    if (!portInstance) {
-      const { SerialPort } = await import("serialport");
-      portInstance = new SerialPort({
-        path: port,
-        baudRate: baud,
-        autoOpen: false,
-      });
-
-      await new Promise((resolve, reject) => {
-        portInstance.open((error) => {
-          if (error) reject(error);
-          else resolve();
-        });
-      });
-
-      openedForReboot = true;
-    }
-
-    emitFirmwareStatus({
-      type: "state",
-      phase: "rebooting",
-      percent: 0,
-      message: `Rebooting ECU on ${port}`,
-    });
-
-    await pulsePortResetLines(portInstance);
-    await delay(250);
-
-    emitFirmwareStatus({
-      type: "completed",
-      phase: "rebooting",
-      percent: 100,
-      message: "ECU reboot pulse sent",
-    });
-
-    return { ok: true };
-  } catch (error) {
-    emitFirmwareStatus({
-      type: "error",
-      phase: "rebooting",
-      message: error.message || "ECU reboot failed",
-    });
-    return { ok: false, error: error.message || "ECU reboot failed" };
-  } finally {
-    if (openedForReboot && portInstance) {
+    return await serialQueue(async () => {
+      let portInstance = activePort;
+      if (!portInstance || portInstance.isOpen === false || portInstance.path !== port) {
+        throw new Error('Connect and verify the selected ECU port before USB reset');
+      }
+      // Renderer quiesces protocol traffic and checks fresh engine/burn/test
+      // status before requesting this transport-only operation.
+      ++serialConnectGeneration;
+      activePort = null;
+      mainWindow?.webContents.send('serial:status', 'disconnected');
       try {
-        await new Promise((resolve) => {
-          portInstance.close(() => resolve());
-        });
-      } catch {}
-    }
+        emitFirmwareStatus({ type: 'state', phase: 'rebooting', message: `Sending USB reset pulse on ${port}` });
+        await pulsePortResetLines(portInstance);
+        await delay(250);
+      } finally {
+        // Keep the handle reachable if Windows refuses to close it.
+        try { await closeSerialPort(portInstance); }
+        catch (error) { activePort = portInstance; throw error; }
+      }
+      emitFirmwareStatus({ type: 'state', phase: 'reconnecting', message: 'USB reset pulse sent; ECU recovery is not yet verified' });
+      return { ok: true, pulseSent: true, baud };
+    });
+  } catch (error) {
+    emitFirmwareStatus({ type: 'error', phase: 'rebooting', message: error.message });
+    return { ok: false, error: error.message };
+  } finally {
+    activeECUReset = false;
+    firmwareOperationReserved = false;
+    if (activeFirmwareFlash === reservation) activeFirmwareFlash = null;
   }
 });
 
@@ -760,28 +732,58 @@ ipcMain.handle("project:pick-existing", async () => {
 });
 
 ipcMain.handle("project:load-file", async (event, filePath) => {
-  const fs = require("node:fs");
   try {
-    const content = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(content);
+    return loadProjectFile(filePath);
   } catch (e) {
+    if ((e instanceof SyntaxError || e.message.includes('integrity check failed')) && fs.existsSync(`${filePath}.bak`)) {
+      try {
+        const recovered = loadProjectFile(`${filePath}.bak`);
+        const { dialog } = require('electron');
+        const { response } = await dialog.showMessageBox(mainWindow, {
+          type: 'warning', title: 'Recover project backup',
+          message: 'This project file cannot be read. A backup is available.',
+          detail: 'Open the backup as a recovered copy, then use Save As to choose a new project file.',
+          buttons: ['Open recovered copy', 'Cancel'], defaultId: 0, cancelId: 1,
+        });
+        if (response === 0) return { ...recovered, filePath: '', fileRevision: undefined, recoveredFrom: `${filePath}.bak` };
+      } catch (backupError) { console.warn('Project backup recovery failed:', backupError.message); }
+    }
     return { error: e.message };
   }
 });
 
-ipcMain.handle("project:save-file", async (event, filePath, data) => {
-  const fs = require("node:fs");
-  console.log('[main] Saving project to:', filePath);
+ipcMain.handle("project:save-file", async (event, filePath, data, options) => {
   try {
-    const json = JSON.stringify(data, null, 2);
-    console.log('[main] JSON stringified, size:', json.length, 'bytes');
-    fs.writeFileSync(filePath, json);
-    console.log('[main] File written successfully');
-    return { ok: true };
+    return saveProjectFile(filePath, data, options);
   } catch (e) {
     console.error('[main] Save failed:', e);
     return { error: e.message };
   }
+});
+
+ipcMain.handle('project:bundled-ini', async () => {
+  const candidates = [path.join(app.getAppPath(), 'speeduino.ini'), path.join(process.resourcesPath, 'speeduino.ini')];
+  for (const filePath of candidates) {
+    if (fs.existsSync(filePath)) return { path: filePath, content: fs.readFileSync(filePath, 'utf8') };
+  }
+  return { error: 'Bundled INI is unavailable. Choose the INI that matches your firmware.' };
+});
+
+ipcMain.handle('project:confirm-transition', async (event, projectName) => {
+  const { dialog } = require('electron');
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'question', title: 'Unsaved project changes',
+    message: `Save changes to ${projectName || 'this project'}?`,
+    detail: 'Save includes pending local field and table edits. It saves the project file on this computer.',
+    buttons: ['Save', 'Discard', 'Cancel'], defaultId: 0, cancelId: 2,
+  });
+  return ['save', 'discard', 'cancel'][response];
+});
+
+let pendingClose = null;
+let closeRequestId = 0;
+ipcMain.on('project:complete-close', (event, requestId, approved) => {
+  if (pendingClose && requestId === closeRequestId && event.sender === mainWindow?.webContents) pendingClose(approved === true);
 });
 
 // --- Existing handlers remain but updated etc ---
@@ -805,7 +807,7 @@ const createWindow = () => {
     backgroundColor: "#0d1117",
     autoHideMenuBar: false,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -822,6 +824,21 @@ const createWindow = () => {
     );
   }
 
+  let closeApproved = false;
+  mainWindow.on('close', event => {
+    if (closeApproved) return;
+    event.preventDefault();
+    if (pendingClose) return;
+    const requestedWindow = mainWindow;
+    // A missing or unresponsive renderer never counts as approval to lose edits.
+    const timeout = setTimeout(() => { pendingClose = null; }, 30000);
+    pendingClose = approved => {
+      clearTimeout(timeout);
+      pendingClose = null;
+      if (approved && !requestedWindow.isDestroyed()) { closeApproved = true; requestedWindow.close(); }
+    };
+    requestedWindow.webContents.send('project:request-close', ++closeRequestId);
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -833,12 +850,12 @@ app.whenReady().then(() => {
       const url = new URL(request.url);
       // Pathname will be /C:/Users/... or /home/user/...
       let decodedPath = decodeURIComponent(url.pathname);
-      
+
       // On Windows, pathname usually starts with a leading slash like /C:/
       if (process.platform === 'win32' && decodedPath.startsWith('/') && decodedPath[2] === ':') {
         decodedPath = decodedPath.slice(1);
       }
-      
+
       const fileUrl = pathToFileURL(decodedPath).toString();
       return net.fetch(fileUrl);
     } catch (err) {

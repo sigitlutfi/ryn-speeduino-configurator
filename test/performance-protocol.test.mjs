@@ -27,14 +27,14 @@ function packet() {
 test('INI page sizes and fields match the performance v3 wire contract', () => {
   assert.equal(ini.constants.pageSizes[6], 143)
   assert.equal(ini.constants.pageSizes[10], 220)
-  assert.equal(ini.outputChannels.ochBlockSize, 152)
+  assert.equal(ini.outputChannels.ochBlockSize, 167)
   assert.equal(ini.outputChannels.channels.rollingPopBangFuelCorrection.offset, 151)
 })
 
 test('INI decoding and legacy decoding agree on performance telemetry', () => {
   const raw = packet()
   const legacy = parseRealtime(raw).performance
-  const metadata = decodeOutputChannels(raw, ini).performance
+  const metadata = decodeOutputChannels(raw, { ...ini, outputChannels: { ...ini.outputChannels, ochBlockSize: raw.length } }).performance
   for (const key of Object.keys(legacy)) assert.equal(metadata[key], legacy[key], key)
   assert.equal(metadata.alsActiveTime, 4321)
   assert.equal(metadata.rollingPopBangActiveTime, 1234)
@@ -59,9 +59,9 @@ test('a fragmented wrapped response of 145 bytes is not misclassified as realtim
   assert.equal(realtime.length, 0)
 })
 
-test('output channel read accepts a 145-byte fragment of a 152-byte raw response', async () => {
+test('output channel read accepts a 145-byte fragment of a framed 152-byte response', async () => {
   const listeners = new Set()
-  const raw = packet()
+  const raw = wrapModernProtocol(Buffer.concat([Buffer.from([0]), packet()]))
   globalThis.window = {
     serial: {
       onData(listener) { listeners.add(listener); return () => listeners.delete(listener) },
@@ -75,7 +75,7 @@ test('output channel read accepts a 145-byte fragment of a 152-byte raw response
     },
   }
   const { serialService } = await import('../src/renderer/core/services/serialService.js')
-  const result = await serialService.readOutputChannels(ini, { settleMs: 1, timeout: 500 })
+  const result = await serialService.readOutputChannels({ ...ini, outputChannels: { ...ini.outputChannels, ochBlockSize: 152 } }, { settleMs: 1, timeout: 500 })
   assert.equal(result.performance.rollingPopBangCutCounter, 5678)
   assert.equal(result.performance.rollingPopBangTimingCorr, -12)
   delete globalThis.window
@@ -87,12 +87,12 @@ test('mock ECU advertises the same signature and returns a complete output block
   const send = command => new Promise(resolve => { receive = resolve; port.write(command) })
   const signature = await send(Buffer.from('Q'))
   assert.equal(signature.toString('ascii'), ini.info.signature)
-  const framed = await send(formatOutputChannelsCommand(ini.outputChannels.ochGetCommand, 0, 152))
+  const framed = await send(formatOutputChannelsCommand(ini.outputChannels.ochGetCommand, 0, 167))
   const parser = new ModernProtocolParser()
   let payload
   parser.on('response', response => { payload = response.data })
   parser.feed(framed)
-  assert.equal(payload.length, 152)
+  assert.equal(payload.length, 167)
   assert.equal(decodeOutputChannels(payload, ini).performance.rollingPopBangFuelCorr, 100)
   port.close()
 })

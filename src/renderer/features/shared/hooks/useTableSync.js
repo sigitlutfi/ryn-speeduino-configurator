@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useCallback, useRef } from "react";
 import { useStore } from "../../../core/store.js";
 import { getTableMetadata, getVarMetadata } from "../../../../shared/ini-parser.js";
-import { getDecodedPage } from "../utils/projectConstants.js";
+import { getDecodedPage, getDecodedPages } from "../utils/projectConstants.js";
+import { resolveNumericMetadata } from '../../../../shared/protocol/ini-numeric.js';
 import { toDisplay, toRaw } from "../utils/normalization.js";
 
 function arraysEqual(a = [], b = []) {
@@ -41,7 +42,6 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
   const tableState = useStore((s) => s.tables[storeKey]);
   
   const updateTable = useStore((s) => s.updateTable);
-  const updateConstants = useStore((s) => s.updateConstants);
   const writePagesToRAM = useStore((s) => s.writePagesToRAM);
   const burnPendingPages = useStore((s) => s.burnPendingPages);
   const saveProject = useStore((s) => s.saveProject);
@@ -67,13 +67,14 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
   );
 
   const meta = useMemo(() => getTableMetadata(parsedIni, iniTableId), [parsedIni, iniTableId]);
+  const decodedPages = useMemo(() => getDecodedPages(constants, parsedIni), [constants, parsedIni]);
   const xMeta = useMemo(
-    () => (meta?.xBinsVar ? getVarMetadata(parsedIni, meta.xBinsVar) : null),
-    [parsedIni, meta?.xBinsVar],
+    () => resolveNumericMetadata(meta?.xBinsVar ? getVarMetadata(parsedIni, meta.xBinsVar) : null, parsedIni, decodedPages),
+    [parsedIni, meta?.xBinsVar, decodedPages],
   );
   const yMeta = useMemo(
-    () => (meta?.yBinsVar ? getVarMetadata(parsedIni, meta.yBinsVar) : null),
-    [parsedIni, meta?.yBinsVar],
+    () => resolveNumericMetadata(meta?.yBinsVar ? getVarMetadata(parsedIni, meta.yBinsVar) : null, parsedIni, decodedPages),
+    [parsedIni, meta?.yBinsVar, decodedPages],
   );
 
   const scaling = useMemo(() => {
@@ -116,12 +117,8 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
             return options.transform.toDisplay(val, scaling);
           }
 
-          const needsScaling = (scaling.scale !== 1 && val > 40 && val > scaling.scale * 100);
-          if (needsScaling || scaling.scale === 1) {
-            const displayDigits = options.prec !== undefined ? options.prec : scaling.digits;
-            return parseFloat((val * scaling.scale + scaling.offset).toFixed(displayDigits));
-          }
-          return val; 
+          const displayDigits = options.prec !== undefined ? options.prec : scaling.digits;
+          return parseFloat(((val + scaling.offset) * scaling.scale).toFixed(displayDigits));
         });
         matrix.push(row);
       }
@@ -152,25 +149,11 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
   const handleSave = useCallback(async (isBurn = false) => {
     if (!meta) return;
     
-    const rawValues = tableState.values.flat().map(v => {
-        if (options.transform?.toRaw) {
-            return options.transform.toRaw(v, scaling);
-        }
-        return Math.round((v - scaling.offset) / scaling.scale);
-    });
-
-    const pageData = getDecodedPage(constants, meta.page);
-    const rawRpmAxis = denormalizeAxisValues(tableState?.rpmAxis || [], xMeta);
-    const rawLoadAxis = denormalizeAxisValues(tableState?.loadAxis || [], yMeta);
-
-    await updateConstants({
-      [meta.page]: {
-        ...pageData,
-        [meta.xBinsVar]: rawRpmAxis,
-        [meta.yBinsVar]: rawLoadAxis,
-        [meta.zBinsVar]: rawValues,
-      },
-    });
+    const committed = useStore.getState().applyProjectTableDrafts();
+    if (!committed.ok) {
+      notify(committed.error, 'error');
+      return committed;
+    }
 
     if (connection.status === "connected") {
       const ramResult = await writePagesToRAM([meta.page]);
@@ -202,7 +185,7 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
       notify(`Save Failed: ${result.error}`, "error");
     }
     return result;
-  }, [meta, tableState?.values, tableState?.rpmAxis, tableState?.loadAxis, scaling, constants, updateConstants, writePagesToRAM, burnPendingPages, saveProject, notify, options.transform?.toRaw, connection.status, denormalizeAxisValues, xMeta, yMeta]);
+  }, [meta, writePagesToRAM, burnPendingPages, saveProject, notify, connection.status]);
 
   const isDirty = useMemo(() => {
     if (!meta || !constants) return false;
@@ -217,7 +200,7 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
     if (!original) return false;
     const currentRaw = tableState.values.flat().map(v => {
         if (options.transform?.toRaw) return options.transform.toRaw(v, scaling);
-        return Math.round((v - scaling.offset) / scaling.scale);
+        return Math.round(v / scaling.scale - scaling.offset);
     });
     const currentRawRpmAxis = denormalizeAxisValues(tableState?.rpmAxis || [], xMeta);
     const currentRawLoadAxis = denormalizeAxisValues(tableState?.loadAxis || [], yMeta);
@@ -234,7 +217,7 @@ export function useTableSync(storeKey, iniTableId, options = {}) {
     loadAxis: tableState?.loadAxis || [],
     meta,
     scaling,
-    update: (newMatrix) => updateTable(storeKey, newMatrix),
+    update: (newMatrix) => updateTable(storeKey, newMatrix, true),
     handleSave,
     isDirty
   };

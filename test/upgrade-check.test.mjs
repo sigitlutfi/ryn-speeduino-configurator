@@ -27,7 +27,13 @@ test('the runtime guard accepts paired Celsius/Fahrenheit metadata and rejects s
       ini => { ini.constants.pages[6].pitLimiterRPM.defaultValue++ },
       ini => { ini.constants.pageSizes[10]++ },
       ini => { ini.outputChannels.channels.alsActiveTime.offset++ },
+      ini => { ini.outputChannels.channels.fuelLoadRes.raw = ['{ 4 }'] },
       ini => { delete ini.constants.pages[6].pitLimiterPin.requiresPowerCycle },
+      ini => { ini.tables.sparkTbl = { ...ini.tables.veTable1Tbl } },
+      ini => { ini.tables.sparkTbl.page = 2 },
+      ini => { ini.tables.sparkTbl.xBins.varName += '-changed' },
+      ini => { Object.values(ini.curves)[0].yBins.varName += '-changed' },
+      ini => { ini.dialogFields.Auxin0pina[0].conditions = ['false'] },
     ]) {
       const changed = structuredClone(parsed)
       mutate(changed)
@@ -40,6 +46,8 @@ test('presentation-only INI differences preserve the runtime contract', () => {
   const parsed = parseIni(content, { CELSIUS: true })
   parsed.fieldHelp.alsFuelModifier = 'Project-specific explanation'
   parsed.dialogs = {}
+  for (const table of Object.values(parsed.tables)) table.title = 'Personalized editor title'
+  for (const curve of Object.values(parsed.curves)) curve.title = 'Personalized curve title'
   assert.doesNotThrow(() => assertWritableContract(state(parsed)))
   assert.equal(renderMetadataContract(content.replace(/\r\n/g, '\n')), renderMetadataContract(content))
 })
@@ -83,6 +91,12 @@ test('pair gate rejects stale INI, generated map and configurator ownership sour
     ['src/shared/protocol/avr-pin-mapping.js', /AVR map is stale/],
     ['src/shared/protocol/ini-contract.js', /runtime INI contract is stale/],
     ['src/shared/protocol/board-pins.js', /pin ownership\/validation changed/],
+    ['src/shared/protocol/drive-modes.js', /pin ownership\/validation changed/],
+    ['src/renderer/core/store/slices/drive.modes.js', /pin ownership\/validation changed/],
+    ['src/shared/protocol/drive-mode-migration.js', /pin ownership\/validation changed/],
+    ['src/shared/protocol/pin-registry.js', /pin ownership\/validation changed/],
+    ['src/shared/protocol/configuration-policy.js', /pin ownership\/validation changed/],
+    ['src/shared/protocol/configuration-validation.js', /pin ownership\/validation changed/],
   ]) {
     const filename = resolve(directory, path)
     const original = readFileSync(filename, 'utf8')

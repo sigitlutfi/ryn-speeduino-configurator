@@ -1,215 +1,75 @@
-import React, { useCallback } from "react";
-import Gauge from "../../../ui/Gauge/Index.jsx";
-import RealtimeChart from "../../../ui/Layout/RealtimeChart.jsx";
+import React from 'react'
+import Gauge from '../../../ui/Gauge/Index.jsx'
+import RealtimeChart from '../../../ui/Layout/RealtimeChart.jsx'
 
-function toneClasses(tone) {
-  switch (tone) {
-    case "green":
-      return "border-neon-green/30 bg-neon-green/10 text-neon-green";
-    case "red":
-      return "border-neon-red/30 bg-neon-red/10 text-neon-red";
-    case "yellow":
-      return "border-neon-yellow/30 bg-neon-yellow/10 text-neon-yellow";
-    case "orange":
-      return "border-neon-orange/30 bg-neon-orange/10 text-neon-orange";
-    case "purple":
-      return "border-neon-purple/30 bg-neon-purple/10 text-neon-purple";
-    default:
-      return "border-neon-cyan/30 bg-neon-cyan/10 text-neon-cyan";
-  }
-}
-
-function TileShell({ title, subtitle, children }) {
-  return (
-    <div className="glass rounded-2xl border border-white/5 p-4 min-h-[240px] h-full flex flex-col overflow-hidden">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-[10px] font-orbitron font-bold uppercase tracking-[0.24em] text-white/90">
-            {title}
-          </h3>
-          {subtitle ? (
-            <p className="mt-1 text-[10px] text-white/35 uppercase tracking-[0.18em] font-bold">
-              {subtitle}
-            </p>
-          ) : null}
-        </div>
-      </div>
-      <div className="flex-1 min-h-0">{children}</div>
-    </div>
-  );
-}
+const format = (value, digits = 0) => Number.isFinite(value) ? value.toFixed(digits) : '—'
+const tones = { green: '#6ee7b7', red: '#fda4af', orange: '#fdba74', yellow: '#fde68a', cyan: '#67e8f9' }
 
 function DigitalWidget({ display, color }) {
-  if (display.lines?.length) {
-    return (
-      <div className="grid h-full grid-rows-2 gap-3">
-        {display.lines.map((line) => (
-          <div
-            key={line.label}
-            className="relative overflow-hidden rounded-2xl border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] px-4 py-4"
-          >
-            <div
-              className="pointer-events-none absolute inset-x-0 top-0 h-px"
-              style={{ background: `linear-gradient(90deg, transparent, ${color}66, transparent)` }}
-            />
-            <div className="flex items-start justify-between gap-3">
-              <div className="text-[9px] font-orbitron font-bold uppercase tracking-[0.22em] text-white/38">
-                {line.label}
-              </div>
-              {line.unit ? (
-                <div className="rounded-full border border-white/8 bg-black/30 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/34">
-                  {line.unit}
-                </div>
-              ) : null}
-            </div>
-            <div className="mt-3 font-mono text-[30px] font-black leading-none tracking-tight text-white">
-              {line.value}
-            </div>
-          </div>
-        ))}
+  if (display.lines) return <div className="grid flex-1 grid-cols-2 gap-4 items-center">
+    {display.lines.map(line => <div key={line.label} className="min-w-0">
+      <p className="text-xs text-slate-400">{line.label}</p>
+      <p className="mt-2 font-mono text-3xl font-semibold tabular-nums text-slate-100">{line.value}</p>
+      <p className="mt-1 text-xs text-slate-400">{line.unit}</p>
+    </div>)}
+  </div>
+  const numeric = Number.isFinite(display.value), span = display.max - display.min
+  const percent = numeric && span > 0 ? Math.max(0, Math.min(100, (display.value - display.min) / span * 100)) : null
+  return <div className="flex flex-1 flex-col justify-center gap-5 py-3">
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span className={`${numeric ? 'text-4xl' : 'text-2xl'} min-w-0 font-mono font-semibold tracking-tight tabular-nums text-slate-100`}>
+        {display.text ?? format(display.value, display.decimals)}
+      </span>
+      <span className="text-sm text-slate-400">{display.unit}</span>
+    </div>
+    {percent !== null && <div className="h-1 rounded-full bg-white/10" aria-hidden="true">
+      <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: color }} />
+    </div>}
+  </div>
+}
+
+function StatusWidget({ groups = [] }) {
+  return <dl className="grid flex-1 grid-cols-2 content-center gap-x-4 gap-y-3 py-2">
+    {groups.map(group => <div key={group.label} className="flex items-center justify-between gap-2 border-b border-white/5 pb-2">
+      <dt className="text-xs text-slate-400">{group.label}</dt>
+      <dd className="font-mono text-xs font-medium" style={{ color: group.active === null ? '#64748b' : group.active ? tones[group.tone] || tones.cyan : '#94a3b8' }}>
+        {group.active === null ? '—' : group.active ? 'ON' : 'OFF'}
+      </dd>
+    </div>)}
+  </dl>
+}
+
+export default function WidgetTile({ widget, display, color = '#67e8f9', telemetryStatus = 'offline', receivedAt, sourceKey }) {
+  const live = telemetryStatus === 'live' && display.available !== false
+  const quality = live ? display.quality || 'live' : telemetryStatus === 'live' ? 'unavailable' : telemetryStatus
+  const statusText = ({ live: 'LIVE', check: 'CHECK', partial: 'PARTIAL', unavailable: 'NO DATA', offline: 'OFFLINE', stale: 'STALE', waiting: 'WAITING', blocked: 'BLOCKED' })[quality] || 'NO DATA'
+  const statusColor = ['check', 'partial'].includes(quality) ? '#fcd34d' : live ? color : '#94a3b8'
+  const range = Number.isFinite(display.min) && Number.isFinite(display.max)
+    ? `${format(display.min, display.decimals > 0 ? Math.min(display.decimals, 1) : 0)} – ${format(display.max, display.decimals > 0 ? Math.min(display.decimals, 1) : 0)} ${display.unit}` : null
+  return <section aria-label={`${display.label} widget`} data-channel={widget.channelKey} data-quality={quality}
+    className={`relative flex h-full ${widget.type === 'gauge' ? 'min-h-[266px]' : 'min-h-[206px]'} flex-col overflow-hidden rounded-2xl border bg-slate-950/75 p-4 shadow-sm ${quality === 'check' ? 'border-amber-300/35' : 'border-white/10'}`}>
+    <div className="absolute inset-x-4 top-0 h-px opacity-60" style={{ backgroundColor: live ? color : '#475569' }} />
+    <header className="mb-3 flex items-start justify-between gap-3">
+      <h3 className="text-xs font-semibold leading-5 text-slate-300">{display.label}</h3>
+      <span className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] tracking-wide" style={{ color: statusColor }}>
+        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: statusColor }} />{statusText}
+      </span>
+    </header>
+    {widget.type === 'trace' ? <RealtimeChart label={display.label} color={color} compact
+      min={display.traceMin ?? 0} max={display.traceMax ?? 100} value={live ? display.value : null}
+      sampleTime={receivedAt} active={live} seriesKey={`${sourceKey}:${widget.channelKey}:${display.unit}`}
+      unit={display.unit || ''} decimals={display.decimals ?? 0} />
+      : !live ? <div className="flex flex-1 flex-col justify-center gap-3 py-5">
+        <p className="font-mono text-4xl text-slate-500">—</p>
+        <p className="text-xs leading-relaxed text-slate-400">{telemetryStatus === 'live' ? display.reason || 'Channel unavailable' : 'Waiting for fresh ECU data'}</p>
       </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full flex-col justify-center">
-      <div className="relative overflow-hidden rounded-[28px] border border-white/6 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),rgba(255,255,255,0.02)_55%),linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-5 py-6">
-        <div
-          className="pointer-events-none absolute inset-x-4 top-0 h-px"
-          style={{ background: `linear-gradient(90deg, transparent, ${color}88, transparent)` }}
-        />
-        <div
-          className="pointer-events-none absolute -right-8 top-4 h-16 w-16 rounded-full blur-2xl"
-          style={{ backgroundColor: `${color}22` }}
-        />
-        <div className="text-[9px] font-orbitron font-bold uppercase tracking-[0.24em] text-white/32">
-          Live Value
-        </div>
-        <div className="mt-4 flex items-end justify-between gap-4">
-          <div className="min-w-0 font-mono text-[56px] font-black leading-none tracking-[-0.05em] text-white">
-            {display.text ?? display.value}
-          </div>
-          {display.unit ? (
-            <div className="mb-1 rounded-full border border-white/8 bg-black/30 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-white/42">
-              {display.unit}
-            </div>
-          ) : null}
-        </div>
-        <div
-          className="mt-5 h-[2px] w-16 rounded-full"
-          style={{ background: `linear-gradient(90deg, ${color}, transparent)` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function StatusWidget({ display }) {
-  return (
-    <div className="grid h-full grid-cols-2 gap-3 content-center">
-      {display.groups?.map((group) => (
-        <div
-          key={group.label}
-          className={`relative overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
-            group.active
-              ? `${toneClasses(group.tone)} shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]`
-              : "border-white/5 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] text-white/25"
-          }`}
-        >
-          <div
-            className={`pointer-events-none absolute inset-x-0 top-0 h-px ${
-              group.active ? "" : "bg-white/5"
-            }`}
-            style={group.active ? { background: "linear-gradient(90deg, transparent, currentColor, transparent)" } : undefined}
-          />
-          <div className="flex items-start justify-between gap-2">
-            <div className="text-[9px] font-orbitron font-bold uppercase tracking-[0.18em]">
-              {group.label}
-            </div>
-            <div
-              className={`mt-0.5 h-2.5 w-2.5 rounded-full ${
-                group.active ? "" : "bg-white/12"
-              }`}
-              style={group.active ? { backgroundColor: "currentColor", boxShadow: "0 0 10px currentColor" } : undefined}
-            />
-          </div>
-          <div className="mt-4 text-[10px] font-mono font-black tracking-[0.18em]">
-            {group.active ? "ON" : "OFF"}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TraceWidget({ channelKey, display, getRealtimeValue, color }) {
-  const getter = useCallback(
-    () => getRealtimeValue(channelKey),
-    [getRealtimeValue, channelKey],
-  );
-
-  return (
-    <div className="h-full">
-      <RealtimeChart
-        getValue={getter}
-        label={display.label}
-        color={color}
-        min={display.traceMin ?? display.min ?? 0}
-        max={display.traceMax ?? display.max ?? 100}
-        value={display.value ?? 0}
-        unit={display.unit ?? ""}
-        decimals={display.decimals ?? 0}
-      />
-    </div>
-  );
-}
-
-export default function WidgetTile({
-  widget,
-  display,
-  color,
-  getRealtimeValue,
-}) {
-  const subtitle =
-    widget.type === "trace"
-      ? "Live trace"
-      : widget.type === "status"
-        ? "State indicators"
-        : widget.type === "digital"
-          ? "Precision view"
-          : "Live gauge";
-
-  return (
-    <TileShell title={display.label} subtitle={subtitle}>
-      {widget.type === "gauge" ? (
-        <div className="h-full flex items-center justify-center">
-          <Gauge
-            label={display.label}
-            value={display.value ?? 0}
-            min={display.min ?? 0}
-            max={display.max ?? 100}
-            unit={display.unit ?? ""}
-            decimals={display.decimals ?? 0}
-            warning={display.warning}
-            danger={display.danger}
-            warningMode={display.warningMode ?? "high"}
-            size={176}
-          />
-        </div>
-      ) : null}
-
-      {widget.type === "digital" ? (
-        <DigitalWidget display={display} color={color} />
-      ) : null}
-      {widget.type === "status" ? <StatusWidget display={display} /> : null}
-      {widget.type === "trace" ? (
-        <TraceWidget
-          channelKey={widget.channelKey}
-          display={display}
-          getRealtimeValue={getRealtimeValue}
-          color={color}
-        />
-      ) : null}
-    </TileShell>
-  );
+      : widget.type === 'gauge' ? <Gauge label={display.label} value={display.value} min={display.min} max={display.max}
+        unit={display.unit} decimals={display.decimals} warning={display.warning} danger={display.danger}
+        warningMode={display.warningMode} color={color} size={178} />
+      : widget.type === 'status' ? <StatusWidget groups={display.groups} /> : <DigitalWidget display={display} color={color} />}
+    {widget.type === 'trace' && (display.note || (telemetryStatus === 'live' && display.reason)) && <p className={`mt-2 text-xs ${quality === 'check' ? 'text-amber-200' : 'text-slate-400'}`}>{display.reason || display.note}</p>}
+    {widget.type !== 'trace' && <footer className="mt-2 min-h-4 text-[11px] leading-relaxed text-slate-500">
+      {live && display.note ? <span className={quality === 'check' ? 'text-amber-200' : 'text-slate-400'}>{display.note}</span> : range ? `Display range ${range}` : 'ECU-reported status'}
+    </footer>}
+  </section>
 }

@@ -1,4 +1,6 @@
-import React, { useEffect, useRef } from "react";
+import { createAutoReconnect, validateConnectedECU, recoverECUConnection } from './core/services/ecuRecovery.js';
+import { assertCompatibleContract } from '../shared/protocol/contract.js';
+import React, { useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { Buffer } from "buffer";
 import { useStore } from "./core/store.js";
@@ -30,6 +32,7 @@ import GettingStarted from "./features/projects/GettingStarted.jsx";
 import Analysis from "./features/dashboard/Analysis.jsx";
 import AppToolbar from "./ui/AppToolbar.jsx";
 import Sidebar from "./ui/Sidebar.jsx";
+import ECURestartNotice from './ui/ECURestartNotice.jsx';
 import NotificationTray from "./ui/NotificationTray.jsx";
 import IniMismatchDialog from "./ui/IniMismatchDialog.jsx";
 import GlobalPreferencesPage from "./features/system/GlobalPreferencesPage.jsx";
@@ -60,12 +63,16 @@ import SyncDialog from "./ui/SyncDialog.jsx";
 import { getAccent } from "./core/theme.js";
 
 export default function App() {
+  useEffect(() => window.projects.onCloseRequested?.(() => useStore.getState().closeProject()), []);
   const [, navigate] = useLocation();
   const currentProject = useStore((s) => s.currentProject);
   const init = useStore((s) => s.init);
   const settings = useStore((s) => s.settings);
   const parsedIni = useStore((s) => s.parsedIni);
   const connectionStatus = useStore((s) => s.connection.status);
+  const firmwareSignature = useStore(s => s.connection.firmwareSignature);
+  const handshakeStatus = useStore(s => s.connection.handshakeStatus);
+  const projectEpoch = useStore(s => s.projectEpoch);
   const setConnectionStatus = useStore((s) => s.setConnectionStatus);
   const setConnectionPort = useStore((s) => s.setConnectionPort);
   const setConnectionBaud = useStore((s) => s.setConnectionBaud);
@@ -84,24 +91,30 @@ export default function App() {
   const iniMismatchDetails = useStore((s) => s.iniMismatchDetails);
   const openIniMismatchDialog = useStore((s) => s.openIniMismatchDialog);
   const closeIniMismatchDialog = useStore((s) => s.closeIniMismatchDialog);
-  const autoReconnectAttemptRef = useRef(null);
+  const validationStatus = useStore(s => s.connection.validationStatus);
 
   const accent = getAccent(settings.accentColor);
 
   useEffect(() => {
     init();
 
-    const handleRealtime = (payload) => {
+    const handleRealtime = (payload, source) => {
       const data =
         Buffer.isBuffer(payload) || payload instanceof Uint8Array
           ? parseRealtime(payload)
           : payload;
-      if (data) setRealtime(data);
+      if (data) setRealtime(data, source);
     };
     serialService.onRealtime(handleRealtime);
 
     // Connection status handler with handshake sequence
-    window.serial.onStatus(async (status) => {
+    let transportGeneration = 0, transportConnected = false;
+    const unsubscribeStatus = window.serial.onStatus(async (status) => {
+      if (status === 'connected' && (transportConnected || (useStore.getState().connection.autoReconnectPaused && !useStore.getState().connection.connectionAttempt))) return;
+      transportConnected = status === 'connected';
+      const generation = ++transportGeneration;
+      const intent = useStore.getState().connection.recoveryGeneration;
+      const isCurrent = () => generation === transportGeneration && useStore.getState().connection.recoveryGeneration === intent;
       console.log("[App] Serial status event", status);
 
       if (status === "connected") {
@@ -114,10 +127,12 @@ export default function App() {
           });
 
           console.log("[App] Serial connected, performing handshake...");
+          serialService.reset();
           const handshakeInfo = await serialService.handshake();
+          if (!isCurrent()) return;
           setConnectionStatus("connected");
           setConnectionHandshakeStatus("ok");
-          notify("ECU connected", "success", 2000);
+          notify("ECU handshake complete; validating configuration and telemetry", "info", 2500);
           addConnectionEvent("handshake", "ECU handshake completed", {
             signature: handshakeInfo?.signature || "",
             product: handshakeInfo?.product || "",
@@ -125,9 +140,7 @@ export default function App() {
 
           const {
             currentProject,
-            compareWithECU,
             updateECUConnectionInfo,
-            parsedIni,
           } = useStore.getState();
           updateECUConnectionInfo(handshakeInfo);
 
@@ -160,49 +173,9 @@ export default function App() {
             });
           }
 
-          if (currentProject?.ini?.content && !hasIniSignatureMismatch) {
-            try {
-              const results = await compareWithECU();
-              if (!results?.error) {
-                const matched = results.matching?.length || 0;
-                const different = results.different?.length || 0;
-                const generated = results.generated?.length || 0;
-                const missing = results.missing?.length || 0;
-                const errors = results.errors?.length || 0;
 
-                addConnectionEvent("sync", "Initial ECU comparison completed", {
-                  matched,
-                  different,
-                  generated,
-                  missing,
-                  errors,
-                });
-                notify(
-                  `CRC sync check: ${matched} match, ${different} different, ${generated} generated, ${missing} missing local`,
-                  different > 0 || generated > 0 ? "warning" : "info",
-                  3500,
-                );
-
-                if (different > 0 || generated > 0 || missing > 0 || errors > 0) {
-                  console.warn("[App] Opening sync dialog after connect", {
-                    matching: matched,
-                    different,
-                    generated,
-                    missing,
-                    errors,
-                  });
-                  useStore.getState().openSyncDialog(results);
-                }
-              }
-            } catch (syncErr) {
-              console.warn("[App] Initial CRC sync check failed:", syncErr);
-            }
-          }
-
-          if (parsedIni?.outputChannels?.ochGetCommand && !hasIniSignatureMismatch) {
-            serialService.startOutputChannelsPolling(parsedIni);
-          }
         } catch (err) {
+          if (!isCurrent()) return;
           console.error("[App] Handshake failed:", err);
           setConnectionStatus("error", "Handshake failed");
           setConnectionTransportStatus("error");
@@ -211,8 +184,13 @@ export default function App() {
             error: err?.message || "Handshake failed",
           });
           notify("ECU handshake failed", "error");
-          window.serial.disconnect();
+          try { await window.serial.disconnect(); } catch (closeError) { console.error("[App] Disconnect after handshake failure failed", closeError); }
         }
+      } else if (status === 'connecting') {
+        serialService.reset();
+        setConnectionStatus('connecting');
+        setConnectionTransportStatus('connecting');
+        setConnectionHandshakeStatus('idle');
       } else if (status === "disconnected") {
         serialService.reset();
         setConnectionStatus("disconnected");
@@ -220,8 +198,10 @@ export default function App() {
         setConnectionHandshakeStatus("idle");
         closeIniMismatchDialog();
         addConnectionEvent("transport", "Serial transport disconnected");
-        clearRuntimeProfileSession({ state: "Disconnected" });
+        if (useStore.getState().runtimeProfileSession?.state !== 'Unknown') clearRuntimeProfileSession({ state: 'Disconnected' });
       } else if (status.startsWith("error:")) {
+        serialService.reset();
+        setConnectionHandshakeStatus('failed');
         console.error("[App] Serial transport error", status.slice(6));
         setConnectionStatus("error", status.slice(6));
         setConnectionTransportStatus("error");
@@ -232,7 +212,8 @@ export default function App() {
     });
 
     return () => {
-      window.serial.offAll();
+      transportGeneration += 1;
+      unsubscribeStatus?.();
       serialService.offRealtime(handleRealtime);
       serialService.destroy();
     };
@@ -249,153 +230,102 @@ export default function App() {
       closeIniMismatchDialog,
     ]);
 
+  // Validate each project/session before publishing live data. A tune mismatch
+  // remains a review outcome; it never uploads or replaces a tune automatically.
   useEffect(() => {
-    if (
-      connectionStatus !== "connected" ||
-      !parsedIni?.outputChannels?.ochGetCommand
-    ) {
-      serialService.stopOutputChannelsPolling();
-    }
-
-    return () => {
-      if (connectionStatus !== "connected") {
-        serialService.stopOutputChannelsPolling();
-      }
+    if (connectionStatus !== 'connected' || handshakeStatus !== 'ok' || !firmwareSignature) return;
+    let cancelled = false;
+    const initial = useStore.getState();
+    const session = initial.connection.sessionId;
+    const check = () => {
+      const state = useStore.getState();
+      if (cancelled || state.connection.status !== 'connected' || state.connection.sessionId !== session ||
+          state.projectEpoch !== projectEpoch || state.parsedIni !== parsedIni) throw new Error('ECU validation context changed');
+      assertCompatibleContract(state);
     };
-  }, [connectionStatus, parsedIni]);
+    initial.setConnectionValidation('checking');
+    serialService.stopOutputChannelsPolling();
+    initial.clearRealtime();
+    (async () => {
+      try {
+        const result = await validateConnectedECU({ check,
+          compare: () => useStore.getState().compareWithECU(),
+          readTelemetry: () => serialService.readOutputChannels(parsedIni) });
+        check();
+        if (result.status === 'review') useStore.getState().openSyncDialog(result.comparison);
+        useStore.getState().setConnectionValidation(result.status);
+        useStore.getState().setRealtime(result.telemetry, { ini: parsedIni });
+        addConnectionEvent('sync', result.status === 'ready' ? 'ECU configuration and fresh telemetry verified' : 'ECU online; tune differences require review');
+      } catch (error) {
+        if (cancelled || useStore.getState().connection.sessionId !== session || useStore.getState().projectEpoch !== projectEpoch) return;
+        if (Object.keys(error.comparison?.pageStates || {}).length) useStore.getState().openSyncDialog(error.comparison);
+        useStore.getState().setConnectionValidation('failed', error.message);
+        useStore.getState().clearRealtime(error.message);
+        addConnectionEvent('error', 'ECU recovery validation failed', { error: error.message });
+        notify(`ECU validation failed: ${error.message}`, 'error', 6000);
+      }
+    })();
+    return () => { cancelled = true; serialService.stopOutputChannelsPolling(); };
+  }, [connectionStatus, handshakeStatus, firmwareSignature, parsedIni, projectEpoch, addConnectionEvent, notify]);
 
   useEffect(() => {
-    const currentProjectPath = currentProject?.filePath || currentProject?.projectName || null;
-    const autoReconnectKey = [
-      currentProjectPath,
-      settings.autoReconnect ? "on" : "off",
-      settings.lastSerialPort || "",
-      settings.lastSerialBaud || "",
-    ].join("|");
-
-    if (!currentProjectPath) {
-      autoReconnectAttemptRef.current = null;
+    serialService.stopOutputChannelsPolling();
+    if (connectionStatus !== 'connected' || handshakeStatus !== 'ok' || !['ready', 'review'].includes(validationStatus)) {
+      useStore.getState().clearRealtime(useStore.getState().connection.validationError || null);
       return;
     }
-    if (!settings.autoReconnect) return;
-    if (!settings.lastSerialPort) return;
-    if (connectionStatus !== "disconnected") return;
-    if (autoReconnectAttemptRef.current === autoReconnectKey) return;
+    try {
+      assertCompatibleContract(useStore.getState());
+      if (!serialService.startOutputChannelsPolling(parsedIni)) throw new Error('The project INI has no telemetry definition');
+    } catch (error) {
+      useStore.getState().clearRealtime(error.message);
+      addConnectionEvent('error', 'Telemetry unavailable', { error: error.message });
+    }
+    return () => serialService.stopOutputChannelsPolling();
+  }, [connectionStatus, handshakeStatus, validationStatus, firmwareSignature, parsedIni, projectEpoch, addConnectionEvent]);
 
-    autoReconnectAttemptRef.current = autoReconnectKey;
-
+  useEffect(() => {
     let cancelled = false;
-
-    const attemptAutoReconnect = async () => {
-      try {
-        const ports = await window.serial.listPorts();
-        if (cancelled) return;
-
-        const rememberedPort = ports.find(
-          (port) => port.path === settings.lastSerialPort,
-        );
-
-        if (!rememberedPort) {
-          console.warn("[App] Auto reconnect skipped, last port unavailable", {
-            port: settings.lastSerialPort,
-          });
-          return;
-        }
-
-        const baud = Number(settings.lastSerialBaud || 115200);
-        try {
-          await window.serial.disconnect();
-        } catch (disconnectError) {
-          console.warn("[App] Auto reconnect pre-disconnect failed", disconnectError);
-        }
-        if (cancelled) return;
-
-        serialService.reset();
-        setConnectionPort(settings.lastSerialPort);
-        setConnectionBaud(baud);
-        setConnectionStatus("connecting");
-        setConnectionTransportStatus("connecting");
-        setConnectionHandshakeStatus("idle");
-        addConnectionEvent("transport", "Attempting auto reconnect", {
-          port: settings.lastSerialPort,
-          baud,
-        });
-
-        console.log("[App] Auto reconnect attempt", {
-          port: settings.lastSerialPort,
-          baud,
-          project: currentProjectPath,
-        });
-
-        const result = await window.serial.connect(settings.lastSerialPort, baud);
-        if (cancelled) return;
-
-        if (!result?.ok) {
-          console.warn("[App] Auto reconnect failed", result?.error);
-          setConnectionStatus("error", result?.error || "Auto reconnect failed");
-          setConnectionTransportStatus("error");
-          addConnectionEvent("error", "Auto reconnect failed", {
-            error: result?.error || "Auto reconnect failed",
-          });
-        }
-      } catch (error) {
-        if (cancelled) return;
-        console.warn("[App] Auto reconnect exception", error);
-        setConnectionStatus("error", error?.message || "Auto reconnect failed");
-        setConnectionTransportStatus("error");
-        addConnectionEvent("error", "Auto reconnect failed", {
-          error: error?.message || "Auto reconnect failed",
-        });
-      }
-    };
-
-    attemptAutoReconnect();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    currentProject,
-    settings.autoReconnect,
-    settings.lastSerialPort,
-    settings.lastSerialBaud,
-    connectionStatus,
-    setConnectionStatus,
-    setConnectionPort,
-    setConnectionBaud,
-    setConnectionTransportStatus,
-    setConnectionHandshakeStatus,
-    addConnectionEvent,
-  ]);
+    const tick = createAutoReconnect({ getState: useStore.getState,
+      onError: error => addConnectionEvent('warning', error.message),
+      connect: async (port, baud) => {
+        const epoch = useStore.getState().projectEpoch;
+        const check = () => {
+          const state = useStore.getState();
+          if (cancelled || state.projectEpoch !== epoch || !state.settings.autoReconnect ||
+              state.settings.lastSerialPort !== port || Number(state.settings.lastSerialBaud || 115200) !== baud ||
+              state.connection.autoReconnectPaused) throw new Error('Auto reconnect cancelled');
+        };
+        addConnectionEvent('transport', 'Attempting auto reconnect', { port, baud });
+        const result = await recoverECUConnection({ serial: window.serial, getState: useStore.getState,
+          port, baud, check, attempts: 1, owner: 'auto' });
+        check();
+        if (!result.ok) addConnectionEvent('warning', result.error);
+      } });
+    void tick();
+    const timer = setInterval(() => { void tick(); }, 1000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [addConnectionEvent]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
       const activeTag = document.activeElement.tagName.toLowerCase();
       const isInput = ["input", "select", "textarea"].includes(activeTag);
-      const { notify, closeProject, saveProject, setProject } =
+      const { notify, closeProject, saveProject, openProject } =
         useStore.getState();
 
       if (e.ctrlKey) {
         if (e.key === "n") {
           e.preventDefault();
-          closeProject().then(() => {
-            notify("Project closed", "info", 2000);
+          closeProject().then(result => {
+            if (result.ok) notify("Project closed", "info", 2000);
           });
         }
         if (e.key === "o") {
           e.preventDefault();
           window.projects.pickExisting().then(async (filePath) => {
             if (filePath) {
-              const proj = await window.projects.loadFile(filePath);
-              if (proj && !proj.error) {
-                setProject({ ...proj, filePath });
-                notify(
-                  `Project Loaded: ${proj.projectName || "Unnamed"}`,
-                  "success",
-                );
-              } else {
-                notify("Failed to load project", "error");
-              }
+              await openProject(filePath);
             }
           });
         }
@@ -476,6 +406,7 @@ export default function App() {
             <Sidebar />
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
               <IndicatorTray />
+              <ECURestartNotice />
               <main className="flex-1 overflow-hidden relative ">
                 <Switch>
                   <Route path={ROUTES.ANALYSIS} component={Analysis} />

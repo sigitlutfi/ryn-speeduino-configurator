@@ -16,6 +16,7 @@ const TACHO_FIELDS = [
 
 export default function TachoOutput() {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     handleSave,
@@ -83,7 +84,7 @@ export default function TachoOutput() {
             </div>
 
             <div className="space-y-4">
-              <SelectField
+              <SelectField pinPages={pinPages}
                 name="tachoPin"
                 label="Output Pin"
                 getValue={getValue}
@@ -91,7 +92,7 @@ export default function TachoOutput() {
                 updateValue={updateValue}
               />
 
-              <SelectField
+              <SelectField pinPages={pinPages}
                 name="tachoMode"
                 label="Pulse Mode"
                 getValue={getValue}
@@ -99,7 +100,7 @@ export default function TachoOutput() {
                 updateValue={updateValue}
               />
 
-              <SelectField
+              <SelectField pinPages={pinPages}
                 name="tachoDiv"
                 label="Output Speed"
                 getValue={getValue}

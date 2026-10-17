@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   FlaskConical,
   Wind,
@@ -7,24 +7,22 @@ import {
   ShieldAlert,
   Settings,
   CircleDot,
-  MousePointer2,
-  Lock,
   Thermometer,
-  Trophy,
-  Gauge,
-  Droplets,
   AlertTriangle,
   Beaker,
 } from "lucide-react";
+import { useStore } from "../../core/store";
+import { useLiveTelemetry } from '../shared/hooks/useLiveTelemetry.js';
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
-import CurveEditor from "../../ui/CurveEditor";
 import PinSelect from "../shared/components/PinSelect";
 import {
+  GroupHeader,
   SelectRow,
   InputField,
   InfoCard,
 } from "../shared/components/TuningComponents";
+import IniCurvePanel from "../shared/components/IniCurvePanel";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 
 const WMI_FIELDS = [
@@ -51,9 +49,10 @@ const WMI_FIELDS = [
 ];
 
 const WMI = () => {
-  const [activePoint, setActivePoint] = useState(null);
+  const { realtime } = useLiveTelemetry();
 
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -89,37 +88,14 @@ const WMI = () => {
     setFieldValue(name, toRaw(val, info?.meta));
   };
 
-  const getMetadata = (name) => getFieldInfo(name)?.meta || null;
 
   const wmiEnabled = getValue("wmiEnabled");
   const wmiAdvEnabled = getValue("wmiAdvEnabled");
 
-  // Robust array sanitization to prevent NaN in CurveEditor
-  const rawBins = getValue("wmiAdvBins");
-  const wmiAdvBins = (
-    Array.isArray(rawBins) && rawBins.length === 6
-      ? rawBins
-      : [0, 100, 200, 300, 400, 500]
-  ).map((v) => (v === undefined || isNaN(v) ? 0 : v));
-
-  const rawAdj = getValue("wmiAdvAdj");
-  const wmiAdvAdj = (
-    Array.isArray(rawAdj) && rawAdj.length === 6 ? rawAdj : [0, 0, 0, 0, 0, 0]
-  ).map((v) => (v === undefined || isNaN(v) ? 0 : v));
-
-  const SectionHeader = ({ title, icon: Icon, theme = "cyan" }) => (
-    <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-2">
-      <div
-        className={`w-1 h-3 bg-neon-${theme} shadow-glow-${theme} rounded-full`}
-      />
-      <span className="text-[9px] font-black text-white/80 uppercase tracking-[0.2em]">
-        {title}
-      </span>
-      {Icon && (
-        <Icon size={12} className={`ml-auto text-neon-${theme} opacity-30`} />
-      )}
-    </div>
-  );
+  const liveMap =
+    isConnected && wmiEnabled > 0 && wmiAdvEnabled > 0 && Number.isFinite(realtime?.map)
+      ? realtime.map
+      : null;
 
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden h-screen animate-in fade-in duration-700">
@@ -146,7 +122,7 @@ const WMI = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Core & Logic */}
             <div className="lg:col-span-8 p-6 rounded-3xl glass-card border border-white/5 bg-gradient-to-br from-neon-cyan/[0.05] to-transparent">
-              <SectionHeader
+              <GroupHeader
                 title="System Foundation"
                 icon={Settings}
                 theme="cyan"
@@ -164,7 +140,7 @@ const WMI = () => {
                   onChange={(val) => updateValue("wmiMode", val)}
                   options={getFieldInfo("wmiMode")?.meta?.options}
                 />
-                <PinSelect
+                <PinSelect decodedPages={pinPages}
                   label="PWM Output Pin"
                   fieldName="vvt2Pin"
                   value={getValue("vvt2Pin")}
@@ -187,8 +163,8 @@ const WMI = () => {
             <div
               className={`lg:col-span-4 p-6 rounded-3xl glass-card border border-white/5 bg-black/40 transition-all ${wmiEnabled === 0 ? "opacity-30 grayscale" : ""}`}
             >
-              <SectionHeader title="Arming Interface" icon={Zap} theme="blue" />
-              <PinSelect
+              <GroupHeader title="Arming Interface" icon={Zap} theme="blue" />
+              <PinSelect decodedPages={pinPages}
                 label="Enable / Arm Pin"
                 fieldName="wmiEnabledPin"
                 value={getValue("wmiEnabledPin")}
@@ -206,11 +182,11 @@ const WMI = () => {
           </div>
 
           <div
-            className={`grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all ${wmiEnabled === 0 ? "opacity-30 grayscale pointer-events-none" : ""}`}
+            className={`grid grid-cols-1 lg:grid-cols-12 gap-6 transition-all ${wmiEnabled === 0 ? "opacity-70" : ""}`}
           >
             {/* Engagement Conditions */}
             <div className="lg:col-span-12 p-6 rounded-[32px] glass-card border border-white/5">
-              <SectionHeader
+              <GroupHeader
                 title="Engagement Thresholds"
                 icon={Thermometer}
                 theme="cyan"
@@ -257,7 +233,7 @@ const WMI = () => {
 
             {/* Tank Monitoring */}
             <div className="lg:col-span-6 p-6 rounded-[32px] glass-card border border-white/5 bg-black/40">
-              <SectionHeader
+              <GroupHeader
                 title="Fluid Management"
                 icon={Beaker}
                 theme="blue"
@@ -273,7 +249,7 @@ const WMI = () => {
                     onChange={(val) => updateValue("wmiEmptyEnabled", val)}
                     options={getFieldInfo("wmiEmptyEnabled")?.meta?.options}
                   />
-                  <PinSelect
+                  <PinSelect decodedPages={pinPages}
                     label="Input Pin"
                     fieldName="wmiEmptyPin"
                     value={getValue("wmiEmptyPin")}
@@ -300,7 +276,7 @@ const WMI = () => {
                     onChange={(val) => updateValue("wmiIndicatorEnabled", val)}
                     options={getFieldInfo("wmiIndicatorEnabled")?.meta?.options}
                   />
-                  <PinSelect
+                  <PinSelect decodedPages={pinPages}
                     label="Output Pin"
                     fieldName="wmiIndicatorPin"
                     value={getValue("wmiIndicatorPin")}
@@ -325,7 +301,7 @@ const WMI = () => {
             {/* Ignition Correction */}
             <div className="lg:col-span-6 p-6 rounded-[32px] glass-card border border-white/5 bg-gradient-to-tr from-neon-blue/[0.05] to-transparent">
               <div className="flex items-center justify-between mb-4">
-                <SectionHeader
+                <GroupHeader
                   title="Ignition Advance Logic"
                   icon={Activity}
                   theme="blue"
@@ -350,68 +326,15 @@ const WMI = () => {
                   options={getFieldInfo("wmiAdvEnabled")?.meta?.options}
                 />
 
-                <div
-                  className={`p-4 rounded-2xl border transition-all ${wmiAdvEnabled ? "bg-neon-blue/5 border-neon-blue/20 shadow-glow-blue/5" : "bg-white/5 border-white/5 opacity-30 grayscale"}`}
-                >
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-8 h-8 rounded-lg bg-neon-blue/10 flex items-center justify-center border border-neon-blue/20">
-                      <Activity className="text-neon-blue" size={16} />
-                    </div>
-                    <h5 className="text-[10px] font-black text-white/80 uppercase tracking-widest">
-                      MAP Based Advance Profile
-                    </h5>
-                  </div>
-
-                  <div className="h-[300px] mb-6">
-                    <CurveEditor
-                      xValues={wmiAdvBins}
-                      yValues={wmiAdvAdj}
-                      theme="blue"
-                      xLabel="MAP (kPa)"
-                      yLabel="Adv Deg"
-                      xRange={{ min: 0, max: 511 }}
-                      yRange={{ min: -40, max: 40 }}
-                      activeIdx={activePoint}
-                      onHoverPoint={setActivePoint}
-                      onChange={(newX, newY) => {
-                        setFieldValue(
-                          "wmiAdvBins",
-                          toRaw(newX, getMetadata("wmiAdvBins")),
-                        );
-                        setFieldValue(
-                          "wmiAdvAdj",
-                          toRaw(newY, getMetadata("wmiAdvAdj")),
-                        );
-                      }}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-6 gap-2">
-                    {wmiAdvBins.map((bin, i) => (
-                      <div
-                        key={i}
-                        className={`p-2 rounded-lg border flex flex-col items-center gap-1 transition-all ${activePoint === i ? "border-neon-blue/40 bg-neon-blue/10" : "border-white/5 bg-black/20"}`}
-                      >
-                        <span className="text-[6px] font-bold text-white/30 uppercase">
-                          {bin} kPa
-                        </span>
-                        <input
-                          type="number"
-                          value={wmiAdvAdj[i]}
-                          onChange={(e) => {
-                            const next = [...wmiAdvAdj];
-                            next[i] = parseFloat(e.target.value);
-                            setFieldValue(
-                              "wmiAdvAdj",
-                              toRaw(next, getMetadata("wmiAdvAdj")),
-                            );
-                          }}
-                          className="w-full bg-transparent border-none text-[10px] font-mono font-black text-neon-blue text-center outline-none"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <IniCurvePanel
+        xName="wmiAdvBins"
+        yName="wmiAdvAdj"
+        title="MAP Based Advance Profile"
+        icon={Activity}
+        theme="blue"
+        layout="stacked"
+        liveXValue={liveMap}
+      />
               </div>
             </div>
           </div>

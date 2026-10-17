@@ -4,7 +4,7 @@ import { DEFAULT_ACTIVE_PAGES } from "../utils/project.constants.js";
 
 export function createEmptyEcuState(raw = {}) {
   const mergedActivePages = Array.from(
-    new Set([...(raw.sync?.activePages ?? []), ...DEFAULT_ACTIVE_PAGES]),
+    new Set(raw.sync?.activePages ?? DEFAULT_ACTIVE_PAGES),
   ).sort((a, b) => a - b);
 
   return {

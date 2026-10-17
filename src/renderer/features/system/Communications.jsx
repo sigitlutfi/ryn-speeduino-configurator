@@ -1,3 +1,5 @@
+import { serialService } from '../../core/services/serialService.js';
+import { recoverECUConnection, disconnectECU } from '../../core/services/ecuRecovery.js';
 import React, { useEffect } from "react";
 import { useStore } from "../../core/store.js";
 import { BAUD_RATES } from "../../../shared/protocol/ts-commands.js";
@@ -67,6 +69,8 @@ export default function Communications() {
   const connectionError = useStore((s) => s.connection.errorMsg);
   const transportStatus = useStore((s) => s.connection.transportStatus);
   const handshakeStatus = useStore((s) => s.connection.handshakeStatus);
+  const validationStatus = useStore(s => s.connection.validationStatus);
+  const validationError = useStore(s => s.connection.validationError);
   const availablePorts = useStore((s) => s.connection.availablePorts);
   const refreshingPorts = useStore((s) => s.connection.refreshingPorts);
   const eventLog = useStore((s) => s.connection.eventLog);
@@ -129,17 +133,25 @@ export default function Communications() {
   ]);
 
   const handleConnect = async () => {
-    if (!connectionPort) return;
+    if (!connectionPort || useStore.getState().operation) return;
 
+    useStore.getState().cancelConnectionRecovery();
+    serialService.reset();
+    useStore.getState().setAutoReconnectPaused(false);
     setConnectionStatus("connecting");
     addConnectionEvent("transport", "Connect requested", {
       port: connectionPort,
       baud: connectionBaud,
     });
 
-    const result = await window.serial.connect(connectionPort, connectionBaud);
+    const generation = useStore.getState().connection.recoveryGeneration;
+    let result;
+    try { result = await recoverECUConnection({ serial: window.serial, getState: useStore.getState, port: connectionPort, baud: connectionBaud, attempts: 1, owner: 'manual' }); }
+    catch (error) { result = { ok: false, error: error.message }; }
+    if (useStore.getState().connection.recoveryGeneration !== generation) return;
     if (!result.ok) {
-      setConnectionStatus("error", result.error);
+      if (useStore.getState().connection.status !== 'connected') setConnectionStatus("error", result.error);
+      useStore.getState().notify(result.error, 'error');
       return;
     }
 
@@ -157,8 +169,8 @@ export default function Communications() {
   };
 
   const handleDisconnect = async () => {
-    await window.serial.disconnect();
-    setConnectionStatus("disconnected");
+    try { await disconnectECU({ serial: window.serial, getState: useStore.getState, reset: () => serialService.reset() }); }
+    catch (error) { useStore.getState().notify(`Disconnect failed: ${error.message}`, 'error'); return; }
     addConnectionEvent("transport", "Disconnect requested", {
       port: connectionPort,
     });
@@ -199,9 +211,9 @@ export default function Communications() {
       icon: PlugZap,
     },
     {
-      label: "Handshake",
-      value: handshakeStatus,
-      tone: handshakeTone,
+      label: "ECU validation",
+      value: validationStatus === "failed" ? validationError || "failed" : validationStatus,
+      tone: validationStatus === "ready" ? "text-neon-green" : validationStatus === "failed" ? "text-neon-red" : "text-neon-orange",
       icon: Activity,
     },
     {

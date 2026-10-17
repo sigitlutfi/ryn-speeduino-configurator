@@ -13,6 +13,9 @@ import {
 import { serialService } from "../../services/serialService.js";
 import { getDecodedPages } from "../utils/page.utils.js";
 import { delay } from "../utils/project.utils.js";
+import { prepareConfigurationWrite } from '../../../../shared/protocol/configuration-policy.js';
+import { configurationWriteOptions } from '../../../../shared/protocol/board-pins.js';
+import { validateConfigurationValues } from '../../../../shared/protocol/configuration-validation.js';
 
 export function createRuntimeTablesSlice(set, get) {
   return {
@@ -46,6 +49,8 @@ export function createRuntimeTablesSlice(set, get) {
         throw new Error("Not connected");
       }
 
+      if (get().operation) throw new Error('Another ECU operation is running');
+      const pollingSession = serialService.sessionGeneration;
       serialService.suspendOutputChannelsPolling();
       try {
         const page = await readPageFromECU(tableDef.page);
@@ -55,11 +60,12 @@ export function createRuntimeTablesSlice(set, get) {
           pageBuffer: page.buffer,
         };
       } finally {
-        serialService.resumeOutputChannelsPolling();
+        serialService.resumeOutputChannelsPolling(pollingSession);
       }
     },
 
     writeRuntimeTable: async (tableName, nextTable, options = {}) => {
+      if (get().operation || ['ProfileActive', 'Unknown'].includes(get().runtimeProfileSession?.state)) throw new Error('Return the runtime profile to DEFAULT before manual RAM writes');
       const { parsedIni, connection, readPageFromECU } = get();
       if (connection.status !== "connected") {
         throw new Error("Not connected");
@@ -73,6 +79,16 @@ export function createRuntimeTablesSlice(set, get) {
         throw new Error(`No runtime table payload provided for '${tableName}'`);
       }
 
+      const epoch = get().projectEpoch;
+      const session = get().connection.sessionId;
+      const checkContext = () => {
+        if (get().projectEpoch !== epoch || get().connection.sessionId !== session || get().parsedIni !== parsedIni) throw new Error("Project or ECU changed during manual write");
+        assertWritableContract(get());
+      };
+      checkContext();
+      const owner = {};
+      get().setOperation({ owner, type: "runtime-write", scope: "runtime-write", label: "Manual ECU RAM write" });
+      const pollingSession = serialService.sessionGeneration;
       serialService.suspendOutputChannelsPolling();
       try {
         const ecuPage = await readPageFromECU(tableDef.page);
@@ -100,12 +116,22 @@ export function createRuntimeTablesSlice(set, get) {
             );
           }
 
+          const rangeError = validateConfigurationValues(parsedIni, { [tableDef.page]: { [target.varName]: target.values } });
+          if (rangeError) throw new Error(rangeError);
           serializeValue(nextBuffer, meta.offset, target.values, meta);
         }
 
+        checkContext();
         const dirtyRegion = findDirtyRegion(ecuPage.buffer, nextBuffer);
 
         if (dirtyRegion) {
+          await prepareConfigurationWrite(parsedIni, { [tableDef.page]: nextBuffer }, async id => {
+            checkContext();
+            const result = id === tableDef.page ? ecuPage : await readPageFromECU(id);
+            checkContext();
+            return result;
+          }, { ...configurationWriteOptions(get().currentProject), readCRC: id => serialService.readPageCRC(id) });
+          checkContext();
           assertWritableContract(get());
           const maxChunkLength = options.maxChunkLength ?? 32;
           for (
@@ -122,6 +148,7 @@ export function createRuntimeTablesSlice(set, get) {
               chunkOffset + chunkLength,
             );
 
+            checkContext();
             await serialService.writePage(
               tableDef.page,
               dirtyRegion.offset + chunkOffset,
@@ -134,13 +161,18 @@ export function createRuntimeTablesSlice(set, get) {
           await delay(options.writeSettleMs ?? 40);
         }
 
+        const verified = await readPageFromECU(tableDef.page);
+        checkContext();
+        if (!Buffer.from(verified.buffer).equals(nextBuffer)) throw new Error('Manual table RAM verification failed');
+
         return {
           table: tableDef,
           dirtyRegion,
           buffer: nextBuffer,
         };
       } finally {
-        serialService.resumeOutputChannelsPolling();
+        serialService.resumeOutputChannelsPolling(pollingSession);
+        if (get().operation?.owner === owner) get().clearOperation();
       }
     },
 

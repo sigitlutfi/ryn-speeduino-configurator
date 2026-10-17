@@ -34,16 +34,21 @@ function crc32(buffer) {
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
-class SerialService {
+export class SerialService {
   constructor() {
     this.parser = new ModernProtocolParser();
     this.isReady = false;
     this.pendingCommands = [];
     this.commandInFlightCount = 0;
+    this.commandTail = Promise.resolve();
+    this.sessionGeneration = 0;
+    this.cancelTransactions = new Set();
     this.realtimeReadInFlight = false;
     this.outputChannelsPollTimer = null;
     this.outputChannelsPollConfig = null;
     this.outputChannelsPollRunning = false;
+    this.pollGeneration = 0;
+    this.activePollRead = null;
     this.outputChannelsSuspendCount = 0;
 
     // Setup parser event handlers
@@ -70,7 +75,7 @@ class SerialService {
 
     // Hook into window.serial.onData
     if (typeof window !== 'undefined' && window.serial) {
-      window.serial.onData((data) => {
+      this.unsubscribeParser = window.serial.onData((data) => {
         this.parser.feed(data);
       });
     }
@@ -89,13 +94,23 @@ class SerialService {
     }
   }
 
-  async _runCommandTransaction(callback) {
-    await this._waitForRealtimeIdle();
+  async _runCommandTransaction(callback, realtime = false) {
+    const generation = this.sessionGeneration;
+    const previous = this.commandTail;
+    let release;
+    this.commandTail = new Promise(resolve => { release = resolve; });
     this.commandInFlightCount += 1;
     try {
-      return await callback();
+      await previous;
+      if (generation !== this.sessionGeneration) throw new Error('Serial session changed; reconnect and retry');
+      if (!realtime) await this._waitForRealtimeIdle();
+      if (generation !== this.sessionGeneration) throw new Error('Serial session changed; reconnect and retry');
+      const result = await callback();
+      if (generation !== this.sessionGeneration) throw new Error('Serial session changed; reconnect and retry');
+      return result;
     } finally {
-      this.commandInFlightCount = Math.max(0, this.commandInFlightCount - 1);
+      if (generation === this.sessionGeneration) this.commandInFlightCount = Math.max(0, this.commandInFlightCount - 1);
+      release();
     }
   }
 
@@ -104,15 +119,20 @@ class SerialService {
    * boot delay -> flush RX -> legacy F -> legacy Q -> legacy S
    */
   async handshake() {
+    const session = this.sessionGeneration;
+    const check = () => { if (session !== this.sessionGeneration) throw new Error('Serial session changed during handshake'); };
     try {
       await this._bootDelay(2200);
+      check();
       await this.flush();
+      check();
 
       const probe = await this.sendLegacyCommand("F", {
         timeout: 2000,
         settleMs: 80,
         isComplete: (text) => text.length >= 3,
       });
+      check();
       if (probe.trim() !== "002") {
         throw new Error(`Unexpected legacy probe response: ${probe}`);
       }
@@ -123,6 +143,7 @@ class SerialService {
         isComplete: (text) => /speeduino\s+\d/i.test(text),
       });
 
+      check();
       let product = "";
       try {
         product = await this.sendLegacyCommand("S", {
@@ -131,10 +152,12 @@ class SerialService {
           isComplete: (text) => /speeduino/i.test(text) && /\d/.test(text),
         });
       } catch (err) {
+        check();
         console.warn("[Serial] Handshake product request failed:", err.message);
         product = "";
       }
 
+      check();
       this.isReady = true;
       console.log("[Serial] Handshake complete", {
         probe: probe.trim(),
@@ -147,7 +170,7 @@ class SerialService {
         product: product.trim(),
       };
     } catch (err) {
-      this.isReady = false;
+      if (session === this.sessionGeneration) this.isReady = false;
       throw err;
     }
   }
@@ -169,63 +192,56 @@ class SerialService {
       const timeout = options.timeout ?? 2000;
       const isComplete = options.isComplete ?? ((text) => text.length > 0);
       const settleMs = options.settleMs ?? 100;
-
       return new Promise((resolve, reject) => {
         let buffer = Buffer.alloc(0);
         let unsubscribe = null;
         let settleTimer = null;
-
+        let settled = false;
         const cleanup = () => {
-          if (unsubscribe) unsubscribe();
-          if (settleTimer) clearTimeout(settleTimer);
+          clearTimeout(timer);
+          clearTimeout(settleTimer);
+          unsubscribe?.();
+          this.cancelTransactions.delete(fail);
         };
-
-        const timer = setTimeout(() => {
+        const fail = error => {
+          if (settled) return;
+          settled = true;
           cleanup();
-          reject(new Error(`Legacy command '${command}' timed out`));
-        }, timeout);
-
-        const handleData = (data) => {
-          const chunk = Buffer.from(data);
-
-          if (chunk.length >= 7) {
-            const possibleLen = chunk.readUInt16BE(0);
-            const totalLen = 2 + possibleLen + 4;
-            if (possibleLen > 0 && possibleLen <= 1024 && chunk.length >= totalLen) {
-              return;
-            }
-          }
-
-          buffer = Buffer.concat([buffer, chunk]);
-          const text = buffer.toString("ascii").replace(/\0/g, "").trim();
+          reject(error);
+        };
+        const timer = setTimeout(() => fail(new Error(`Legacy command '${command}' timed out`)), timeout);
+        const handleData = data => {
+          if (settled) return;
+          buffer = Buffer.concat([buffer, Buffer.from(data)]);
+          const text = buffer.toString('ascii').replace(/\0/g, '').trim();
           if (text && isComplete(text)) {
-            if (settleTimer) clearTimeout(settleTimer);
+            clearTimeout(settleTimer);
             settleTimer = setTimeout(() => {
-              clearTimeout(timer);
+              settled = true;
               cleanup();
-              resolve(buffer.toString("ascii").replace(/\0/g, "").trim());
+              resolve(text);
             }, settleMs);
           }
         };
+        this.cancelTransactions.add(fail);
         unsubscribe = window.serial.onData(handleData);
-        window.serial.sendCommand(Buffer.from(command, "ascii")).then((result) => {
-          if (!result.ok) {
-            clearTimeout(timer);
-            cleanup();
-            reject(new Error(result.error || `Legacy send failed for ${command}`));
-          }
-        });
+        Promise.resolve().then(() => {
+          if (!settled) return window.serial.sendCommand(Buffer.from(command, 'ascii'));
+        }).then(result => {
+          if (!settled && !result?.ok) fail(new Error(result?.error || `Legacy send failed for ${command}`));
+        }).catch(fail);
       });
     });
   }
 
-  _tryParseWrappedResponse(buffer) {
+  _tryParseWrappedResponse(buffer, strict = false) {
     if (buffer.length < 7) {
       return null;
     }
 
     const payloadLen = buffer.readUInt16BE(0);
     if (payloadLen <= 0 || payloadLen > 2048) {
+      if (strict) throw new Error(`Invalid framed response length ${payloadLen}`);
       return null;
     }
 
@@ -238,6 +254,7 @@ class SerialService {
     const receivedCRC = buffer.readUInt32BE(2 + payloadLen);
     const calculatedCRC = crc32(payload);
     if (receivedCRC !== calculatedCRC) {
+      if (strict) throw new Error('CRC validation failed for framed response');
       return null;
     }
 
@@ -249,82 +266,93 @@ class SerialService {
   }
 
   async sendHybridCommand(command, options = {}) {
-    return this._runCommandTransaction(async () => {
-      const timeout = options.timeout ?? 3000;
-      const rawExpectedLength = options.rawExpectedLength ?? 1;
-      const successStatuses = options.successStatuses ?? [ResponseStatus.OK];
-      const label = options.label ?? "command";
-      const settleMs = options.settleMs ?? 60;
+    return this._runCommandTransaction(() => this._sendHybridCommand(command, options));
+  }
 
-      this.parser.reset();
+  async _sendHybridCommand(command, options = {}) {
+    const timeout = options.timeout ?? 3000;
+    const rawExpectedLength = options.rawExpectedLength === null ? null : options.rawExpectedLength ?? 1;
+    const successStatuses = options.successStatuses ?? [ResponseStatus.OK];
+    const label = options.label ?? "command";
+    // Modern commands have framed responses. Raw legacy replies must be
+    // requested explicitly; a broken frame must never become a raw ACK.
+    const responseMode = options.responseMode ?? 'framed';
+    if (!['framed', 'raw'].includes(responseMode)) throw new Error('Unknown serial response mode');
 
-      return new Promise((resolve, reject) => {
-        let buffer = Buffer.alloc(0);
-        let unsubscribe = null;
-        let settleTimer = null;
+    this.parser.reset();
 
-        const cleanup = () => {
-          if (unsubscribe) unsubscribe();
-          if (settleTimer) clearTimeout(settleTimer);
-        };
+    return new Promise((resolve, reject) => {
+      let buffer = Buffer.alloc(0);
+      let unsubscribe = null;
+      let settled = false;
 
-        const timer = setTimeout(() => {
-          cleanup();
-          this.parser.reset();
-          reject(new Error(`${label} timeout`));
-        }, timeout);
+      const cleanup = () => {
+        if (unsubscribe) unsubscribe();
+        this.cancelTransactions.delete(fail);
+      };
 
-        const finish = (status, data) => {
-          clearTimeout(timer);
-          cleanup();
-          this.parser.reset();
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        this.parser.reset();
+        reject(error);
+      };
 
-          if (!successStatuses.includes(status)) {
-            reject(new Error(`Unexpected status 0x${status.toString(16)} during ${label}`));
-            return;
-          }
+      const timer = setTimeout(() => fail(new Error(`${label} timeout`)), timeout);
 
-          resolve({ status, data: Buffer.from(data) });
-        };
+      const finish = (status, data) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        this.parser.reset();
 
-        const handleData = (bytes) => {
-          const chunk = Buffer.from(bytes);
+        if (!successStatuses.includes(status)) {
+          reject(new Error(`Unexpected status 0x${status.toString(16)} during ${label}`));
+          return;
+        }
 
-          buffer = Buffer.concat([buffer, chunk]);
+        resolve({ status, data: Buffer.from(data) });
+      };
 
-          const wrapped = this._tryParseWrappedResponse(buffer);
-          if (wrapped) {
+      const handleData = (bytes) => {
+        if (settled) return;
+        const chunk = Buffer.from(bytes);
+
+        buffer = Buffer.concat([buffer, chunk]);
+
+        try {
+          if (responseMode === 'framed') {
+            const wrapped = this._tryParseWrappedResponse(buffer, true);
+            if (!wrapped) return;
+            if (wrapped.totalLength !== buffer.length) throw new Error(`Unexpected trailing bytes in framed response during ${label}: received ${buffer.length}, frame ${wrapped.totalLength}, tail ${buffer.subarray(wrapped.totalLength, wrapped.totalLength + 8).toString('hex')}`);
+            if (rawExpectedLength !== null && successStatuses.includes(wrapped.status) && wrapped.data.length !== rawExpectedLength - 1) {
+              throw new Error(`Unexpected payload length during ${label}`);
+            }
             finish(wrapped.status, wrapped.data);
-            return;
+          } else if (buffer.length && !successStatuses.includes(buffer[0])) {
+            finish(buffer[0], Buffer.alloc(0));
+          } else if (buffer.length >= rawExpectedLength) {
+            if (buffer.length !== rawExpectedLength) throw new Error('Unexpected raw response length');
+            finish(buffer[0], buffer.slice(1));
           }
+        } catch (error) {
+          fail(error);
+        }
+      };
 
-          if (buffer.length >= rawExpectedLength) {
-            if (settleTimer) clearTimeout(settleTimer);
-            settleTimer = setTimeout(() => {
-              const lateWrapped = this._tryParseWrappedResponse(buffer);
-              if (lateWrapped) {
-                finish(lateWrapped.status, lateWrapped.data);
-                return;
-              }
+      this.cancelTransactions.add(fail);
+      unsubscribe = window.serial.onData(handleData);
 
-              const status = buffer[0];
-              const data = buffer.slice(1, rawExpectedLength);
-              finish(status, data);
-            }, settleMs);
-          }
-        };
-
-        unsubscribe = window.serial.onData(handleData);
-
-        window.serial.sendCommand(command).then((result) => {
-          if (!result.ok) {
-            clearTimeout(timer);
-            cleanup();
-            this.parser.reset();
-            reject(new Error(result.error || `Send failed during ${label}`));
-          }
-        });
-      });
+      Promise.resolve().then(() => {
+        if (!settled) return window.serial.sendCommand(command);
+      }).then((result) => {
+        if (!settled && !result?.ok) {
+          fail(new Error(result.error || `Send failed during ${label}`));
+        }
+      }).catch(fail);
     });
   }
 
@@ -335,50 +363,11 @@ class SerialService {
    * @returns {Promise<{status: number, data: Buffer}>}
    */
   async sendCommand(command, timeout = 3000) {
-    return new Promise((resolve, reject) => {
-      // Add to pending queue
-      this.pendingCommands.push({ resolve, reject });
+    return this._runCommandTransaction(() => this._sendCommand(command, timeout));
+  }
 
-      // Set timeout
-      const timer = setTimeout(() => {
-        // Remove from queue
-        const idx = this.pendingCommands.findIndex(cmd => cmd.resolve === resolve);
-        if (idx !== -1) this.pendingCommands.splice(idx, 1);
-
-        reject(new Error('Command timeout'));
-      }, timeout);
-
-      // Send command
-      window.serial.sendCommand(command).then(result => {
-        if (!result.ok) {
-          clearTimeout(timer);
-          const idx = this.pendingCommands.findIndex(cmd => cmd.resolve === resolve);
-          if (idx !== -1) this.pendingCommands.splice(idx, 1);
-          reject(new Error(result.error || 'Send failed'));
-        }
-      });
-
-      // Clear timeout when resolved/rejected
-      const originalResolve = resolve;
-      const originalReject = reject;
-
-      resolve = (value) => {
-        clearTimeout(timer);
-        originalResolve(value);
-      };
-
-      reject = (err) => {
-        clearTimeout(timer);
-        originalReject(err);
-      };
-
-      // Update queue with wrapped resolve/reject
-      const queueItem = this.pendingCommands.find(cmd => cmd.resolve === originalResolve);
-      if (queueItem) {
-        queueItem.resolve = resolve;
-        queueItem.reject = reject;
-      }
-    });
+  async _sendCommand(command, timeout = 3000) {
+    return this._sendHybridCommand(command, { timeout, rawExpectedLength: null, label: 'command' });
   }
 
   /**
@@ -453,87 +442,20 @@ class SerialService {
    * @returns {Promise<Buffer>}
    */
   async readPageBuffer(command, pageSize, timeout = 3000) {
-    return this._runCommandTransaction(async () => {
-      this.parser.reset();
-      this.parser.enableRawMode(0);
-
-      return new Promise((resolve, reject) => {
-        let buffer = Buffer.alloc(0);
-        let unsubscribe = null;
-        let settleTimer = null;
-
-        const cleanup = () => {
-          if (unsubscribe) unsubscribe();
-          if (settleTimer) clearTimeout(settleTimer);
-        };
-
-        const timer = setTimeout(() => {
-          cleanup();
-          this.parser.reset();
-          reject(new Error(`read page bytes=${pageSize} timeout`));
-        }, timeout);
-
-        const finish = (pageData) => {
-          clearTimeout(timer);
-          cleanup();
-          this.parser.reset();
-          resolve(Buffer.from(pageData));
-        };
-
-        const scheduleRawResolution = () => {
-          // Firmware modern reads are framed. Never treat a partial frame
-          // with this transaction's length header as raw page data.
-          if (buffer.length >= 2 && buffer.readUInt16BE(0) === pageSize + 1) return;
-          if (buffer.length < pageSize) {
-            return;
-          }
-
-          if (settleTimer) clearTimeout(settleTimer);
-          settleTimer = setTimeout(() => {
-            if (buffer.length >= pageSize + 1 && buffer[0] === ResponseStatus.OK) {
-              finish(buffer.slice(1, 1 + pageSize));
-              return;
-            }
-
-            finish(buffer.slice(0, pageSize));
-          }, 60);
-        };
-
-        const handleData = (bytes) => {
-          const chunk = Buffer.from(bytes);
-
-          buffer = Buffer.concat([buffer, chunk]);
-
-          const wrapped = this._tryParseWrappedResponse(buffer);
-          if (wrapped) {
-            if (wrapped.status !== ResponseStatus.OK || wrapped.data.length < pageSize) {
-              clearTimeout(timer);
-              cleanup();
-              this.parser.reset();
-              reject(new Error(`Invalid page response: status 0x${wrapped.status.toString(16)}, bytes ${wrapped.data.length}`));
-              return;
-            }
-            finish(wrapped.data.slice(0, pageSize));
-            return;
-          }
-
-          scheduleRawResolution();
-        };
-        unsubscribe = window.serial.onData(handleData);
-
-        window.serial.sendCommand(command).then((result) => {
-          if (!result.ok) {
-            clearTimeout(timer);
-            cleanup();
-            this.parser.reset();
-            reject(new Error(result.error || "Send failed during page read"));
-          }
-        });
-      });
+    if (!Number.isInteger(pageSize) || pageSize <= 0) throw new Error('Invalid page read size');
+    const response = await this.sendHybridCommand(command, {
+      timeout,
+      rawExpectedLength: pageSize + 1,
+      label: `read page bytes=${pageSize}`,
     });
+    return Buffer.from(response.data);
   }
 
   async readOutputChannels(parsedIni, options = {}) {
+    return this._runCommandTransaction(() => this._readOutputChannels(parsedIni, options), true);
+  }
+
+  async _readOutputChannels(parsedIni, options = {}) {
     const ochTemplate = parsedIni?.outputChannels?.ochGetCommand;
     const blockSize = parsedIni?.outputChannels?.ochBlockSize;
     if (!ochTemplate || !blockSize) {
@@ -547,77 +469,15 @@ class SerialService {
       options.tsCanId ?? 0,
     );
 
-    this.parser.reset();
-
-    // This read handles raw and wrapped responses itself until it settles.
-    // Keep the global parser from interpreting raw bytes as frame headers.
-    this.parser.enableRawMode(0);
-    const outputBuffer = await new Promise((resolve, reject) => {
-      let buffer = Buffer.alloc(0);
-      let unsubscribe = null;
-      let settleTimer = null;
-      const expectedBytes = options.length ?? blockSize;
-      const timeout = options.timeout ?? 1200;
-
-      const cleanup = () => {
-        if (unsubscribe) unsubscribe();
-        if (settleTimer) clearTimeout(settleTimer);
-      };
-
-      const timer = setTimeout(() => {
-        cleanup();
-        this.parser.reset();
-        reject(new Error(`output channels timeout after ${expectedBytes} bytes`));
-      }, timeout);
-
-      const finish = (payload) => {
-        clearTimeout(timer);
-        cleanup();
-        this.parser.reset();
-        resolve(Buffer.from(payload));
-      };
-
-      const scheduleRawResolution = () => {
-        if (buffer.length >= 2 && buffer.readUInt16BE(0) === expectedBytes + 1) return;
-        if (buffer.length < expectedBytes) {
-          return;
-        }
-
-        if (settleTimer) clearTimeout(settleTimer);
-        settleTimer = setTimeout(() => {
-          if (buffer.length >= expectedBytes + 1 && buffer[0] === ResponseStatus.OK) {
-            finish(buffer.slice(1, 1 + expectedBytes));
-            return;
-          }
-
-          finish(buffer.slice(0, expectedBytes));
-        }, options.settleMs ?? 30);
-      };
-
-      const handleData = (bytes) => {
-        const chunk = Buffer.from(bytes);
-
-        buffer = Buffer.concat([buffer, chunk]);
-
-        const wrapped = this._tryParseWrappedResponse(buffer);
-        if (wrapped && wrapped.status === ResponseStatus.OK && wrapped.data.length >= expectedBytes) {
-          finish(wrapped.data.slice(0, expectedBytes));
-          return;
-        }
-
-        scheduleRawResolution();
-      };
-
-      unsubscribe = window.serial.onData(handleData);
-      window.serial.sendCommand(command).then((result) => {
-        if (!result.ok) {
-          clearTimeout(timer);
-          cleanup();
-          this.parser.reset();
-          reject(new Error(result.error || "Send failed during output channels read"));
-        }
-      });
+    const expectedBytes = options.length ?? blockSize;
+    if (!Number.isInteger(expectedBytes) || expectedBytes <= 0) throw new Error('Invalid output channels read size');
+    // Already inside a transaction: do not queue another transaction behind it.
+    const response = await this._sendHybridCommand(command, {
+      timeout: options.timeout ?? 1200,
+      rawExpectedLength: expectedBytes + 1,
+      label: `output channels bytes=${expectedBytes}`,
     });
+    const outputBuffer = response.data;
 
     return decodeOutputChannels(outputBuffer, parsedIni);
   }
@@ -628,18 +488,26 @@ class SerialService {
       return false;
     }
 
+    if (this.outputChannelsPollConfig?.parsedIni !== parsedIni) this.stopOutputChannelsPolling();
+
     this.outputChannelsPollConfig = {
       parsedIni,
       intervalMs: options.intervalMs ?? 120,
       tsCanId: options.tsCanId ?? 0,
     };
 
+    if (this.outputChannelsSuspendCount > 0) return true;
+
     if (this.outputChannelsPollTimer) {
       return true;
     }
 
+    const session = this.sessionGeneration;
+    const poll = ++this.pollGeneration;
+    const config = this.outputChannelsPollConfig;
     const tick = async () => {
       if (
+        session !== this.sessionGeneration || poll !== this.pollGeneration ||
         this.outputChannelsSuspendCount > 0 ||
         this.outputChannelsPollRunning ||
         this.commandInFlightCount > 0 ||
@@ -648,21 +516,26 @@ class SerialService {
         return;
       }
 
+      const read = {};
+      this.activePollRead = read;
       this.outputChannelsPollRunning = true;
       this.realtimeReadInFlight = true;
       try {
-        const realtime = await this.readOutputChannels(this.outputChannelsPollConfig.parsedIni, {
-          tsCanId: this.outputChannelsPollConfig.tsCanId,
+        const realtime = await this.readOutputChannels(config.parsedIni, {
+          tsCanId: config.tsCanId,
           timeout: 1200,
         });
-        if (realtime) {
-          this._emitRealtime(realtime);
+        if (realtime && session === this.sessionGeneration && poll === this.pollGeneration) {
+          this._emitRealtime(realtime, { ini: config.parsedIni });
         }
       } catch (error) {
-        console.warn("[Serial] Output channels poll failed:", error.message);
+        if (session === this.sessionGeneration && poll === this.pollGeneration) console.warn("[Serial] Output channels poll failed:", error.message);
       } finally {
-        this.realtimeReadInFlight = false;
-        this.outputChannelsPollRunning = false;
+        if (this.activePollRead === read) {
+          this.activePollRead = null;
+          this.realtimeReadInFlight = false;
+          this.outputChannelsPollRunning = false;
+        }
       }
     };
 
@@ -672,13 +545,12 @@ class SerialService {
   }
 
   stopOutputChannelsPolling() {
+    this.pollGeneration += 1;
     if (this.outputChannelsPollTimer) {
       clearInterval(this.outputChannelsPollTimer);
       this.outputChannelsPollTimer = null;
     }
     this.outputChannelsPollConfig = null;
-    this.outputChannelsPollRunning = false;
-    this.realtimeReadInFlight = false;
   }
 
   suspendOutputChannelsPolling() {
@@ -690,6 +562,7 @@ class SerialService {
   }
 
   async enterExclusiveMode(timeout = 1500) {
+    const session = this.sessionGeneration;
     this.suspendOutputChannelsPolling();
     console.log("[Serial] Entering exclusive mode", {
       suspendCount: this.outputChannelsSuspendCount,
@@ -705,11 +578,12 @@ class SerialService {
           outputChannelsPollRunning: this.outputChannelsPollRunning,
           realtimeReadInFlight: this.realtimeReadInFlight,
         });
-        break;
+        throw new Error('Realtime polling did not stop before exclusive operation');
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
+    if (session !== this.sessionGeneration) throw new Error('Serial session changed before exclusive operation');
     console.log("[Serial] Exclusive mode ready", {
       waitMs: Date.now() - startedAt,
       outputChannelsPollRunning: this.outputChannelsPollRunning,
@@ -717,7 +591,8 @@ class SerialService {
     });
   }
 
-  resumeOutputChannelsPolling() {
+  resumeOutputChannelsPolling(session = this.sessionGeneration) {
+    if (session !== this.sessionGeneration) return;
     this.outputChannelsSuspendCount = Math.max(0, this.outputChannelsSuspendCount - 1);
     if (
       this.outputChannelsSuspendCount === 0 &&
@@ -811,8 +686,8 @@ class SerialService {
   /**
    * Emit realtime data to all listeners
    */
-  _emitRealtime(data) {
-    this.realtimeListeners.forEach(cb => cb(data));
+  _emitRealtime(data, source) {
+    this.realtimeListeners.forEach(cb => cb(data, source));
   }
 
   /**
@@ -838,11 +713,17 @@ class SerialService {
    * Reset service state
    */
   reset() {
+    this.sessionGeneration += 1;
+    for (const cancel of [...this.cancelTransactions]) cancel(new Error('Serial session changed; reconnect and retry'));
+    for (const pending of this.pendingCommands.splice(0)) pending.reject(new Error('Serial session changed; reconnect and retry'));
     this.parser.reset();
     this.isReady = false;
     this.pendingCommands = [];
     this.commandInFlightCount = 0;
     this.stopOutputChannelsPolling();
+    this.activePollRead = null;
+    this.outputChannelsPollRunning = false;
+    this.realtimeReadInFlight = false;
     this.outputChannelsSuspendCount = 0;
   }
 
@@ -850,6 +731,9 @@ class SerialService {
    * Cleanup
    */
   destroy() {
+    this.reset();
+    this.unsubscribeParser?.();
+    this.unsubscribeParser = null;
     this.stopOutputChannelsPolling();
     this.parser.offAll();
     this.realtimeListeners = [];
@@ -862,3 +746,7 @@ class SerialService {
 
 // Singleton instance
 export const serialService = new SerialService();
+
+// Vite replaces this module during development. Retire its listeners, queued
+// commands and timers before a replacement instance can use the same USB port.
+if (import.meta.hot) import.meta.hot.dispose(() => serialService.destroy());

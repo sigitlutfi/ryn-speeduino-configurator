@@ -14,16 +14,27 @@ Use Git Bash, Linux or WSL syntax, with paths to the actual two checkouts:
 node scripts/check-compatibility.mjs
 node --test scripts/check-compatibility.test.mjs
 
-# Configurator checkout; dependencies installed using npm ci.
-npm run upgrade:check -- --firmware /path/to/firmware
+# Configurator checkout; dependencies installed using bun install --frozen-lockfile.
+bun install --frozen-lockfile
+bun run upgrade:check -- --firmware /path/to/firmware
 
 # Complete software gate. Windows uses WSL for native tests.
-npm run upgrade:check -- --firmware /path/to/firmware --full --report upgrade-report.json
+bun run upgrade:check -- --firmware /path/to/firmware --full --report upgrade-report.json
 ```
 
-`--full` runs both Node suites, the renderer build, twelve native firmware
-suites, all three Mega channel builds, and compilation of the generated INI
-assertions for each AVR build. It never uploads firmware or writes to an ECU.
+`--full` runs both Node suites, the renderer build, fourteen native firmware
+suites, the standard `megaatmega2560` build used for the four-cylinder project,
+and compilation of the generated INI assertions for that AVR build. Per the
+project owner's scope, six/eight-injector channel variants (`6-3` and `8-1`)
+are no longer required validation targets. Their build definitions remain
+available. Shared native, protocol, pin and storage regression tests still run.
+The gate never uploads firmware or writes to an ECU.
+For changes to Electron, Bun or native dependencies, also run `bun run package`
+and `bun run test:package -- "out/RYN CONFIGURATOR-win32-x64"` on Windows.
+The package check copies its archive and unpacked native modules outside the
+checkout, loads SerialPort with Electron, and enumerates ports without opening
+them. CI runs this check in its Windows packaging job. Bun is pinned to 1.4.0;
+the script/test runtime remains Node 24 and the app runtime remains Electron.
 The report is written only after success and records both actual Git revisions,
 tracked/untracked dirty state, INI SHA-256 and firmware contract SHA-256. The firmware
 revision recorded in the pairing file is the accepted reference; a newer checkout
@@ -72,15 +83,17 @@ tests use the Windows compiler.
    Review the generated test diff. It checks all fifteen wire page sizes and
    writes each of the 56 current custom fields independently, proving byte/bit
    positions and signed scalar types against the compiled C++ representation.
-   It also checks custom telemetry bits and little-endian values. It does not
+   It additionally checks all 17 compact Drive Mode constants, including the
+   two-byte CRC and signed ignition offsets, and custom telemetry bits and
+   little-endian values. It does not
    assert every upstream base field offset; source review remains necessary.
 7. Commit the reviewed firmware candidate (the sync command verifies that its
    baseline and relevant sources/tooling are committed). In the configurator checkout, fix
    any affected UI, pin ownership rules and protocol code, then derive artifacts:
 
    ```bash
-   npm run upgrade:sync -- --firmware /path/to/firmware
-   npm run upgrade:check -- --firmware /path/to/firmware --full --report upgrade-report.json
+   bun run upgrade:sync -- --firmware /path/to/firmware
+   bun run upgrade:check -- --firmware /path/to/firmware --full --report upgrade-report.json
    ```
 
    Sync requires a current accepted firmware baseline. It copies the INI,

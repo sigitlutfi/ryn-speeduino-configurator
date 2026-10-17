@@ -4,11 +4,19 @@ const nowIso = () => new Date().toISOString()
 
 export const INITIAL_CONNECTION = {
   status: 'disconnected',
+  sessionId: 0,
+  firmwareSignature: null,
   port: '',
   baud: 115200,
   errorMsg: '',
   transportStatus: 'idle',
   handshakeStatus: 'idle',
+  validationStatus: 'idle',
+  validationError: '',
+  autoReconnectPaused: false,
+  recoveryGeneration: 0,
+  connectionAttempt: null,
+  connectionAttemptSequence: 0,
   availablePorts: [],
   refreshingPorts: false,
   lastConnectedAt: null,
@@ -25,12 +33,21 @@ export const createConnectionSlice = (set) => ({
 
   setConnectionStatus: (status, errorMsg = '') =>
     set((s) => ({
+      realtimeReceivedAt: status !== s.connection.status ? null : s.realtimeReceivedAt,
+      driveModeStatus: status !== s.connection.status ? null : s.driveModeStatus,
+      ...(status !== s.connection.status && ['ProfileActive', 'Applying', 'RollingBack', 'Unknown'].includes(s.runtimeProfileSession?.state) ? {
+        runtimeProfileSession: { ...s.runtimeProfileSession, state: 'Unknown', activeProfile: null }
+      } : {}),
       connection: {
         ...s.connection,
         status,
+        sessionId: s.connection.sessionId + (status !== s.connection.status ? 1 : 0),
+        firmwareSignature: status !== s.connection.status ? null : s.connection.firmwareSignature,
+        validationStatus: status !== s.connection.status ? 'idle' : s.connection.validationStatus,
+        validationError: status !== s.connection.status ? '' : s.connection.validationError,
         errorMsg,
         lastConnectedAt:
-          status === 'connected' ? nowIso() : s.connection.lastConnectedAt,
+          status === 'connected' && status !== s.connection.status ? nowIso() : s.connection.lastConnectedAt,
         lastErrorAt:
           status === 'error' ? nowIso() : s.connection.lastErrorAt,
       },
@@ -38,6 +55,28 @@ export const createConnectionSlice = (set) => ({
 
   setConnectionPort: (port) =>
     set((s) => ({ connection: { ...s.connection, port } })),
+
+  cancelConnectionRecovery: () => set(s => ({ connection: { ...s.connection,
+    autoReconnectPaused: true, connectionAttempt: null, recoveryGeneration: s.connection.recoveryGeneration + 1 } })),
+
+  beginConnectionAttempt: (owner = 'recovery') => {
+    let attempt
+    set(s => {
+      if (s.connection.connectionAttempt) throw new Error('Another connection attempt is running')
+      attempt = { owner, id: s.connection.connectionAttemptSequence + 1 }
+      return { connection: { ...s.connection, connectionAttempt: attempt, connectionAttemptSequence: attempt.id } }
+    })
+    return attempt
+  },
+
+  endConnectionAttempt: attempt => set(s => s.connection.connectionAttempt === attempt
+    ? { connection: { ...s.connection, connectionAttempt: null } } : {}),
+
+  setAutoReconnectPaused: (autoReconnectPaused) =>
+    set(s => ({ connection: { ...s.connection, autoReconnectPaused } })),
+
+  setConnectionValidation: (validationStatus, validationError = '') =>
+    set(s => ({ connection: { ...s.connection, validationStatus, validationError } })),
 
   setConnectionBaud: (baud) =>
     set((s) => ({ connection: { ...s.connection, baud } })),

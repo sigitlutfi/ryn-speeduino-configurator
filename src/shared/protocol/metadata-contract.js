@@ -1,7 +1,9 @@
 // Only protocol and configuration semantics belong in this comparison. Project
 // names, dialog layout and help text may differ without changing ECU writes.
+import { isPinAssignmentField } from './pin-registry.js'
 const FIELD_KEYS = ['type', 'dataType', 'offset', 'bitRange', 'shape', 'length', 'encoding',
-  'units', 'scale', 'translate', 'lo', 'hi', 'digits', 'options', 'defaultValue', 'requiresPowerCycle']
+  'units', 'scale', 'translate', 'lo', 'hi', 'digits', 'options', 'defaultValue', 'requiresPowerCycle',
+  'scaleExpression', 'translateExpression', 'loExpression', 'hiExpression', 'digitsExpression', 'raw']
 
 function fieldsContract(fields) {
   return Object.keys(fields || {}).sort().map(name => [name,
@@ -31,5 +33,21 @@ export function metadataContract(ini) {
     realtimeSize: ini?.outputChannels?.ochBlockSize,
     realtimeCommand: ini?.outputChannels?.ochGetCommand,
     channels: fieldsContract(ini?.outputChannels?.channels),
+    tables: Object.keys(ini?.tables || {}).sort().map(id => {
+      const table = ini.tables[id]
+      return [id, table.page, table.xBins?.varName ?? '', table.yBins?.varName ?? '', table.zBins?.varName ?? '']
+    }),
+    curves: Object.keys(ini?.curves || {}).sort().map(id => {
+      const curve = ini.curves[id]
+      return [id, curve.xBins?.varName ?? '', curve.yBins?.varName ?? '']
+    }),
+    // Pin availability uses INI conditions; labels and dialog placement do not
+    // affect ownership, but changing an activation expression does.
+    pinConditions: Object.values(ini?.constants?.pages || {}).flatMap(fields =>
+      Object.entries(fields).filter(([name, meta]) => isPinAssignmentField(name, meta))
+        .map(([name]) => [name, [...new Set((ini.dialogFields?.[name] || [])
+          .map(entry => (entry.conditions?.length ? entry.conditions : [entry.condition])
+            .filter(Boolean).map(condition => condition.trim()).sort().join(' && ')))].sort()]))
+      .sort(([a], [b]) => a.localeCompare(b)),
   }
 }

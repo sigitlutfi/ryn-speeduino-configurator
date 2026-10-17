@@ -1,3 +1,4 @@
+import { parseDriveStatus } from './drive-modes.js'
 /**
  * Parse a 138-byte TunerStudio realtime data packet from Speeduino.
  * Byte mapping sourced directly from speeduino/logger.cpp getTSLogEntry().
@@ -23,11 +24,11 @@ export function parseRealtime(bytes) {
   const afr    = b[10] / 10;            // λ ratio * 14.7 (stored as AFR*10 / 10)
   const ve     = b[102];                // % (byte 102 = current VE)
   const ve1    = b[19];                 // % VE table 1
-  const tps    = b[25];                 // 0-100%
+  const tps    = b[25] / 2;             // firmware 0..200 => 0..100%, as in INI
   const advance = new Int8Array([b[24]])[0]; // signed, degrees
   const corrections = b[17] | (b[18] << 8); // %
-  const pw1    = (b[76] | (b[77] << 8)) / 1000; // ms (stored in µs/100 => /10 for µs, /1000 for ms... actually in 100µs units)
-  const dwell  = (b[90] | (b[91] << 8)) / 10;   // ms
+  const pw1    = (b[76] | (b[77] << 8)) / 1000; // microseconds on the wire, milliseconds here
+  const dwell  = (b[90] | (b[91] << 8)) / 1000;   // ms
   const baro   = b[41];                // kPa
   const vss    = b[104] | (b[105] << 8); // km/h
   const gear   = b[106];
@@ -135,11 +136,18 @@ export function parseRealtime(bytes) {
   const syncLossCounter = b[3];                // byte
 
   return {
+    driveMode: bytes.length >= 167 ? parseDriveStatus(b.subarray(152, 167)) : null,
     rpm,
     map,
+    emap: b[121] | (b[122] << 8),
+    fuelLoadRaw: (b[86] | (b[87] << 8)) << 16 >> 16,
+    ignLoadRaw: (b[88] | (b[89] << 8)) << 16 >> 16,
     iat,
     coolant,
+    clt: coolant,
     battery,
+    vbatt: battery,
+    tpsADC: b[74],
     afr,
     ve,
     ve1,
@@ -148,6 +156,7 @@ export function parseRealtime(bytes) {
     corrections,
     pw1,
     dwell,
+    dwellActual: (b[125] | (b[126] << 8)) / 1000,
     baro,
     vss,
     gear,

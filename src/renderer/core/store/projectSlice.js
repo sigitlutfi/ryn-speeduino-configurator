@@ -11,7 +11,9 @@ import { createECUCommunicationSlice } from "./slices/ecu.communication.js";
 import { createECUSyncSlice } from "./slices/ecu.sync.js";
 import { createRuntimeFieldsSlice } from "./slices/runtime.fields.js";
 import { createRuntimeTablesSlice } from "./slices/runtime.tables.js";
+import { createDriveModesSlice } from "./slices/drive.modes.js";
 import { createRuntimeProfileSlice } from "./slices/runtime.profile.js";
+import { createECURestartSlice } from './slices/ecu.restart.js';
 
 // Re-export constants for backward compatibility
 export {
@@ -39,6 +41,7 @@ export { migrateProject } from "./utils/project.normalization.js";
 export const createProjectSlice = (set, get) => ({
   // === Core State ===
   currentProject: null,
+  projectEpoch: 0,
   parsedIni: null,
   recentProjects: [],
   runtimeProfileSession: createEmptyRuntimeProfileSession(),
@@ -54,6 +57,7 @@ export const createProjectSlice = (set, get) => ({
 
   // ECU sync operations (burn, compare, upload)
   ...createECUSyncSlice(set, get),
+  ...createECURestartSlice(set, get),
 
   // Runtime field read/write/verify
   ...createRuntimeFieldsSlice(set, get),
@@ -63,4 +67,5 @@ export const createProjectSlice = (set, get) => ({
 
   // Runtime profile apply/rollback
   ...createRuntimeProfileSlice(set, get),
+  ...createDriveModesSlice(set, get),
 });

@@ -100,3 +100,6 @@ out/
 !samples/
 !samples/*.rynproj
 !samples/*.msq
+
+# Synthetic project fixture required by the Flutter handoff
+!docs/fixtures/synthetic-project-v5.rynproj

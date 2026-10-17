@@ -13,8 +13,16 @@ import {
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import { useStore } from "../../core/store.js";
 import TuningHeader from "../shared/components/TuningHeader";
+import {
+  GroupHeader,
+  StatField,
+  SelectField,
+} from "../shared/components/TuningComponents";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 import ReqFuelCalculator from "./ReqFuelCalculator.jsx";
+import { getSupportedBoardChoices, validateBoardSelection, projectPinMapOptions } from '../../../shared/protocol/board-pins.js';
+import { injectionSquirts } from '../../../shared/protocol/required-fuel.js';
+import { buildPinRegistry } from '../shared/utils/pinRegistry.js';
 
 const ENGINE_FIELDS = [
   "nCylinders",
@@ -37,9 +45,11 @@ const ENGINE_FIELDS = [
 const EngineSettings = () => {
   const [showReqFuelCalc, setShowReqFuelCalc] = useState(false);
   const currentProject = useStore((s) => s.currentProject);
+  const parsedIni = useStore(s => s.parsedIni);
   const updateProjectField = useStore((s) => s.updateProjectField);
 
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     setLocalPage,
@@ -64,121 +74,39 @@ const EngineSettings = () => {
     setFieldValue(name, toRaw(val, info?.meta));
   };
 
+  const fieldProps = { getValue, updateValue, getFieldInfo, pinPages };
   const reqFuelCalcPrefs = currentProject?.engine?.reqFuelCalc || {};
-
-  const GroupHeader = ({
-    title,
-    icon: Icon,
-    colorClass = "bg-neon-red shadow-glow-red",
-  }) => (
-    <div className="flex items-center gap-4 mb-6">
-      <div className={`w-1.5 h-6 ${colorClass} rounded-full`} />
-      <h3 className="font-orbitron text-[11px] font-black text-white uppercase tracking-[0.3em]">
-        {title}
-      </h3>
-      {Icon && <Icon className="ml-auto text-neon-red opacity-10" size={18} />}
-    </div>
-  );
-
-  const StatField = ({
-    name,
-    label,
-    icon: Icon,
-    unit,
-    step = 1,
-    disabled = false,
-    theme = "red",
-    description,
-  }) => {
-    const val = getValue(name);
-    return (
-      <div
-        className={`p-6 rounded-3xl glass-card border border-white/10 transition-all ${disabled ? "opacity-20 grayscale pointer-events-none" : "hover:border-neon-red/30"}`}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-            {Icon && (
-              <Icon size={12} className={`text-neon-${theme} opacity-40`} />
-            )}
-            {label}
-          </span>
-          {unit && (
-            <span className="text-[8px] font-black text-white/20 uppercase">
-              {unit}
-            </span>
-          )}
-        </div>
-        <input
-          type="number"
-          step={step}
-          value={val}
-          onChange={(e) => updateValue(name, parseFloat(e.target.value))}
-          className={`w-full bg-black/40 border-none text-2xl font-mono font-black text-white focus:text-neon-${theme} outline-none transition-colors duration-300`}
-        />
-        {description && (
-          <p className="text-[7px] text-gray-600 font-bold uppercase mt-2 leading-tight">
-            {description}
-          </p>
-        )}
-      </div>
-    );
-  };
-
-  const SelectField = ({
-    name,
-    label,
-    icon: Icon,
-    disabled = false,
-    theme = "white",
-  }) => {
-    const val = getValue(name);
-    const info = getFieldInfo(name);
-
-    // Handle filtering "INVALID" while maintaining original mapping index
-    const availableOptions = info?.meta?.options || [];
-    const filteredOptions = availableOptions
-      .map((opt, i) => ({ label: opt, value: i }))
-      .filter((o) => o.label && o.label !== "INVALID");
-
-    return (
-      <div
-        className={`p-6 rounded-3xl glass-card border border-white/10 transition-all ${disabled ? "opacity-20 grayscale pointer-events-none" : "hover:border-gray-500/30 font-bold"}`}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
-            {Icon && <Icon size={12} className="text-white opacity-40" />}
-            {label}
-          </span>
-        </div>
-        <select
-          value={val}
-          onChange={(e) => updateValue(name, parseInt(e.target.value))}
-          className={`w-full bg-black/40 border-none text-[10px] font-orbitron font-black uppercase text-white outline-none py-1 appearance-none cursor-pointer`}
-        >
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((opt) => (
-              <option
-                key={opt.value}
-                value={opt.value}
-                className="bg-bg-deep text-white"
-              >
-                {opt.label}
-              </option>
-            ))
-          ) : (
-            <option value={val}>Loading...</option>
-          )}
-        </select>
-      </div>
-    );
-  };
+  const hardware = projectPinMapOptions(currentProject);
+  const channelBuildKnown = ['standard', '6-3', '8-1'].includes(currentProject?.hardware?.channelBuild);
+  const boardChoices = getSupportedBoardChoices(parsedIni, hardware.platform);
+  const boardValue = getValue('pinLayout');
+  const boardError = validateBoardSelection(parsedIni, boardValue, hardware.platform);
+  const boardOptions = boardChoices.some(choice => choice.value === boardValue) ? boardChoices : [
+    { value: boardValue, label: `${getFieldInfo('pinLayout')?.meta?.options?.[boardValue] || `Board ${boardValue}`} — unavailable for this firmware`, disabled: true }, ...boardChoices,
+  ];
+  const boardChanged = boardValue !== currentProject?.constants?.decodedPages?.[getFieldInfo('pinLayout')?.pageId]?.pinLayout;
+  const routingChanges = useMemo(() => {
+    if (!boardChanged || !parsedIni) return [];
+    const before = buildPinRegistry(parsedIni, currentProject.constants.decodedPages, hardware);
+    const after = buildPinRegistry(parsedIni, pinPages, hardware);
+    return after.rows.filter(row => row.isActive && row.physicalPin !== before.rows.find(previous => previous.field === row.field)?.physicalPin)
+      .map(row => ({ label: row.displayLabel, before: before.rows.find(previous => previous.field === row.field)?.physicalPin, after: row.physicalPin }));
+  }, [boardChanged, parsedIni, pinPages, currentProject?.constants, currentProject?.hardware]);
+  const cylinders = getValue('nCylinders');
+  const dividerOptions = Array.from({ length: Number.isInteger(cylinders) && cylinders > 0 ? cylinders : 0 }, (_, i) => i + 1)
+    .filter(value => cylinders % value === 0).map(value => ({ value, label: `Divider ${value} · ${cylinders / value} squirts/cycle requested` }));
+  let squirtsInfo;
+  try {
+    const squirts = injectionSquirts(cylinders, getValue('divider'), getValue('injLayout'), getValue('twoStroke'), getValue('injType'));
+    squirtsInfo = `Efektif: ${squirts} squirts/cycle. ${getValue('injLayout') === 3 && getValue('twoStroke') === 0 ? 'Sequential four-stroke memakai 1 squirt.' : 'Pembagi harus membagi jumlah silinder secara tepat.'}`;
+  } catch { squirtsInfo = 'Pilih jumlah silinder dan divider yang valid sebelum menyimpan.'; }
 
   return (
     <div className="flex flex-col h-full  select-none animate-in fade-in duration-700">
       <TuningHeader
-        title="Engine Strategy"
+        title="Master Setup"
         icon={Settings}
-        description="Core power management and thermodynamic constants"
+        description="Board, engine configuration and base fuel delivery"
         isDirty={isDirty}
         isSaving={isSaving}
         saveStatus={saveStatus}
@@ -199,12 +127,18 @@ const EngineSettings = () => {
         )}
 
         <div className="max-w-[1400px] mx-auto space-y-10 pb-24">
+          <section aria-label="Hardware target" className="rounded-2xl border border-cyan-200/15 bg-cyan-300/[0.035] p-5 text-xs text-slate-300 space-y-2">
+            <p className="font-semibold text-cyan-100">{hardware.platform === 'mega2560' ? 'Mega2560' : 'MCU belum dikonfirmasi'} · {channelBuildKnown ? `kapasitas firmware ${hardware.injectorChannels} injector / ${hardware.ignitionChannels} ignition channels` : 'Channel build belum dikonfirmasi; reservasi pin memakai semua channel'}</p>
+            <p>Board menentukan routing fisik; jumlah silinder tidak mengubah kapasitas channel hasil build. Pilihan hanya mencakup mapping firmware yang didukung.</p>
+            {currentProject?.hardware?.restartRequired && <p className="text-amber-200">Setup ECU menunggu Burn/power cycle dan verifikasi. Mapping berikut adalah konfigurasi tujuan.</p>}
+            {!hardware.platform && <p className="text-amber-200">Konfirmasikan MCU dan channel build di I/O Summary terlebih dahulu.</p>}
+          </section>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="p-8 rounded-[40px] backdrop-blur-md border border-white/5 bg-black/20">
               <GroupHeader
                 title="Core Constants"
                 icon={Cpu}
-                colorClass="bg-white"
+                theme="white"
               />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
                 <div className="md:col-span-2 p-6 rounded-3xl bg-neon-red/5 border border-neon-red/20 relative group">
@@ -221,8 +155,11 @@ const EngineSettings = () => {
                     </button>
                   </div>
                   <input
+                    aria-label="Required Fuel (ms)"
                     type="number"
                     step="0.1"
+                    min="0.1"
+                    max={getFieldInfo('reqFuel')?.meta?.hi ?? 25.5}
                     value={getValue("reqFuel")}
                     onChange={(e) =>
                       updateValue("reqFuel", parseFloat(e.target.value))
@@ -235,27 +172,46 @@ const EngineSettings = () => {
                 </div>
 
                 <StatField
+                  {...fieldProps}
                   name="stoich"
                   label="Stoichiometric Ratio"
                   unit="AFR"
+                  theme="red"
                 />
                 <SelectField
+                  {...fieldProps}
                   name="pinLayout"
                   label="Speeduino Board"
+                  options={boardOptions}
+                  disabled={!hardware.platform}
+                  description="Changing the board requires Burn, ECU power cycle and verification. Explicit pin overrides are retained."
+                  error={boardError}
                   icon={Cpu}
+                  theme="white"
                 />
+                {boardChanged && <details aria-label="Preview perubahan routing board" className="md:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-xs space-y-3">
+                  <summary className="cursor-pointer font-semibold text-amber-100">Preview routing board · {routingChanges.length} perubahan · belum diterapkan ke ECU</summary>
+                  <p className="text-slate-400">Pin override tetap dipertahankan. Konflik dicek kembali saat Save dan sebelum upload. Burn dan power cycle diperlukan untuk menerapkan mapping.</p>
+                  <div className="grid sm:grid-cols-2 gap-2">{routingChanges.map(row => <div key={row.label} className="flex justify-between gap-3 rounded-lg border border-white/5 p-2">
+                    <span>{row.label}</span><span className="font-mono">{row.before == null ? '—' : `D${row.before}`} → {row.after == null ? '—' : `D${row.after}`}</span>
+                  </div>)}</div>
+                </details>}
                 <SelectField
+                  {...fieldProps}
                   name="nCylinders"
                   label="Cylinder Count"
                   icon={Activity}
+                  theme="white"
                 />
-                <StatField
+                <SelectField
+                  {...fieldProps}
                   name="nInjectors"
                   label="Injector Count"
                   icon={Zap}
+                  theme="red"
                 />
-                <SelectField name="twoStroke" label="Stroke Cycle" />
-                <SelectField name="engineType" label="Engine Stroke" />
+                <SelectField {...fieldProps} name="twoStroke" label="Stroke Cycle" theme="white" />
+                <SelectField {...fieldProps} name="engineType" label="Firing Pattern" description="Even fire / Odd fire describes firing intervals." theme="white" />
               </div>
             </div>
 
@@ -264,28 +220,34 @@ const EngineSettings = () => {
                 <GroupHeader
                   title="Fueling Strategy"
                   icon={Flame}
-                  colorClass="bg-neon-cyan shadow-glow-cyan"
+                  theme="cyan"
                 />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <SelectField
+                    {...fieldProps}
                     name="algorithm"
                     label="Control Algorithm"
                     icon={ShieldAlert}
                   />
-                  <StatField
+                  <SelectField
+                    {...fieldProps}
                     name="divider"
-                    label="Squirts per Cycle"
-                    description="Firing events per cycle (720°)"
+                    label="Injection Divider"
+                    options={dividerOptions}
+                    description={squirtsInfo}
+                    theme="red"
                   />
-                  <SelectField name="injType" label="Injection Type" />
-                  <SelectField name="alternate" label="Injektor Timing" />
+                  <SelectField {...fieldProps} name="injType" label="Injection Type" />
+                  <SelectField {...fieldProps} name="alternate" label="Injektor Timing" />
                   <StatField
+                    {...fieldProps}
                     name="injOpen"
                     label="Injector Open Time"
                     unit="ms"
                     step={0.1}
+                    theme="red"
                   />
-                  <SelectField name="mapSample" label="MAP Sampling" />
+                  <SelectField {...fieldProps} name="mapSample" label="MAP Sampling" />
                 </div>
               </div>
 
@@ -298,22 +260,24 @@ const EngineSettings = () => {
                     Setup Warning
                   </h4>
                   <p className="text-[8px] text-gray-500 font-medium uppercase mt-1 leading-relaxed">
-                    Changing Required Fuel will rescale your whole VE table.
-                    Only recalculate if you changed injectors or fuel type.
+                    Mengubah Required Fuel mengubah jumlah bahan bakar dasar setelah setup diterapkan.
+                    Nilai tabel VE tidak diubah atau dikompensasi otomatis. Gunakan spesifikasi mesin dan injektor saat menghitung ulang.
                   </p>
                 </div>
               </div>
             </div>
           </div>
 
+
+
           <div className="p-8 rounded-[40px] glass-card border border-white/10">
             <GroupHeader
               title="Ignition / Sync"
               icon={Zap}
-              colorClass="bg-neon-orange shadow-glow-orange"
+              theme="orange"
             />
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <SelectField name="sparkMode" label="Spark Mode" theme="orange" />
+              <SelectField {...fieldProps} name="sparkMode" label="Spark Mode" theme="orange" />
             </div>
           </div>
         </div>
@@ -331,9 +295,9 @@ const EngineSettings = () => {
           }
           initialDisplacementUnit={reqFuelCalcPrefs.displacementUnit ?? "cc"}
           initialCylinders={getValue("nCylinders")}
-          initialInjectorFlow={reqFuelCalcPrefs.injectorFlow ?? 440}
+          initialInjectorFlow={reqFuelCalcPrefs.injectorFlow ?? currentProject?.engine?.injectorFlow ?? 440}
           initialInjectorUnit={reqFuelCalcPrefs.injectorUnit ?? "ccmin"}
-          initialSquirts={getValue("divider")}
+          initialSquirts={getValue("divider") > 0 ? getValue("nCylinders") / getValue("divider") : 2}
           initialStoich={getValue("stoich")}
           onApply={(data) => {
             const reqFuelInfo = getFieldInfo("reqFuel");
@@ -361,14 +325,14 @@ const EngineSettings = () => {
               setLocalPage(reqFuelInfo.pageId, {
                 [reqFuelInfo.key]: toRaw(data.reqFuel, reqFuelInfo.meta),
                 [nCylInfo.key]: toRaw(data.cylinders, nCylInfo.meta),
-                [dividerInfo.key]: toRaw(data.squirts, dividerInfo.meta),
+                [dividerInfo.key]: toRaw(data.divider, dividerInfo.meta),
                 [stoichInfo.key]: toRaw(data.stoich, stoichInfo.meta),
               });
             } else {
               // Fallback if INI mappings ever diverge across pages.
               updateValue("reqFuel", data.reqFuel);
               updateValue("nCylinders", data.cylinders);
-              updateValue("divider", data.squirts);
+              updateValue("divider", data.divider);
               updateValue("stoich", data.stoich);
             }
 

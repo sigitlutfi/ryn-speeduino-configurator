@@ -1,11 +1,7 @@
 // Table transformation and display utilities
 
-import {
-  RUNTIME_PROFILE_TABLE_DEFS,
-  readRuntimeTableFromDecodedPage,
-  resolveRuntimeTable,
-} from "../../../../shared/protocol/runtime-tables.js";
 import { INITIAL_TABLES } from "../tableSlice.js";
+import { displayTablesFromPages } from './table.drafts.js';
 
 export function matrixFromFlatValues(flatValues = [], rows = 16, cols = 16) {
   const matrix = [];
@@ -23,27 +19,7 @@ export function buildDisplayTablesFromDecodedPages(
   const nextTables = { ...INITIAL_TABLES, ...(baseTables || {}) };
   if (!parsedIni || !decodedPages) return nextTables;
 
-  for (const definition of Object.values(RUNTIME_PROFILE_TABLE_DEFS)) {
-    try {
-      const tableDef = resolveRuntimeTable(parsedIni, definition.key);
-      const decodedPage = decodedPages?.[tableDef.page];
-      if (!decodedPage) continue;
-
-      const runtimeTable = readRuntimeTableFromDecodedPage(decodedPage, tableDef);
-      nextTables[definition.storeKey] = {
-        values: runtimeTable.displayValues,
-        rpmAxis: runtimeTable.displayRpmAxis,
-        loadAxis: runtimeTable.displayLoadAxis,
-      };
-    } catch (error) {
-      console.warn(
-        `[project] Failed to build display table '${definition.key}' from ECU data:`,
-        error,
-      );
-    }
-  }
-
-  return nextTables;
+  return displayTablesFromPages(parsedIni, decodedPages, nextTables);
 }
 
 export function createNeutralRuntimeTablePreset(tableDef, baselineTable = null, fillValue = 100) {

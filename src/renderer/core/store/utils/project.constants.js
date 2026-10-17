@@ -1,6 +1,6 @@
 // Project-level constants and defaults
 
-export const SCHEMA_VERSION = 4;
+export { PROJECT_SCHEMA_VERSION as SCHEMA_VERSION } from '../../../../shared/project-format.js';
 
 export const DEFAULT_PROJECT_UNITS = {
   temperature: "celsius",
@@ -22,7 +22,7 @@ export const DEFAULT_RUNTIME_PROFILE_FIELDS = [
 
 export const DEFAULT_RUNTIME_PROFILE_GUARDS = {
   max_tps_pct: 5,
-  max_rpm: 1500,
+  max_rpm: 0,
   engine_not_cranking: true,
 };
 

@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { X, Zap, Calculator, ChevronDown, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { calculateRequiredFuel, injectionDivider } from "../../../shared/protocol/required-fuel.js";
+
 // Unit conversion constants
 const CID_TO_CC  = 16.3871;
 const LBHR_TO_CCMIN = 10.5;
@@ -36,18 +38,11 @@ function resolveFuelPreset(stoich) {
  * Calculates Required Fuel in milliseconds for Speeduino.
  */
 function calcReqFuel(dispCc, cylinders, injCcMin, divider, stoich) {
-  // Defensive check for all parameters
-  const d = parseFloat(dispCc);
-  const c = parseInt(cylinders);
-  const i = parseFloat(injCcMin);
-  const v = parseInt(divider);
-  const s = parseFloat(stoich);
-
-  if (isNaN(d) || isNaN(c) || isNaN(i) || isNaN(v) || isNaN(s)) return null;
-  if (d <= 0 || c <= 0 || i <= 0 || v <= 0 || s <= 0) return null;
-
-  const fuelMultiplier = 14.7 / s;
-  return (36.0 * fuelMultiplier * d) / (c * i * v);
+  try {
+    injectionDivider(Number(cylinders), Number(divider));
+    const value = calculateRequiredFuel({ displacement: dispCc, cylinders, injectorFlow: injCcMin, stoich });
+    return value >= 0.1 && value <= 25.5 ? value : null;
+  } catch { return null; }
 }
 
 const UnitToggle = ({ value, onChange, options }) => (
@@ -157,6 +152,7 @@ export default function ReqFuelCalculator({
         injectorFlow: parseFloat(injValue),
         injectorUnit: injUnit,
         squirts: div,
+        divider: injectionDivider(cyl, div),
         stoich: selectedStoich,
       });
       onClose();
@@ -236,7 +232,7 @@ export default function ReqFuelCalculator({
                         value={squirts} onChange={e => setSquirts(e.target.value)}
                         className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-gray-200 focus:border-neon-cyan text-center appearance-none cursor-pointer"
                       >
-                        {[1, 2, 3, 4, 8].map(n => <option key={n} value={n.toString()}>{n}</option>)}
+                        {[1, 2, 3, 4, 6, 8].map(n => <option key={n} value={n.toString()}>{n}</option>)}
                       </select>
                       <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-700 pointer-events-none" />
                     </div>
@@ -280,7 +276,7 @@ export default function ReqFuelCalculator({
                   reqFuel !== null ? 'bg-neon-cyan/5 border-neon-cyan/20' : 'bg-red-500/5 border-red-500/10'
                 }`}>
                   <div className="flex items-center justify-between mb-1 relative z-10">
-                    <span className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">Calculated reqFuel</span>
+                    <span className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">Full-cycle Required Fuel</span>
                     {reqFuel === null && <AlertCircle size={12} className="text-red-500/50" />}
                   </div>
                   <div className="flex items-baseline gap-2 relative z-10">
@@ -312,8 +308,8 @@ export default function ReqFuelCalculator({
                 <button
                   onClick={handleApply} disabled={reqFuel === null}
                   className={`flex-1 py-3 rounded-xl text-[10px] font-orbitron font-bold uppercase tracking-[0.2em] transition-all ${
-                    reqFuel === null 
-                      ? 'bg-gray-800 text-gray-500 cursor-not-allowed opacity-50' 
+                    reqFuel === null
+                      ? 'bg-gray-800 text-gray-500 cursor-not-allowed opacity-50'
                       : 'bg-neon-cyan text-bg-deep hover:opacity-90 active:scale-95 box-glow-cyan'
                   }`}
                 >

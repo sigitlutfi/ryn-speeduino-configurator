@@ -33,6 +33,7 @@ export const createUISlice = (set) => ({
   setOperation: (operation) =>
     set({
       operation: {
+        owner: operation?.owner ?? null,
         type: operation?.type ?? "generic",
         stage: operation?.stage ?? "working",
         label: operation?.label ?? "Working",

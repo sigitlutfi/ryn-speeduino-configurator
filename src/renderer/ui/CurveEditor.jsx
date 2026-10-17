@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useId } from "react";
+import { moveCurvePoint, roundAxis, interpolateCurve } from './curve-math.js';
 
 /**
  * Universal Curve Editor for 2D tuning tables (e.g., IAT, WUE, Injector Dead Time).
@@ -54,6 +55,12 @@ const THEMES = {
     glow: "rgba(217,70,239,0.5)",
     gradient: ["#d946ef", "#f0abfc"],
   },
+  blue: {
+    primary: "#60a5fa",
+    secondary: "#2563eb",
+    glow: "rgba(59,130,246,0.5)",
+    gradient: ["#2563eb", "#60a5fa"],
+  },
 };
 
 const CurveEditor = ({
@@ -61,16 +68,25 @@ const CurveEditor = ({
   yValues,
   xRange: initialXRange = { min: -40, max: 120 },
   yRange: initialYRange = { min: 0, max: 255 },
+  xBounds = initialXRange,
+  yBounds = initialYRange,
   xLabel = "X Axis",
   yLabel = "Y Axis",
   xFixed = false,
   precision = 0,
+  xPrecision = precision,
+  step = 10 ** -precision,
+  xStep = 10 ** -xPrecision,
+  disabled = false,
   theme = "cyan",
   activeIdx = null,
+  liveXValue = null,
   onHoverPoint,
   onChange,
   onCommit,
+  onInteractionStart,
 }) => {
+  const gradientId = `curve-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const svgRef = useRef(null);
   const [draggingIdx, setDraggingIdx] = useState(null);
   const [hoveredIdx, setHoveredIdx] = useState(null);
@@ -126,21 +142,11 @@ const CurveEditor = ({
     return Math.max(yRange.min, Math.min(yRange.max, val));
   };
 
-  const round = (val) => {
-    const factor = Math.pow(10, precision);
-    return Math.round(val * factor) / factor;
-  };
+  const round = (val) => roundAxis(Number(val), precision);
+  const roundX = (val) => roundAxis(Number(val), xPrecision);
 
   const getInterpolatedY = (xVal) => {
-    if (curveXValues.length < 2) return curveYValues[0] || 0;
-    for (let i = 0; i < curveXValues.length - 1; i++) {
-      if (xVal >= curveXValues[i] && xVal <= curveXValues[i + 1]) {
-        const t = (xVal - curveXValues[i]) / (curveXValues[i + 1] - curveXValues[i]);
-        return curveYValues[i] + t * (curveYValues[i + 1] - curveYValues[i]);
-      }
-    }
-    if (xVal < curveXValues[0]) return curveYValues[0];
-    return curveYValues[curveYValues.length - 1];
+    return interpolateCurve(curveXValues, curveYValues, xVal) ?? 0;
   };
 
   const handleAutoScale = () => {
@@ -149,13 +155,15 @@ const CurveEditor = ({
     const maxX = Math.max(...curveXValues) + (xRange.max - xRange.min) * 0.1;
     const minY = Math.min(...curveYValues) - (yRange.max - yRange.min) * 0.1;
     const maxY = Math.max(...curveYValues) + (yRange.max - yRange.min) * 0.1;
-    setXRange({ min: round(minX), max: round(maxX) });
-    setYRange({ min: round(minY), max: round(maxY) });
+    setXRange({ min: roundX(minX), max: Math.max(roundX(maxX), roundX(minX) + xStep) });
+    setYRange({ min: round(minY), max: Math.max(round(maxY), round(minY) + step) });
     setShowSettings(false);
   };
 
   const handleStartInteraction = (idx, e) => {
+    if (disabled || (e.button !== undefined && e.button !== 0)) return;
     if (e.cancelable) e.preventDefault();
+    onInteractionStart?.();
     setDraggingIdx(idx);
   };
 
@@ -168,28 +176,13 @@ const CurveEditor = ({
       const pixelY = ((clientY - rect.top) / rect.height) * height;
 
       setMousePos({ x: pixelX, y: pixelY });
-      if (draggingIdx === null) return;
+      if (draggingIdx === null || disabled) return;
 
       const newX = fromX(pixelX);
       const newY = fromY(pixelY);
-      const nextXValues = [...curveXValues];
-      const nextYValues = [...curveYValues];
-
-      if (!xFixed) {
-        const prevX =
-          draggingIdx > 0 ? nextXValues[draggingIdx - 1] : xRange.min - 100;
-        const postX =
-          draggingIdx < nextXValues.length - 1
-            ? nextXValues[draggingIdx + 1]
-            : xRange.max + 100;
-        nextXValues[draggingIdx] = Math.max(
-          prevX + (precision > 0 ? 0.1 : 1),
-          Math.min(postX - (precision > 0 ? 0.1 : 1), round(newX)),
-        );
-      }
-      nextYValues[draggingIdx] = round(newY);
-
-      if (onChange) onChange(nextXValues, nextYValues);
+      const next = moveCurvePoint(curveXValues, curveYValues, draggingIdx, { x: newX, y: newY },
+        { xRange: xBounds, yRange: yBounds, xFixed, xPrecision, precision, xStep, step });
+      if (onChange) onChange(next.x, next.y);
     },
     [
       draggingIdx,
@@ -199,6 +192,7 @@ const CurveEditor = ({
       yRange,
       xFixed,
       precision,
+      xPrecision, xStep, step, disabled, xBounds, yBounds,
       onChange,
     ],
   );
@@ -213,6 +207,7 @@ const CurveEditor = ({
   useEffect(() => {
     const onMouseMove = (e) => handleMove(e.clientX, e.clientY);
     const onTouchMove = (e) => {
+      if (e.cancelable) e.preventDefault();
       if (e.touches.length > 0)
         handleMove(e.touches[0].clientX, e.touches[0].clientY);
     };
@@ -257,7 +252,7 @@ const CurveEditor = ({
             fontSize="10"
             textAnchor="middle"
           >
-            {round(val)}
+            {roundX(val)}
           </text>
         </g>,
       );
@@ -307,7 +302,7 @@ const CurveEditor = ({
     )
       return null;
 
-    const valX = round(fromX(x));
+    const valX = roundX(fromX(x));
     const valY = round(getInterpolatedY(valX));
     const crossY = getY(valY);
 
@@ -355,6 +350,39 @@ const CurveEditor = ({
     );
   };
 
+  const renderLiveMarker = () => {
+    if (!Number.isFinite(liveXValue) || !curveXValues.length) return null;
+    const clampedX = Math.max(xRange.min, Math.min(xRange.max, liveXValue));
+    const lx = getX(clampedX);
+    const interpY = round(getInterpolatedY(liveXValue));
+    const clampedY = Math.max(yRange.min, Math.min(yRange.max, interpY));
+    const ly = getY(clampedY);
+
+    return (
+      <g pointerEvents="none">
+        <line
+          x1={lx}
+          y1={padding.top}
+          x2={lx}
+          y2={height - padding.bottom}
+          stroke="#4ade80"
+          strokeOpacity="0.45"
+          strokeWidth="1.5"
+          strokeDasharray="3 3"
+        />
+        <circle
+          cx={lx}
+          cy={ly}
+          r="9"
+          fill="rgba(74, 222, 128, 0.2)"
+          stroke="#4ade80"
+          strokeWidth="1.5"
+        />
+        <circle cx={lx} cy={ly} r="3.5" fill="#4ade80" />
+      </g>
+    );
+  };
+
   const internalHoverStart = (idx) => {
     setHoveredIdx(idx);
     if (onHoverPoint) onHoverPoint(idx);
@@ -373,6 +401,14 @@ const CurveEditor = ({
         </span>
 
         <div className="flex items-center gap-3">
+          {Number.isFinite(liveXValue) && curveXValues.length > 0 && (
+            <div className="flex items-center gap-1.5 rounded-md border border-neon-green/30 bg-neon-green/10 px-2 py-0.5 font-mono text-[10px] font-bold text-neon-green">
+              <span className="h-1.5 w-1.5 rounded-full bg-neon-green animate-pulse" />
+              <span>
+                LIVE {roundX(liveXValue)} → {round(getInterpolatedY(liveXValue))}
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-1.5 text-[10px] text-white/40">
             <div
               style={{
@@ -384,6 +420,8 @@ const CurveEditor = ({
             Active Value
           </div>
           <button
+            type="button"
+            aria-label="Curve axis settings"
             onClick={() => setShowSettings(!showSettings)}
             className={`p-1.5 rounded-lg transition-all ${showSettings ? "bg-white text-black" : "hover:bg-white/5 text-white/40"}`}
           >
@@ -421,7 +459,7 @@ const CurveEditor = ({
                     type="number"
                     value={xRange.min}
                     onChange={(e) =>
-                      setXRange({ ...xRange, min: round(e.target.value) })
+                      roundX(e.target.value) < xRange.max && setXRange({ ...xRange, min: roundX(e.target.value) })
                     }
                     className="w-full bg-black/40 border border-white/5 rounded p-1 text-xs text-white"
                   />
@@ -434,7 +472,7 @@ const CurveEditor = ({
                     type="number"
                     value={xRange.max}
                     onChange={(e) =>
-                      setXRange({ ...xRange, max: round(e.target.value) })
+                      roundX(e.target.value) > xRange.min && setXRange({ ...xRange, max: roundX(e.target.value) })
                     }
                     className="w-full bg-black/40 border border-white/5 rounded p-1 text-xs text-white"
                   />
@@ -454,7 +492,7 @@ const CurveEditor = ({
                     type="number"
                     value={yRange.min}
                     onChange={(e) =>
-                      setYRange({ ...yRange, min: round(e.target.value) })
+                      round(e.target.value) < yRange.max && setYRange({ ...yRange, min: round(e.target.value) })
                     }
                     className="w-full bg-black/40 border border-white/5 rounded p-1 text-xs text-white"
                   />
@@ -467,7 +505,7 @@ const CurveEditor = ({
                     type="number"
                     value={yRange.max}
                     onChange={(e) =>
-                      setYRange({ ...yRange, max: round(e.target.value) })
+                      round(e.target.value) > yRange.min && setYRange({ ...yRange, max: round(e.target.value) })
                     }
                     className="w-full bg-black/40 border border-white/5 rounded p-1 text-xs text-white"
                   />
@@ -493,10 +531,14 @@ const CurveEditor = ({
       >
         {/* defs MUST come first in SVG for url() references to resolve on initial paint */}
         <defs>
+          <clipPath id={`${gradientId}-plot`}>
+            <rect x={padding.left - 8} y={padding.top - 8}
+              width={width - padding.left - padding.right + 16} height={height - padding.top - padding.bottom + 16} />
+          </clipPath>
           {Object.entries(THEMES).map(([name, config]) => (
             <linearGradient
               key={name}
-              id={`gradient-${name}`}
+              id={`${gradientId}-${name}`}
               gradientUnits="userSpaceOnUse"
               x1={padding.left}
               y1="0"
@@ -518,17 +560,18 @@ const CurveEditor = ({
           fillOpacity="0.2"
         />
         {renderGrid()}
-
+        <g clipPath={`url(#${gradientId}-plot)`}>
         <path
           d={pathData}
           fill="none"
-          stroke={`url(#gradient-${THEMES[theme] ? theme : "cyan"})`}
+          stroke={`url(#${gradientId}-${THEMES[theme] ? theme : "cyan"})`}
           strokeWidth="3"
           strokeLinejoin="round"
           strokeLinecap="round"
           style={{ filter: `drop-shadow(0 0 8px ${colors.glow})` }}
         />
 
+        {renderLiveMarker()}
         {renderCrosshair()}
 
         {curveXValues.map((x, i) => {
@@ -539,6 +582,25 @@ const CurveEditor = ({
           return (
             <g
               key={i}
+              role="button"
+              tabIndex={disabled ? -1 : 0}
+              aria-label={`Bin ${i + 1}: ${xLabel} ${x}, ${yLabel} ${curveYValues[i]}. Arrow keys adjust; Shift for ten steps.`}
+              aria-disabled={disabled}
+              onFocus={() => internalHoverStart(i)}
+              onBlur={internalHoverEnd}
+              onKeyDown={event => {
+                if (disabled || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+                event.preventDefault();
+                const multiplier = event.shiftKey ? 10 : 1;
+                const deltaX = event.key === 'ArrowLeft' ? -xStep : event.key === 'ArrowRight' ? xStep : 0;
+                const deltaY = event.key === 'ArrowDown' ? -step : event.key === 'ArrowUp' ? step : 0;
+                const next = moveCurvePoint(curveXValues, curveYValues, i,
+                  { x: deltaX ? x + deltaX * multiplier : undefined, y: deltaY ? curveYValues[i] + deltaY * multiplier : undefined },
+                  { xRange: xBounds, yRange: yBounds, xPrecision, precision, xStep, step, xFixed });
+                onInteractionStart?.();
+                onChange?.(next.x, next.y);
+                onCommit?.(next.x, next.y);
+              }}
               onMouseEnter={() => internalHoverStart(i)}
               onMouseLeave={internalHoverEnd}
               onMouseDown={(e) => handleStartInteraction(i, e)}
@@ -580,6 +642,7 @@ const CurveEditor = ({
             </g>
           );
         })}
+        </g>
       </svg>
       <div className="mt-2 text-center text-[10px] font-orbitron font-bold text-white/20 uppercase tracking-[0.3em]">
         {xLabel}

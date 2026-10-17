@@ -1,14 +1,21 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
+const { stageRuntimeDependencies } = require('./scripts/package-runtime.cjs');
 
 module.exports = {
   packagerConfig: {
     asar: true,
+    // Only external runtime dependencies are staged by packageAfterCopy.
+    prune: false,
     extraResource: [
       'bin',
+      'speeduino.ini',
     ],
   },
   rebuildConfig: {},
+  hooks: {
+    packageAfterCopy: async (_config, buildPath) => stageRuntimeDependencies(buildPath),
+  },
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
@@ -28,6 +35,7 @@ module.exports = {
     },
   ],
   plugins: [
+    { name: '@electron-forge/plugin-auto-unpack-natives', config: {} },
     {
       name: '@electron-forge/plugin-vite',
       config: {

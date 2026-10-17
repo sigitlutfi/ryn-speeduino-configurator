@@ -1,160 +1,66 @@
-import React, { useEffect, useMemo, useRef } from "react";
-import uPlot from "uplot";
-import "uplot/dist/uPlot.min.css";
+import React, { useEffect, useRef } from 'react'
+import uPlot from 'uplot'
+import 'uplot/dist/uPlot.min.css'
+import { appendPlotSample, telemetryPlotRange } from '../../../shared/protocol/telemetry-plot.js'
 
-const MAX_POINTS = 300;
+const format = (value, digits = 0) => Number.isFinite(value) ? value.toFixed(digits) : '—'
 
-function formatValue(value, decimals) {
-  if (!Number.isFinite(value)) return "0";
-  return value.toFixed(decimals);
-}
-
-export default function RealtimeChart({
-  getValue,
-  label,
-  color = "#39d353",
-  min = 0,
-  max = 8000,
-  value = 0,
-  unit = "",
-  decimals = 0,
-}) {
-  const containerRef = useRef(null);
-  const plotRef = useRef(null);
-  const dataRef = useRef({ ts: [], vals: [] });
-
-  const currentValue = useMemo(() => formatValue(value, decimals), [value, decimals]);
-  const minValue = useMemo(() => formatValue(min, decimals > 0 ? Math.min(decimals, 1) : 0), [min, decimals]);
-  const maxValue = useMemo(() => formatValue(max, decimals > 0 ? Math.min(decimals, 1) : 0), [max, decimals]);
-
+export default function RealtimeChart({ label, color = '#67e8f9', min = 0, max = 100,
+  value = null, sampleTime = null, active = false, seriesKey = '', unit = '', decimals = 0, compact = false }) {
+  const container = useRef(null), plot = useRef(null)
+  const history = useRef({ ts: [], vals: [], lastReceivedAt: null })
   useEffect(() => {
-    if (!containerRef.current) return;
-
-    const opts = {
-      width: containerRef.current.clientWidth || 600,
-      height: 168,
-      cursor: { show: false },
-      legend: { show: false },
-      padding: [10, 10, 14, 10],
+    if (!container.current) return
+    history.current = { ts: [], vals: [], lastReceivedAt: null }
+    const now = Date.now() / 1000
+    const chart = new uPlot({
+      width: Math.max(120, container.current.clientWidth), height: 154,
+      legend: { show: false }, cursor: { show: true, drag: { x: false, y: false, setScale: false } },
+      padding: [8, 8, 4, 0],
       axes: [
-        {
-          show: true,
-          stroke: "rgba(255,255,255,0.12)",
-          grid: { stroke: "rgba(255,255,255,0.05)", width: 1 },
-          ticks: { show: false },
-          values: () => [],
-          border: { show: false },
-        },
-        {
-          show: true,
-          stroke: "rgba(255,255,255,0.12)",
-          grid: { stroke: "rgba(255,255,255,0.05)", width: 1 },
-          ticks: { show: false },
-          size: 42,
-          values: (u, vals) => vals.map((tick) => formatValue(tick, decimals > 0 ? Math.min(decimals, 1) : 0)),
-          border: { show: false },
-        },
+        { stroke: '#64748b', font: '10px ui-monospace, monospace', size: 25, ticks: { show: false },
+          grid: { show: false }, values: (_u, ticks) => ticks.map(t => {
+            const end = history.current.ts.at(-1) ?? now
+            return `${Math.min(0, Math.round(t - end))}s`
+          }) },
+        { stroke: '#94a3b8', font: '10px ui-monospace, monospace', size: 44, ticks: { show: false },
+          grid: { stroke: 'rgba(148,163,184,0.08)', width: 1 },
+          values: (_u, ticks) => ticks.map(t => format(t, Math.min(decimals, 2))) },
       ],
-      scales: {
-        x: { time: true },
-        y: { range: [min, max] },
-      },
-      series: [
-        {},
-        {
-          label,
-          stroke: color,
-          width: 2.2,
-          fill: `${color}18`,
-        },
-      ],
-    };
-
-    const now = Date.now() / 1000;
-    const emptyData = [[now], [0]];
-    plotRef.current = new uPlot(opts, emptyData, containerRef.current);
-
-    const handleResize = () => {
-      if (plotRef.current && containerRef.current) {
-        plotRef.current.setSize({ width: containerRef.current.clientWidth, height: 168 });
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      plotRef.current?.destroy();
-      plotRef.current = null;
-    };
-  }, []);
+      scales: { x: { time: false, range: () => { const end = history.current.ts.at(-1) ?? now; return [end - 30, end] } },
+        y: { range: (_u, lo, hi) => telemetryPlotRange(min, max, lo, hi) } },
+      series: [{}, { label, stroke: color, width: 1.8, spanGaps: false, points: { show: false } }],
+    }, [[now], [null]], container.current)
+    plot.current = chart
+    const resize = () => {
+      if (!container.current) return
+      const width = Math.max(120, Math.floor(container.current.clientWidth))
+      if (width !== chart.width) chart.setSize({ width, height: 154 })
+    }
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null
+    observer?.observe(container.current)
+    window.addEventListener('resize', resize)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', resize); chart.destroy(); plot.current = null }
+  }, [label, color, min, max, decimals, unit, seriesKey])
 
   useEffect(() => {
-    let rafId;
-    const tick = () => {
-      if (plotRef.current && getValue) {
-        const nextValue = getValue();
-        const now = Date.now() / 1000;
-        const d = dataRef.current;
-        d.ts.push(now);
-        d.vals.push(nextValue);
-        if (d.ts.length > MAX_POINTS) {
-          d.ts.shift();
-          d.vals.shift();
-        }
-        plotRef.current.setData([d.ts, d.vals]);
-      }
-      rafId = requestAnimationFrame(tick);
-    };
+    if (!plot.current) return
+    if (appendPlotSample(history.current, active ? value : null, sampleTime)) {
+      plot.current.setData([history.current.ts, history.current.vals])
+    }
+  }, [value, sampleTime, active, label, color, min, max, decimals, unit, seriesKey])
 
-    let last = 0;
-    const throttled = (ts) => {
-      if (ts - last > 100) {
-        last = ts;
-        tick();
-        return;
-      }
-      rafId = requestAnimationFrame(throttled);
-    };
-
-    rafId = requestAnimationFrame(throttled);
-    return () => cancelAnimationFrame(rafId);
-  }, [getValue]);
-
-  return (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-[28px] border border-white/6 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.07),rgba(255,255,255,0.02)_55%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-4">
-      <div
-        className="pointer-events-none absolute inset-x-5 top-0 h-px"
-        style={{ background: `linear-gradient(90deg, transparent, ${color}88, transparent)` }}
-      />
-      <div
-        className="pointer-events-none absolute -right-10 top-2 h-20 w-20 rounded-full blur-3xl"
-        style={{ backgroundColor: `${color}20` }}
-      />
-
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[9px] font-orbitron font-bold uppercase tracking-[0.24em] text-white/34">
-            Live trace
-          </div>
-          <div className="mt-2 font-mono text-[28px] font-black leading-none tracking-tight text-white">
-            {currentValue}
-            {unit ? <span className="ml-2 text-[11px] text-white/36">{unit}</span> : null}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 rounded-full border border-white/8 bg-black/25 px-3 py-1">
-          <span className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: color }} />
-          <span className="text-[9px] font-orbitron font-bold uppercase tracking-[0.2em] text-white/40">
-            {label}
-          </span>
-        </div>
+  return <div className={`flex min-w-0 flex-1 flex-col ${compact ? '' : 'rounded-2xl border border-white/10 bg-slate-950/75 p-4'}`}>
+    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-2xl font-semibold tabular-nums text-slate-100">{active ? format(value, decimals) : '—'}</span>
+        <span className="text-xs text-slate-400">{unit}</span>
       </div>
-
-      <div className="mb-3 flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.18em] text-white/30">
-        <span>Min {minValue}</span>
-        <span>Max {maxValue}</span>
-      </div>
-
-      <div ref={containerRef} className="min-h-0 flex-1 rounded-2xl bg-black/20 p-2" />
+      {!compact && <span className="text-xs text-slate-300">{label}</span>}
     </div>
-  );
+    <div ref={container} role="img" aria-label={`${label} trace, last 30 seconds${active ? '' : ', no live data'}`} className="min-h-[154px] min-w-0 w-full" />
+    <div className="mt-2 flex items-center justify-between gap-2 font-mono text-[10px] text-slate-500">
+      <span>30 s window · {active ? 'live' : 'paused'}</span><span>Auto range</span>
+    </div>
+  </div>
 }

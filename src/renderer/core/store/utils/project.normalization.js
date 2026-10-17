@@ -1,10 +1,14 @@
 // Project normalization, migration, and serialization helpers
 
+import { createInitializationPages } from "../../../../shared/protocol/initialization-pages.js";
+import { parsePage } from "../../../../shared/protocol/binary-parser.js";
+import { isPageSnapshot, decodePageSnapshot } from "../../../../shared/protocol/page-cache.js";
 import { parseIni } from "../../../../shared/ini-parser.js";
 import {
   createPageSnapshot,
   decodePageSnapshots,
   serializeDecodedPage,
+  validatePageSnapshot,
 } from "../../../../shared/protocol/page-cache.js";
 import {
   readRuntimeTableFromDecodedPage,
@@ -22,6 +26,7 @@ import {
   nowIso,
 } from "./project.utils.js";
 import { createEmptyEcuState } from "../types/project.types.js";
+import { assertProjectFormat, compactTemplate, compactRestorePoint } from '../../../../shared/project-format.js';
 
 export function parseIniFromProject(project) {
   const iniContent = project?.ini?.content;
@@ -67,40 +72,24 @@ export function createProjectRestorePoint({
 }
 
 export function materializeProjectConstants(parsedIni, constants = {}) {
-  const decodedPages = cloneJsonSafe(constants?.decodedPages, {}) || {};
-  const pageSnapshots = cloneJsonSafe(constants?.pages, {}) || {};
-
-  if (!parsedIni?.constants?.pages) {
-    return {
-      pages: pageSnapshots,
-      decodedPages,
-    };
+  if (!parsedIni?.constants?.pages) return cloneJsonSafe(constants, { pages: {}, decodedPages: {} });
+  const decoded = cloneJsonSafe(constants.decodedPages, {}) || {};
+  const existing = {};
+  for (const [page, value] of Object.entries(constants.pages || {})) {
+    if (isPageSnapshot(value)) existing[page] = value;
+    else decoded[page] = { ...(decoded[page] || {}), ...value };
   }
-
-  for (const pageId of Object.keys(parsedIni.constants.pages)) {
-    if (pageSnapshots[pageId]) continue;
-
-    const pageBuffer = serializeDecodedPage(
-      parsedIni,
-      Number(pageId),
-      decodedPages[pageId] || {},
-    );
-
-    if (pageBuffer.length > 0) {
-      pageSnapshots[pageId] = createPageSnapshot({
-        pageId: Number(pageId),
-        size: pageBuffer.length,
-        buffer: pageBuffer,
-        source: "generated",
-        syncState: "unknown",
-      });
-    }
+  const initialized = createInitializationPages(parsedIni, decoded).constants;
+  for (const [page, snapshot] of Object.entries(existing)) {
+    validatePageSnapshot(snapshot, parsedIni.constants.pageSizes[page]);
+    initialized.pages[page] = cloneJsonSafe(snapshot);
+    initialized.decodedPages[page] = parsePage(decodePageSnapshot(snapshot), parsedIni.constants.pages[page]);
   }
-
-  return {
-    pages: pageSnapshots,
-    decodedPages,
-  };
+  // A legacy partial payload cannot be promoted to a complete ECU baseline.
+  for (const page of Object.keys(decoded)) {
+    if (!existing[page]) initialized.pages[page].source = 'legacy-partial';
+  }
+  return initialized;
 }
 
 function createDefaultRuntimeProfilePreset(
@@ -149,12 +138,7 @@ function createDefaultRuntimeProfilePreset(
       ? readRuntimeTableFromDecodedPage(afr1DecodedPage, afr1Def)
       : null;
 
-    preset.tablePresets.afr1 = buildRuntimeTableOverlay(
-      null,
-      afr1Def,
-      { target: "afr1", operation: "fill", value: 14.7 },
-      afr1BaseTable,
-    );
+    if (afr1BaseTable) preset.tablePresets.afr1 = { ...afr1BaseTable, operation: "preset", source: "base-project" };
   } catch (error) {
     console.warn(
       `[project] Failed to seed runtime profile preset '${name}':`,
@@ -232,6 +216,7 @@ function normalizeRuntimeProfiles(
   };
 
   return {
+    ...rawRuntimeProfiles,
     eco: withFallbackTablePreset("eco"),
     racing: withFallbackTablePreset("racing"),
     extreme: withFallbackTablePreset("extreme"),
@@ -259,6 +244,7 @@ export function ensureProjectRuntimeProfiles(
 
 export function normalizeProjectV3(raw, parsedIni = null) {
   if (!raw) return null;
+  assertProjectFormat(raw);
 
   const migratedAt = nowIso();
   const { decodedPages: legacyDecodedPages, pageSnapshots } =
@@ -266,6 +252,10 @@ export function normalizeProjectV3(raw, parsedIni = null) {
 
   let decodedPages = { ...legacyDecodedPages };
   if (parsedIni && Object.keys(pageSnapshots).length > 0) {
+    for (const [id, snapshot] of Object.entries(pageSnapshots)) {
+      const validated = validatePageSnapshot(snapshot, parsedIni.constants.pageSizes[id]);
+      pageSnapshots[id] = { ...snapshot, crc32: validated.crc32, syncState: 'unknown', lastVerifiedAt: null };
+    }
     decodedPages = {
       ...decodedPages,
       ...decodePageSnapshots(parsedIni, pageSnapshots),
@@ -285,7 +275,7 @@ export function normalizeProjectV3(raw, parsedIni = null) {
           pageId: Number(pageId),
           size: pageBuffer.length,
           buffer: pageBuffer,
-          source: "generated",
+          source: "legacy-partial",
           syncState: "unknown",
         });
       }
@@ -299,10 +289,12 @@ export function normalizeProjectV3(raw, parsedIni = null) {
   );
 
   return {
+    ...raw,
     schemaVersion: SCHEMA_VERSION,
     projectName: raw.projectName || raw.name || "Unnamed Project",
     description: raw.description ?? "",
     hardware: {
+      ...raw.hardware,
       pinMapPlatform: raw.hardware?.pinMapPlatform === 'mega2560' ? 'mega2560' : '',
       channelBuild: ['standard', '6-3', '8-1'].includes(raw.hardware?.channelBuild) ? raw.hardware.channelBuild : '',
     },
@@ -313,6 +305,7 @@ export function normalizeProjectV3(raw, parsedIni = null) {
       ...(raw.engine ?? {}),
     },
     ini: {
+      ...raw.ini,
       path: raw.ini?.path ?? raw.iniPath ?? "",
       signature: raw.ini?.signature ?? "",
       version: raw.ini?.version ?? "",
@@ -331,9 +324,11 @@ export function normalizeProjectV3(raw, parsedIni = null) {
     ),
     tables: raw.tables ?? null,
     ui: {
+      ...raw.ui,
       accentColor: raw.ui?.accentColor ?? raw.color ?? "cyan",
     },
     initialization: {
+      ...raw.initialization,
       boardLayout: raw.initialization?.boardLayout ?? null,
       iniSignature:
         raw.initialization?.iniSignature ??
@@ -341,6 +336,8 @@ export function normalizeProjectV3(raw, parsedIni = null) {
         raw.iniSignature ??
         "",
       baseTune: {
+        ...(raw.initialization?.baseTune || {}),
+        template: compactTemplate(raw.initialization?.baseTune?.template),
         requested: raw.initialization?.baseTune?.requested ?? false,
         applied: raw.initialization?.baseTune?.applied ?? false,
         providerId: raw.initialization?.baseTune?.providerId ?? null,
@@ -349,6 +346,7 @@ export function normalizeProjectV3(raw, parsedIni = null) {
         warningCount: raw.initialization?.baseTune?.warningCount ?? 0,
       },
       restorePoints: {
+        ...raw.initialization?.restorePoints,
         blankCanvas:
           cloneJsonSafe(raw.initialization?.restorePoints?.blankCanvas, null) ??
           null,
@@ -363,17 +361,39 @@ export function normalizeProjectV3(raw, parsedIni = null) {
 }
 
 export function serializeProjectForSave(project, tables) {
-  const normalizedProject = ensureProjectRuntimeProfiles(project);
+  const normalizedProject = project.runtimeProfiles?.eco && project.runtimeProfiles?.racing && project.runtimeProfiles?.extreme
+    ? project : ensureProjectRuntimeProfiles(project);
 
+  const { fileRevision, tables: cachedTables, color, ...persistent } = normalizedProject;
   return {
-    ...normalizedProject,
+    ...persistent,
+    schemaVersion: SCHEMA_VERSION,
     constants: {
       pages: normalizedProject.constants?.pages || {},
     },
     runtimeProfiles: normalizedProject.runtimeProfiles || {},
-    tables,
+    initialization: {
+      ...normalizedProject.initialization,
+      baseTune: { ...normalizedProject.initialization?.baseTune,
+        template: compactTemplate(normalizedProject.initialization?.baseTune?.template) },
+      restorePoints: Object.fromEntries(Object.entries(normalizedProject.initialization?.restorePoints || {})
+        .map(([key, point]) => [key, compactRestorePoint(point)])),
+    },
     updatedAt: nowIso(),
   };
+}
+
+// Disk dirtiness is independent of ECU verification and connection state.
+export function projectFingerprint(project) {
+  if (!project) return '';
+  const { filePath, updatedAt, ecu, ...data } = serializeProjectForSave(project);
+  const cleanPages = pages => Object.fromEntries(Object.entries(pages || {}).map(([id, page]) =>
+    [id, { pageId: page.pageId, size: page.size, rawEncoding: page.rawEncoding, rawData: page.rawData, source: page.source }]));
+  data.constants = { pages: cleanPages(data.constants.pages) };
+  for (const point of Object.values(data.initialization?.restorePoints || {})) {
+    if (point?.constants?.pages) point.constants = { pages: cleanPages(point.constants.pages) };
+  }
+  return JSON.stringify(data);
 }
 
 export function migrateProject(raw) {

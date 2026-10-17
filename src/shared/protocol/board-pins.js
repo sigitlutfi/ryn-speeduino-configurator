@@ -1,4 +1,23 @@
 import avrMapping from './avr-pin-mapping.js'
+import { getVarMetadata } from '../ini-parser.js'
+
+export function getSupportedBoardChoices(ini, platform = 'mega2560') {
+  const options = getVarMetadata(ini, 'pinLayout')?.options || []
+  return options.map((label, value) => ({ value, label }))
+    .filter(choice => choice.label && !/^(invalid|unused)$/i.test(choice.label.trim()) &&
+      platform === 'mega2560' && Object.hasOwn(avrMapping.layouts, choice.value))
+}
+
+export function validateBoardSelection(ini, board, platform) {
+  if (!getVarMetadata(ini, 'pinLayout')) return null
+  if (!platform) return 'Confirm the installed MCU in I/O Summary before changing the board layout.'
+  return getSupportedBoardChoices(ini, platform).some(choice => choice.value === board) ? null
+    : `Board layout ${board} is not supported by the selected ${platform} firmware. Choose a supported board; firmware fallback routing is not allowed.`
+}
+
+export function configurationWriteOptions(project) {
+  return { ...projectPinMapOptions(project), restartPending: project?.hardware?.restartRequired }
+}
 
 export function projectPinMapOptions(project) {
   const channels = { standard: [4, 5], '6-3': [6, 3], '8-1': [8, 1] }[project?.hardware?.channelBuild]
@@ -85,6 +104,8 @@ export function fieldPinActive(field, context) {
     n2o_arming_pin: () => !!v.n2o_enable,
     // initialiseNitrous initializes both stage outputs even when disabled.
     n2o_stage1_pin: () => true, n2o_stage2_pin: () => true,
+    onboard_log_tr5_Epin_pin: () => !!v.onboard_log_file_style && !!v.onboard_log_trigger_Epin,
   }
+  if (['n2o_stage1_pin', 'n2o_stage2_pin'].includes(field)) return { active: true, reason: 'Reserved by firmware nitrous pin initialization, including when nitrous is disabled', source: 'firmware' }
   return gates[field] ? { active: gates[field](), reason: 'Firmware pin ownership gate', source: 'firmware' } : null
 }

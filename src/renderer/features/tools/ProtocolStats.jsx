@@ -1,5 +1,5 @@
+import { useLiveTelemetry } from '../shared/hooks/useLiveTelemetry.js';
 import React from "react";
-import { useStore } from "../../core/store.js";
 import { Activity, Zap, Cpu, AlertTriangle, RefreshCw } from "lucide-react";
 import TuningHeader from "../shared/components/TuningHeader";
 
@@ -37,38 +37,35 @@ const StatCard = ({ label, value, unit = "", icon: Icon, color = "cyan" }) => (
 );
 
 const ProtocolStats = () => {
-  const realtime = useStore((s) => s.realtime);
-  const connection = useStore((s) => s.connection);
-
-  const isConnected = connection.status === "connected";
+  const { realtime, status: telemetryStatus } = useLiveTelemetry();
 
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden h-screen animate-in fade-in duration-700">
       <TuningHeader
         title="Protocol Stats"
         subtitle="ECU Performance & Communication Integrity"
-        status={isConnected ? "NORMAL" : "OFFLINE"}
+        status={telemetryStatus.toUpperCase()}
       />
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-10 pb-32">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
           <StatCard
             label="Main Loop Rate"
-            value={realtime?.loopsPerSecond ?? 0}
+            value={realtime?.loopsPerSecond ?? '—'}
             unit="Hz"
             icon={RefreshCw}
             color="cyan"
           />
           <StatCard
             label="Sync Loss Count"
-            value={realtime?.syncLossCounter ?? 0}
+            value={realtime?.syncLossCounter ?? '—'}
             unit="errors"
             icon={AlertTriangle}
             color="red"
           />
           <StatCard
             label="Free System RAM"
-            value={realtime?.freeRAM ?? 0}
+            value={realtime?.freeRAM ?? '—'}
             unit="bytes"
             icon={Cpu}
             color="green"
@@ -93,7 +90,7 @@ const ProtocolStats = () => {
                     CRC Errors
                   </span>
                   <span className="text-xl font-mono font-black text-white">
-                    0
+                    <span title="Host CRC error counters are not collected">—</span>
                   </span>
                 </div>
                 <div className="h-10 w-[1px] bg-white/10" />
@@ -102,7 +99,7 @@ const ProtocolStats = () => {
                     Timeouts
                   </span>
                   <span className="text-xl font-mono font-black text-white">
-                    0
+                    <span title="Host timeout counters are not collected">—</span>
                   </span>
                 </div>
               </div>

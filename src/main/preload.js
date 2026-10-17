@@ -1,7 +1,7 @@
 // See the Electron documentation for details on how to use preload scripts:
 // https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('serial', {
   listPorts: () => ipcRenderer.invoke('serial:listPorts'),
@@ -32,7 +32,18 @@ contextBridge.exposeInMainWorld('projects', {
   pickExisting: () => ipcRenderer.invoke('project:pick-existing'),
   loadIni: (path) => ipcRenderer.invoke('project:load-ini', path),
   loadFile: (path) => ipcRenderer.invoke('project:load-file', path),
-  saveFile: (path, data) => ipcRenderer.invoke('project:save-file', path, data),
+  saveFile: (path, data, options) => ipcRenderer.invoke('project:save-file', path, data, options),
+  bundledIni: () => ipcRenderer.invoke('project:bundled-ini'),
+  pathForFile: file => webUtils.getPathForFile(file),
+  confirmTransition: name => ipcRenderer.invoke('project:confirm-transition', name),
+  onCloseRequested: callback => {
+    const handler = async (_event, requestId) => {
+      try { ipcRenderer.send('project:complete-close', requestId, (await callback())?.ok === true); }
+      catch { ipcRenderer.send('project:complete-close', requestId, false); }
+    };
+    ipcRenderer.on('project:request-close', handler);
+    return () => ipcRenderer.removeListener('project:request-close', handler);
+  },
   addRecent: (project) => ipcRenderer.invoke('project:add-recent', project),
   removeRecent: (filePath) => ipcRenderer.invoke('project:remove-recent', filePath),
   pickImage: () => ipcRenderer.invoke('project:pick-image'),

@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useStore } from "../../core/store.js";
-import { parseIni } from "../../../shared/ini-parser.js";
+import { createProjectDocument } from './projectCreation.js';
+import { calculateRequiredFuel } from "../../../shared/protocol/required-fuel.js";
+import { parseIni, getVarMetadata } from "../../../shared/ini-parser.js";
 import {
   buildProjectInitialization,
   getBoardLayoutChoices,
@@ -72,10 +74,7 @@ function getRecentProjectStatus(project) {
 export default function GettingStarted() {
   const {
     setProject,
-    saveProject,
-    updateConstants,
-    updateProjectField,
-    captureProjectRestorePoint,
+    openProject,
     recentProjects,
     removeRecentProject,
     notify,
@@ -99,33 +98,73 @@ export default function GettingStarted() {
   const [displacement, setDisplacement] = useState("2000");
   const [cylinders, setCylinders] = useState("4");
   const [engineType, setEngineType] = useState("inline");
-  const [showEngine, setShowEngine] = useState(false);
+  const [injectorFlow, setInjectorFlow] = useState("");
+  const [injectorOpenTime, setInjectorOpenTime] = useState("");
+  const [stoich, setStoich] = useState("14.7");
+  const [showEngine, setShowEngine] = useState(true);
   const [loading, setLoading] = useState(false);
   const [pendingRemovePath, setPendingRemovePath] = useState(null);
+  const iniRequest = useRef(0);
   const recentProject = recentProjects[0];
+  const reqFuelPreview = (() => {
+    try { return calculateRequiredFuel({ displacement, cylinders, injectorFlow, stoich }).toFixed(1); }
+    catch { return null; }
+  })();
+  const creationProblem = (() => {
+    if (!projectName.trim()) return 'Enter a project name.';
+    if (!parsedIniPreview) return 'Choose a firmware INI.';
+    if (boardLayoutChoices.length && boardLayoutValue === '') return 'Choose the board fitted to your ECU.';
+    if (!initBaseTune) return '';
+    if (!reqFuelPreview) return 'Enter engine displacement and injector flow to calculate Required Fuel.';
+    const maximum = getVarMetadata(parsedIniPreview, 'reqFuel')?.hi ?? 25.5;
+    if (+reqFuelPreview < 0.1 || +reqFuelPreview > maximum) return `Required Fuel must be between 0.1 and ${maximum} ms. Check the engine and injector values.`;
+    if (+stoich < 1 || +stoich > 25.5) return 'Enter a valid stoichiometric AFR.';
+    if (+injectorOpenTime < 0.1 || +injectorOpenTime > 25.5) return 'Enter injector opening time from the injector specification (0.1â€“25.5 ms).';
+    return '';
+  })();
+  const acceptIni = (path, content) => {
+    const parsed = parseIni(content, { CELSIUS: true });
+    if (!Object.keys(parsed.constants?.pages || {}).length) throw new Error('INI contains no configuration pages');
+    setIniPath(path);
+    setIniContent(content);
+    setIniSignature(parsed.info.signature ?? '');
+    setParsedIniPreview(parsed);
+    setBoardLayoutChoices(getBoardLayoutChoices(parsed));
+    setBoardLayoutValue('');
+  };
+  const handleBundledIni = async () => {
+    const request = ++iniRequest.current;
+    try {
+      const bundled = await window.projects.bundledIni();
+      if (request !== iniRequest.current) return;
+      if (bundled.error) throw new Error(bundled.error);
+      acceptIni(bundled.path, bundled.content);
+    } catch (error) { if (request === iniRequest.current) notify(error.message, 'error'); }
+  };
+  useEffect(() => {
+    if (view !== 'create' || iniContent || !window.projects.bundledIni) return;
+    let cancelled = false;
+    const request = ++iniRequest.current;
+    window.projects.bundledIni().then(bundled => {
+      if (!cancelled && request === iniRequest.current && !bundled.error) acceptIni(bundled.path, bundled.content);
+    }).catch(error => { if (!cancelled) notify(error.message, 'error'); });
+    return () => { cancelled = true; };
+  }, [view]);
 
   const handlePickIni = async () => {
     const path = await window.projects.pickIni();
     if (!path) return;
-    setIniPath(path);
-    setIniContent("");
-    setIniSignature("");
-    setParsedIniPreview(null);
-    setBoardLayoutChoices([]);
-    setBoardLayoutValue("");
+    const request = ++iniRequest.current;
     try {
       const content = await window.projects.loadIni(path);
+      if (request !== iniRequest.current) return;
       if (typeof content === "string") {
-        const parsed = parseIni(content);
-        setIniContent(content);
-        setIniSignature(parsed.info.signature ?? "");
-        setParsedIniPreview(parsed);
-        setBoardLayoutChoices(getBoardLayoutChoices(parsed));
+        acceptIni(path, content);
       } else {
         notify("Failed to read selected INI", "error");
       }
     } catch (error) {
-      notify(`INI parse failed: ${error.message}`, "error");
+      if (request === iniRequest.current) notify(`INI parse failed: ${error.message}`, "error");
     }
   };
 
@@ -153,7 +192,7 @@ export default function GettingStarted() {
   }, [view]);
 
   const handleCreate = async () => {
-    if (!projectName || !iniPath) return;
+    if (creationProblem) { notify(creationProblem, 'warning'); return; }
     if (boardLayoutChoices.length > 0 && boardLayoutValue === "") {
       notify("Board layout is required for this INI", "warning");
       return;
@@ -161,85 +200,22 @@ export default function GettingStarted() {
 
     setLoading(true);
     try {
-      const savePath = await window.projects.pickSave(projectName);
-      if (!savePath) {
-        setLoading(false);
-        return;
-      }
-
-      const initializationPlan = buildProjectInitialization({
-        parsedIni: parsedIniPreview,
-        selectedBoardLayout: boardLayoutValue,
-        engine: {
-          displacement: displacement ? Number(displacement) : null,
-          cylinders: cylinders ? Number(cylinders) : null,
-          type: engineType || null,
-        },
-        initBaseTune,
-      });
-
-      const raw = {
-        projectName,
-        description,
-        color: projectColor,
-        ini: {
-          path: iniPath,
-          signature: iniSignature,
-          version: parsedIniPreview?.info?.mtVersion ?? "",
-          content: iniContent || null,
-        },
-        engine: {
-          displacement: displacement ? Number(displacement) : null,
-          cylinders: cylinders ? Number(cylinders) : null,
-          type: engineType || null,
-        },
-        initialization: {
-          iniSignature: iniSignature || parsedIniPreview?.info?.signature || "",
-          boardLayout: initializationPlan.metadata.boardLayout,
-          baseTune: {
-            requested: !!initBaseTune,
-            applied: false,
-            providerId: initializationPlan.metadata.providerId,
-            providerOwner: initializationPlan.metadata.providerOwner,
-            appliedFields: [],
-            warningCount: 0,
-          },
-        },
-        filePath: savePath,
-        created: new Date().toISOString(),
+      const engine = {
+        displacement: Number(displacement) || null, cylinders: Number(cylinders) || null,
+        type: engineType || null, injectorFlow: Number(injectorFlow) || null,
+        injectorOpenTime: Number(injectorOpenTime) || null, stoich: Number(stoich) || null,
+        reqFuelCalc: { displacement: Number(displacement), displacementUnit: 'cc',
+          injectorFlow: Number(injectorFlow), injectorUnit: 'ccmin', stoich: Number(stoich) },
       };
-
-      await setProject(raw);
-      captureProjectRestorePoint("blankCanvas");
-
-      if (Object.keys(initializationPlan.pages).length > 0) {
-        await updateConstants({ pages: initializationPlan.pages });
-      }
-
-      updateProjectField("initialization", {
-        iniSignature: iniSignature || parsedIniPreview?.info?.signature || "",
-        boardLayout: initializationPlan.metadata.boardLayout,
-        baseTune: {
-          requested: !!initBaseTune,
-          applied: initializationPlan.metadata.applied,
-          providerId: initializationPlan.metadata.providerId,
-          providerOwner: initializationPlan.metadata.providerOwner,
-          appliedFields: initializationPlan.metadata.appliedFields,
-          warningCount: initializationPlan.warnings.length,
-        },
-      });
-
-      captureProjectRestorePoint("baseTune", {
-        constants: {
-          pages: initializationPlan.pages || {},
-          decodedPages: initializationPlan.pages || {},
-        },
-      });
-
-      const saveResult = await saveProject();
-      if (!saveResult?.ok) {
-        throw new Error(saveResult?.error || "Failed to save created project");
-      }
+      // Validate first; cancellation of the file picker leaves the session intact.
+      const document = createProjectDocument({ projectName, description, color: projectColor,
+        ini: { path: iniPath, signature: iniSignature, version: parsedIniPreview?.info?.mtVersion || '', content: iniContent },
+        parsedIni: parsedIniPreview, boardLayout: boardLayoutValue, engine, initBaseTune });
+      const initializationPlan = document.plan;
+      const savePath = await window.projects.pickSave(projectName.trim());
+      if (!savePath) return;
+      const result = await setProject({ ...document.project, filePath: savePath }, { persistNew: true });
+      if (!result.ok) throw new Error(result.error);
 
       if (initBaseTune) {
         notify(
@@ -296,23 +272,22 @@ export default function GettingStarted() {
     e.stopPropagation();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && file.name.endsWith(".rynproj")) {
-      const project = await window.projects.loadFile(file.path);
-      if (project && !project.error)
-        setProject({ ...project, filePath: file.path });
+    if (file && file.name.toLowerCase().endsWith(".rynproj")) {
+      const filePath = window.projects.pathForFile?.(file) || file.path;
+      if (filePath) await openProject(filePath);
+      else notify('Cannot locate the dropped file. Use Open Project.', 'error');
     }
   };
 
   const handleOpenExisting = async () => {
     const filePath = await window.projects.pickExisting();
     if (filePath) {
-      const project = await window.projects.loadFile(filePath);
-      if (project && !project.error) setProject({ ...project, filePath });
+      await openProject(filePath);
     }
   };
 
   const renderHome = () => (
-    <div className="flex w-full max-w-[1240px] gap-8 xl:gap-10">
+    <div className="flex w-full max-w-[1240px] flex-col gap-8 xl:flex-row xl:gap-10">
       {/* Left: Primary Actions */}
       <div className="flex-1 space-y-4">
         {/* Hardware Status Bar */}
@@ -336,7 +311,7 @@ export default function GettingStarted() {
           <div className="flex items-center gap-4 relative z-10">
             {recentProject && (
               <button
-                onClick={() => setProject(recentProject)}
+                onClick={() => openProject(recentProject.filePath)}
                 className="rounded-full border border-neon-cyan/20 bg-neon-cyan/10 px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.18em] text-neon-cyan transition-all hover:border-neon-cyan/30 hover:bg-neon-cyan/16"
                 title={`Open ${recentProject.projectName || "Recent Project"}`}
               >
@@ -376,7 +351,7 @@ export default function GettingStarted() {
 
         {recentProject && (
           <button
-            onClick={() => setProject(recentProject)}
+            onClick={() => openProject(recentProject.filePath)}
             className="group relative w-full overflow-hidden rounded-[32px] border border-neon-green/22 bg-gradient-to-r from-neon-green/12 to-transparent p-8 text-left backdrop-blur-xl transition-all hover:border-neon-green/40 hover:bg-neon-green/15"
           >
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-neon-green/80 via-white/25 to-transparent" />
@@ -448,7 +423,7 @@ export default function GettingStarted() {
       </div>
 
       {/* Right: Recent Projects */}
-      <div className="w-[420px] space-y-4 xl:w-[450px]">
+      <div className="w-full space-y-4 xl:w-[420px] xl:shrink-0">
         <div className="mb-4 flex items-center justify-between pl-1">
           <h2 className="text-[10px] font-orbitron font-bold uppercase tracking-[0.24em] text-white/40">
             Recent Activity
@@ -479,7 +454,7 @@ export default function GettingStarted() {
                   className="relative group"
                 >
                   <button
-                    onClick={() => setProject(p)}
+                    onClick={() => openProject(p.filePath)}
                     className={`w-full glass border border-white/5 rounded-[24px] p-4 hover:bg-white/5 hover:backdrop-blur-md transition-all text-left flex items-center gap-4 ${
                       p.color === "cyan"
                         ? "hover:border-neon-cyan/30"
@@ -568,7 +543,9 @@ export default function GettingStarted() {
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="glass w-[700px] rounded-[40px] border border-white/10 p-10 shadow-2xl space-y-6"
+      className="glass w-full max-w-[760px] max-h-[calc(100dvh-160px)] overflow-y-auto rounded-[32px] border border-white/10 p-6 sm:p-8 shadow-2xl space-y-6"
+      inert={loading ? true : undefined}
+      aria-busy={loading}
     >
       <div className="flex items-center gap-4 border-b border-white/6 pb-5">
         <div className="w-12 h-12 rounded-2xl bg-neon-cyan/20 border border-neon-cyan/30 flex items-center justify-center text-neon-cyan">
@@ -605,7 +582,7 @@ export default function GettingStarted() {
               {initBaseTune ? 'Enabled' : 'Manual Setup'}
             </div>
             <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
-              {initBaseTune ? 'Applies safe starter defaults where supported' : 'Create project without automatic defaults'}
+              {initBaseTune ? 'Curves prepared automatically · RYN starter maps' : 'Curves prepared automatically · manual engine and maps'}
             </div>
           </div>
           <div className="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
@@ -644,6 +621,8 @@ export default function GettingStarted() {
             {COLORS.map((c) => (
               <button
                 key={c.id}
+                aria-label={`${c.id} project color`}
+                aria-pressed={projectColor === c.id}
                 onClick={() => setProjectColor(c.id)}
                 className={`w-8 h-8 rounded-full border-2 transition-all ${
                   projectColor === c.id
@@ -690,6 +669,8 @@ export default function GettingStarted() {
                 Pick
               </button>
             </div>
+            <button type="button" onClick={handleBundledIni} disabled={loading}
+              className="ml-1 text-[11px] text-neon-cyan hover:underline">Use bundled firmware INI</button>
             {iniSignature && (
               <div className="ml-1 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-neon-green" />
@@ -727,8 +708,7 @@ export default function GettingStarted() {
               ))}
             </select>
             <p className="ml-1 text-[10px] leading-relaxed text-white/35">
-              Board layout sets the default pin routing for this project. You can still change it later in Engine
-              Constants.
+              Target: Mega2560 standard firmware, 4 cylinders. Choose the actual board; its pin routing comes from the firmware and INI.
             </p>
           </div>
         </div>
@@ -742,11 +722,10 @@ export default function GettingStarted() {
           />
           <div className="min-w-0">
             <div className="text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
-              Init Base Tune
+              Start with RYN base tune
             </div>
             <p className="mt-1 text-[10px] leading-relaxed text-white/40">
-              Applies a minimal functional configuration for the selected firmware and board layout. Unsupported
-              fields are skipped with warnings.
+              Menambahkan peta awal dan pengaturan RYN 12-1, wasted spark, Going Low. Dengan atau tanpa pilihan ini, seluruh kurva disiapkan otomatis dengan sumbu terurut dan nilai awal netral/referensi. Nilai awal tetap perlu dikalibrasi. Upload dan burn dilakukan terpisah.
             </p>
           </div>
         </label>
@@ -759,7 +738,7 @@ export default function GettingStarted() {
             className="flex items-center gap-2 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest ml-1 hover:text-gray-300 transition-colors"
           >
             {showEngine ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            Engine Details <span className="opacity-40">(optional)</span>
+            Engine & Injector <span className="opacity-40">{initBaseTune ? "(required)" : "(optional)"}</span>
           </button>
 
           {showEngine && (
@@ -786,10 +765,9 @@ export default function GettingStarted() {
                 </label>
                 <input
                   type="number"
-                  min="1"
-                  max="12"
+                  readOnly
+                  aria-label="Cylinders (4-cylinder target)"
                   value={cylinders}
-                  onChange={(e) => setCylinders(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs focus:border-neon-cyan outline-none"
                   placeholder="e.g. 4"
                 />
@@ -803,26 +781,43 @@ export default function GettingStarted() {
                   onChange={(e) => setEngineType(e.target.value)}
                   className="w-full bg-[#1a1a2e] border border-white/10 rounded-xl px-4 py-3 text-white text-xs focus:border-neon-cyan outline-none"
                 >
-                  <option value="">—</option>
+                  <option value="">â€”</option>
                   <option value="inline">Inline</option>
                   <option value="v">V-type</option>
                   <option value="flat">Flat / Boxer</option>
-                  <option value="rotary">Rotary</option>
                 </select>
               </div>
+              {[
+                ["Injector flow (cc/min)", injectorFlow, setInjectorFlow, "1", "e.g. 440"],
+                ["Injector opening time (ms)", injectorOpenTime, setInjectorOpenTime, "0.1", "From injector data"],
+                ["Stoichiometric AFR", stoich, setStoich, "1", "14.7 for gasoline"],
+              ].map(([label, value, onChange, min, placeholder]) => (
+                <div key={label} className="space-y-1">
+                  <label className="text-[9px] text-gray-600 uppercase tracking-widest block ml-1">{label}</label>
+                  <input type="number" min={min} step="any" value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs focus:border-neon-cyan outline-none" />
+                </div>
+              ))}
+              <div className="col-span-3 text-[11px] text-white/60">RYN: 12-1 / wasted spark / Going Low / four-stroke / 2 squirts per cycle. Required Fuel: {reqFuelPreview ? `${reqFuelPreview} ms` : "isi parameter mesin dan injektor"}, dihitung untuk satu siklus penuh; firmware membaginya saat injeksi batch.</div>
             </motion.div>
           )}
           {!showEngine && (
             <div className="mt-2 ml-1 text-[10px] text-white/35 uppercase tracking-[0.12em]">
-              Default: 2000cc / 4 cylinders / inline
+              {displacement}cc / {cylinders} cylinders / {engineType} â€” injector {injectorFlow || "belum diisi"} cc/min
             </div>
           )}
         </div>
       </div>
 
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs leading-relaxed text-white/65" aria-live="polite">
+        {creationProblem || (initBaseTune
+          ? `Siap membuat proyek: 4 silinder Â· ${boardLayoutChoices.find(choice => String(choice.value) === boardLayoutValue)?.label || ''} Â· Required Fuel ${reqFuelPreview} ms. Kurva langsung terbentuk dengan nilai awal netral/referensi; kalibrasi mesin tetap diperlukan.`
+          : 'Siap membuat proyek manual: board dan default INI diterapkan, seluruh kurva disiapkan otomatis. Pengaturan mesin, peta, dan kalibrasi tetap perlu diselesaikan.')}
+      </div>
       <div className="flex gap-4 pt-2">
         <button
           onClick={() => setView("home")}
+          disabled={loading}
           className="px-8 py-5 border border-white/10 hover:bg-white/5 text-gray-400 font-bold rounded-2xl uppercase tracking-widest text-[10px] transition-all"
         >
           Cancel
@@ -831,16 +826,14 @@ export default function GettingStarted() {
           onClick={handleCreate}
           disabled={
             loading ||
-            !projectName ||
-            !iniPath ||
-            (boardLayoutChoices.length > 0 && boardLayoutValue === "")
+            !!creationProblem
           }
           className="flex-1 py-5 bg-neon-cyan text-bg-deep font-orbitron font-bold rounded-2xl uppercase tracking-[0.3em] shadow-[0_0_30px_rgba(0,212,255,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 disabled:scale-100 flex items-center justify-center gap-3"
         >
           {loading ? (
             <span className="w-5 h-5 border-2 border-bg-deep/30 border-t-bg-deep rounded-full animate-spin" />
           ) : (
-            "Ready for Launch"
+            "Create Project"
           )}
         </button>
       </div>
@@ -853,7 +846,7 @@ export default function GettingStarted() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleFileDrop}
-      className="flex-1 flex items-center justify-center p-12 bg-transparent font-inter relative overflow-hidden"
+      className="flex-1 min-h-0 flex items-center justify-start p-4 md:p-8 bg-transparent font-inter relative overflow-x-hidden overflow-y-auto"
     >
       {/* Visual cue for drag and drop */}
       <AnimatePresence>
@@ -879,15 +872,15 @@ export default function GettingStarted() {
 
       <div className="neon-grid" />
 
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-neon-cyan/5 blur-[120px] rounded-full pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-neon-purple/5 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute top-0 left-0 w-[40%] h-[40%] bg-neon-cyan/5 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[40%] h-[40%] bg-neon-purple/5 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative z-10 w-full flex flex-col items-center">
+      <div className="relative z-10 my-auto w-full flex flex-col items-center">
         {view === "home" && (
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-12 flex w-full max-w-[1240px] items-end justify-between gap-10 xl:flex-row"
+            className="mb-8 flex w-full max-w-[1240px] flex-col items-start justify-between gap-6 xl:flex-row"
           >
             <div className="flex items-center gap-6">
               <div className="relative group">

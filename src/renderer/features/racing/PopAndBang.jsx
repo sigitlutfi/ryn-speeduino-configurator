@@ -55,6 +55,7 @@ const PATTERN_STEPS = Array.from({ length: 8 }, (_, i) => i);
 export default function PopAndBang() {
   const notify = useStore((s) => s.notify);
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -317,7 +318,7 @@ export default function PopAndBang() {
                   Activation Window
                 </h3>
                 <div className="space-y-4">
-                  <PinSelect
+                  <PinSelect decodedPages={pinPages}
                     label="Switch Pin"
                     fieldName="rollingPopBangPin"
                     value={getValue("rollingPopBangPin")}

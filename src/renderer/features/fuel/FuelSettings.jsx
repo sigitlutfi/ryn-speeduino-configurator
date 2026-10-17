@@ -1,3 +1,4 @@
+import PinSelect from "../shared/components/PinSelect";
 import React from "react";
 import { 
   Flame, 
@@ -13,6 +14,11 @@ import {
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
+import {
+  GroupHeader,
+  SelectRow,
+  InputField,
+} from "../shared/components/TuningComponents";
 import { useStore } from "../../core/store";
 
 const FUEL_FIELDS = [
@@ -30,6 +36,7 @@ const FUEL_FIELDS = [
 export default function FuelSettings() {
   const parsedIni = useStore((s) => s.parsedIni);
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     handleSave,
@@ -64,76 +71,17 @@ export default function FuelSettings() {
     const pageObj = parsedIni.constants.pages[info.pageId];
     const fieldDef = pageObj[info.key];
     
-    if (!fieldDef?.labels) return [];
+    if (!fieldDef?.options) return [];
     
-    return fieldDef.labels
+    return fieldDef.options
       .map((label, index) => ({ label, index }))
       .filter(opt => opt.label && opt.label.toUpperCase() !== "INVALID");
   };
 
-  const GroupHeader = ({ title, icon: Icon, colorClass = "bg-neon-cyan" }) => (
-    <div className="flex items-center gap-3 mb-6">
-      <div className={`${colorClass} p-2 rounded-xl shadow-lg shadow-black/20 text-black`}>
-        <Icon size={16} />
-      </div>
-      <h3 className="text-xs font-black text-white uppercase tracking-widest">{title}</h3>
-    </div>
-  );
-
-  const SelectRow = ({ name, label, description, icon: Icon }) => {
-    const options = getCleanOptions(name);
-    const value = getFieldValue(name);
-
-    return (
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-white/10 transition-all group/row">
-        <div className="flex items-start gap-4 flex-1">
-          <div className="mt-1 p-2 rounded-lg bg-black/40 text-white/40 group-hover/row:text-neon-cyan transition-colors">
-            {Icon && <Icon size={16} />}
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] font-black text-white uppercase tracking-wider">{label}</span>
-            <span className="text-[10px] text-white/40 font-medium leading-relaxed max-w-md">{description}</span>
-          </div>
-        </div>
-        <div className="min-w-[200px]">
-          <select
-            value={value ?? 0}
-            onChange={(e) => setFieldValue(name, parseInt(e.target.value))}
-            className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs font-black text-neon-cyan outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20 transition-all appearance-none cursor-pointer"
-          >
-            {options.map((opt) => (
-              <option key={opt.index} value={opt.index}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-    );
-  };
-
-  const NumberRow = ({ name, label, description, icon: Icon }) => {
-    const value = getFieldValue(name);
-
-    return (
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-white/10 transition-all group/row">
-        <div className="flex items-start gap-4 flex-1">
-          <div className="mt-1 p-2 rounded-lg bg-black/40 text-white/40 group-hover/row:text-neon-cyan transition-colors">
-            {Icon && <Icon size={16} />}
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] font-black text-white uppercase tracking-wider">{label}</span>
-            <span className="text-[10px] text-white/40 font-medium leading-relaxed max-w-md">{description}</span>
-          </div>
-        </div>
-        <div className="min-w-[200px]">
-          <input
-            type="number"
-            value={value ?? 0}
-            onChange={(e) => setFieldValue(name, parseFloat(e.target.value || "0"))}
-            className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs font-black text-neon-cyan outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20 transition-all"
-          />
-        </div>
-      </div>
-    );
+  const fieldProps = {
+    getValue: getFieldValue,
+    updateValue: setFieldValue,
+    getFieldInfo,
   };
 
   const fuel2Mode = getFieldValue("fuel2Mode") ?? 0;
@@ -199,6 +147,7 @@ export default function FuelSettings() {
           
           <div className="flex flex-col gap-4">
             <SelectRow 
+              {...fieldProps}
               name="multiplyMAP" 
               label="Multiply MAP" 
               description="Primary density compensation. Multiplies VE table value by (MAP/Baro) ratio. Essential for Speed-Density tuning."
@@ -213,7 +162,7 @@ export default function FuelSettings() {
           <GroupHeader 
             title="AFR Corrections" 
             icon={Zap} 
-            colorClass="bg-neon-rose shadow-glow-rose"
+            theme="rose"
           />
 
           <div className="flex flex-col gap-6">
@@ -226,6 +175,7 @@ export default function FuelSettings() {
             </div>
 
             <SelectRow 
+              {...fieldProps}
               name="includeAFR" 
               label="Include AFR Target" 
               description="Multiplies by the ratio of actual AFR to Target AFR. (Legacy support only)"
@@ -233,6 +183,7 @@ export default function FuelSettings() {
             />
 
             <SelectRow 
+              {...fieldProps}
               name="incorporateAFR" 
               label="Incorporate AFR Target" 
               description="Modern strategy to include target AFR in the main fueling equation (Stoich / Target AFR)."
@@ -246,11 +197,12 @@ export default function FuelSettings() {
           <GroupHeader
             title="Fuel Table 2 Strategy"
             icon={Table2}
-            colorClass="bg-neon-green shadow-glow-green"
+            theme="green"
           />
 
           <div className="flex flex-col gap-4">
             <SelectRow
+              {...fieldProps}
               name="fuel2Mode"
               label="Secondary Fuel Table Mode"
               description="Defines what VE Table 2 means: disabled, percent multiplier, additive layer, or switched map."
@@ -269,13 +221,15 @@ export default function FuelSettings() {
             {showConditionalControls ? (
               <>
                 <SelectRow
+                  {...fieldProps}
                   name="fuel2SwitchVariable"
                   label="Switch Variable"
                   description="Selects the live value used to decide when VE2 takes over in conditional switch mode."
                   icon={Activity}
                 />
 
-                <NumberRow
+                <InputField
+                  {...fieldProps}
                   name="fuel2SwitchValue"
                   label="Switch Threshold"
                   description={`VE2 becomes active when ${fuel2VariableLabel} is greater than this threshold.`}
@@ -293,14 +247,15 @@ export default function FuelSettings() {
                   </p>
                 </div>
 
-                <SelectRow
-                  name="fuel2InputPin"
+                <PinSelect fieldName="fuel2InputPin" decodedPages={pinPages}
+                  value={getFieldValue("fuel2InputPin")} onChange={value => setFieldValue("fuel2InputPin", value)}
                   label="Input Pin"
                   description="The ECU input pin that triggers Fuel Table 2 when input-based switching is selected."
                   icon={Activity}
                 />
 
                 <SelectRow
+                  {...fieldProps}
                   name="fuel2InputPolarity"
                   label="Input Polarity"
                   description={`VE2 becomes active when the selected pin is ${fuel2InputPolarityLabel}.`}
@@ -309,6 +264,7 @@ export default function FuelSettings() {
 
                 {showInputPullupControl ? (
                   <SelectRow
+                    {...fieldProps}
                     name="fuel2InputPullup"
                     label="Internal Pullup"
                     description={`Current setting is ${fuel2InputPullupLabel}. Typical ground-switch inputs usually want the pullup enabled.`}

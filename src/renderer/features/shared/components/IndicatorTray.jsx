@@ -1,3 +1,4 @@
+import { useLiveTelemetry } from '../hooks/useLiveTelemetry.js';
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -13,11 +14,13 @@ import { useStore } from "../../../core/store.js";
 const Indicator = ({
   label,
   active,
+  available = true,
   onLabel,
   offLabel,
   onColor = "neon-green",
   offColor = "gray-700",
 }) => {
+  available = available && typeof active === 'boolean';
   const colorMap = {
     "neon-green": "bg-neon-green shadow-glow-green",
     "neon-red": "bg-neon-red shadow-glow-red",
@@ -36,11 +39,11 @@ const Indicator = ({
         <span
           className={`text-[10px] font-bold truncate ${active ? "text-white" : "text-white/20"}`}
         >
-          {active ? onLabel : offLabel}
+          {!available ? '—' : active ? onLabel : offLabel}
         </span>
       </div>
       <div
-        className={`w-2 h-2 flex-shrink-0 rounded-full transition-all duration-300 ${active ? colorMap[onColor] : colorMap[offColor]}`}
+        className={`w-2 h-2 flex-shrink-0 rounded-full transition-all duration-300 ${available && active ? colorMap[onColor] : colorMap['gray-700']}`}
       />
     </div>
   );
@@ -58,8 +61,10 @@ const GroupHeader = ({ icon: Icon, label }) => (
 export default function IndicatorTray() {
   const showIndicatorTray = useStore((s) => s.showIndicatorTray);
   const toggleIndicatorTray = useStore((s) => s.toggleIndicatorTray);
-  const engine = useStore((s) => s.realtime?.engine || {});
-  const performance = useStore((s) => s.realtime?.performance || {});
+  const { realtime, status: telemetryStatus } = useLiveTelemetry();
+  const engine = realtime?.engine || {};
+  const performance = realtime?.performance || {};
+  const live = telemetryStatus === 'live';
   const popBangTimerSeconds = Number(performance.rollingPopBangActiveTime || 0) / 1000;
 
   if (!showIndicatorTray) return null;
@@ -146,7 +151,7 @@ export default function IndicatorTray() {
         },
         {
           label: "Boost Cut",
-          active: engine.boostCutSpark || engine.boostCutFuel,
+          active: engine.boostCutSpark === true || engine.boostCutFuel === true ? true : engine.boostCutSpark === false && engine.boostCutFuel === false ? false : null,
           onLabel: "ACTIVE",
           offLabel: "OK",
           onColor: "neon-red",
@@ -326,7 +331,7 @@ export default function IndicatorTray() {
               <React.Fragment key={group.group}>
                 <GroupHeader icon={group.icon} label={group.group} />
                 {group.items.map((item) => (
-                  <Indicator key={item.label} {...item} />
+                  <Indicator key={item.label} {...item} available={live} />
                 ))}
               </React.Fragment>
             ))}
@@ -341,6 +346,7 @@ export default function IndicatorTray() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Indicator
+                available={live}
                 label="Switch"
                 active={performance.rollingPopBangSwitch}
                 onLabel="ON"
@@ -348,6 +354,7 @@ export default function IndicatorTray() {
                 onColor="neon-cyan"
               />
               <Indicator
+                available={live && Number.isFinite(performance.rollingPopBangCutCounter)}
                 label="Cut Step"
                 active={performance.rollingPopBangCutCounter > 0}
                 onLabel={`STEP ${performance.rollingPopBangCutCounter || 0}`}
@@ -355,6 +362,7 @@ export default function IndicatorTray() {
                 onColor="neon-red"
               />
               <Indicator
+                available={live && Number.isFinite(performance.rollingPopBangActiveTime)}
                 label="Timer"
                 active={performance.rollingPopBangActive}
                 onLabel={`${popBangTimerSeconds.toFixed(popBangTimerSeconds < 10 ? 1 : 0)}S`}
@@ -362,6 +370,7 @@ export default function IndicatorTray() {
                 onColor="neon-orange"
               />
               <Indicator
+                available={live && Number.isFinite(performance.rollingPopBangTimingCorr)}
                 label="Timing Corr"
                 active={Math.abs(performance.rollingPopBangTimingCorr || 0) > 0}
                 onLabel={`${performance.rollingPopBangTimingCorr || 0} DEG`}
@@ -369,9 +378,10 @@ export default function IndicatorTray() {
                 onColor="neon-yellow"
               />
               <Indicator
+                available={live && Number.isFinite(performance.rollingPopBangFuelCorr)}
                 label="Fuel Corr"
-                active={(performance.rollingPopBangFuelCorr || 100) !== 100}
-                onLabel={`${performance.rollingPopBangFuelCorr || 100}%`}
+                active={(performance.rollingPopBangFuelCorr ?? 100) !== 100}
+                onLabel={`${performance.rollingPopBangFuelCorr ?? 100}%`}
                 offLabel="100%"
                 onColor="neon-green"
               />
@@ -386,7 +396,7 @@ export default function IndicatorTray() {
               className={`w-1.5 h-1.5 rounded-full ${engine.running ? "bg-neon-green animate-pulse" : "bg-gray-700"}`}
             />
             <span className="text-[9px] font-black text-white/20 uppercase tracking-widest leading-none">
-              OCH Protocol v4.0 Active
+              Telemetry: {telemetryStatus}
             </span>
           </div>
         </div>

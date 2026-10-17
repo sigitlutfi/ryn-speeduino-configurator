@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../../../core/store.js";
 import { getDecodedPages } from "../utils/projectConstants.js";
 import { validateConfigurationValues } from "../../../../shared/protocol/configuration-validation.js";
-import { projectPinMapOptions } from '../../../../shared/protocol/board-pins.js';
-import { validateCustomPinAssignments } from '../utils/pinRegistry.js';
+import { configurationWriteOptions } from '../../../../shared/protocol/board-pins.js';
+import { validateConfigurationChange } from '../../../../shared/protocol/configuration-policy.js';
 
 /**
  * Professional Tuning Module Hook.
@@ -23,7 +23,12 @@ export function useTuningModule(targets, options = {}) {
   const connection = useStore((s) => s.connection);
   const notify = useStore((s) => s.notify);
 
-  const [localConstants, setLocalConstants] = useState({});
+  const fieldDrafts = useStore(s => s.fieldDrafts);
+  const localConstants = useMemo(() => {
+    const pages = { ...getDecodedPages(currentProject?.constants, parsedIni) };
+    for (const [page, values] of Object.entries(fieldDrafts || {})) pages[page] = { ...pages[page], ...values };
+    return pages;
+  }, [currentProject?.constants, parsedIni, fieldDrafts]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
   const [isMappingDone, setIsMappingDone] = useState(false);
@@ -128,29 +133,7 @@ export function useTuningModule(targets, options = {}) {
 
   const { pagesFound } = fieldToPageMap;
 
-  // 2. DATA SYNCHRONIZATION
-  useEffect(() => {
-    if (currentProject?.constants) {
-      setLocalConstants((prev) => {
-        const next = { ...prev };
-        let hasChanges = false;
-
-        // Sync targeted pages
-        pagesFound.forEach((pId) => {
-          const storeData = getDecodedPages(currentProject.constants, parsedIni)?.[pId] || {};
-          if (JSON.stringify(prev[pId]) !== JSON.stringify(storeData)) {
-            next[pId] = storeData;
-            hasChanges = true;
-          }
-        });
-
-        // Finalize mapping state
-        if (!isMappingDone && parsedIni) setIsMappingDone(true);
-
-        return hasChanges ? next : prev;
-      });
-    }
-  }, [currentProject?.constants, pagesFound, parsedIni, isMappingDone]);
+  useEffect(() => { setIsMappingDone(!!parsedIni); }, [parsedIni]);
 
   // Handle case where parsedIni is available but pagesFound is empty (e.g. invalid names)
   useEffect(() => {
@@ -181,8 +164,8 @@ export function useTuningModule(targets, options = {}) {
       }
 
       // If it's an array field but the current value is not an array (or is missing)
-      if (info.meta?.isArray && !Array.isArray(raw)) {
-        const size = info.meta.dimensions?.[0] || 1;
+      if (info.meta?.type === 'array' && !Array.isArray(raw)) {
+        const size = info.meta.shape?.reduce((total, value) => total * value, 1) || 1;
         return new Array(size).fill(0);
       }
 
@@ -191,44 +174,17 @@ export function useTuningModule(targets, options = {}) {
     [localConstants, getFieldInfo, fallbacks],
   );
 
-  const setFieldValue = useCallback(
-    (name, value) => {
-      const info = getFieldInfo(name);
-      if (!info) return;
+  const setFieldValue = useCallback((name, value) => {
+    const info = getFieldInfo(name);
+    if (info) useStore.getState().updateProjectFieldDrafts({ [info.pageId]: { [info.key]: value } });
+  }, [getFieldInfo]);
 
-      setLocalConstants((prev) => ({
-        ...prev,
-        [info.pageId]: {
-          ...(prev[info.pageId] || {}),
-          [info.key]: value,
-        },
-      }));
-    },
-    [getFieldInfo],
-  );
-
-  const getLocalPage = useCallback(
-    (pId) => {
-      return localConstants[pId] || {};
-    },
-    [localConstants],
-  );
-
+  const getLocalPage = useCallback(pId => localConstants[pId] || {}, [localConstants]);
   const setLocalField = useCallback((pId, name, value) => {
-    setLocalConstants((prev) => ({
-      ...prev,
-      [pId]: {
-        ...(prev[pId] || {}),
-        [name]: value,
-      },
-    }));
+    useStore.getState().updateProjectFieldDrafts({ [pId]: { [name]: value } });
   }, []);
-
   const setLocalPage = useCallback((pId, data) => {
-    setLocalConstants((prev) => ({
-      ...prev,
-      [pId]: { ...(prev[pId] || {}), ...data },
-    }));
+    useStore.getState().updateProjectFieldDrafts({ [pId]: data });
   }, []);
 
   const buildScopedPayload = useCallback(() => {
@@ -261,7 +217,7 @@ export function useTuningModule(targets, options = {}) {
     const editedPages = Object.fromEntries(Object.entries(buildScopedPayload()).map(([page, values]) =>
       [page, Object.fromEntries(Object.entries(values).filter(([name, value]) =>
         JSON.stringify(value) !== JSON.stringify(storedPages?.[page]?.[name])))]));
-    const rangeError = validateConfigurationValues(parsedIni, editedPages);
+    const rangeError = validateConfigurationValues(parsedIni, editedPages, storedPages, storedPages);
     if (rangeError) {
       setSaveStatus("error");
       notify(rangeError, "error");
@@ -270,7 +226,7 @@ export function useTuningModule(targets, options = {}) {
     const scoped = buildScopedPayload();
     const candidatePages = { ...storedPages };
     for (const [page, values] of Object.entries(scoped)) candidatePages[page] = { ...candidatePages[page], ...values };
-    const pinError = validateCustomPinAssignments(parsedIni, candidatePages, projectPinMapOptions(currentProject), Object.values(scoped).flatMap(Object.keys));
+    const pinError = validateConfigurationChange(parsedIni, storedPages, candidatePages, configurationWriteOptions(currentProject));
     if (pinError) {
       setSaveStatus('error');
       notify(pinError, 'error');
@@ -295,6 +251,8 @@ export function useTuningModule(targets, options = {}) {
 
       // Update project-local decoded/raw state first
       await updateConstants(scopedPayload);
+      const committed = useStore.getState().applyProjectTableDrafts();
+      if (!committed.ok) throw new Error(committed.error);
 
       if (isConnected && pagesFound.length > 0) {
         const ramResult = await writePagesToRAM(pagesFound);
@@ -348,7 +306,9 @@ export function useTuningModule(targets, options = {}) {
         reset[info.pageId][info.key] = decodedPage[info.key];
       });
     }
-    setLocalConstants(reset);
+    const scope = Object.fromEntries(Object.entries(reset).map(([page, values]) => [page,
+      isPageTargetMode ? null : Object.keys(values)]));
+    useStore.getState().discardProjectFieldDrafts(scope);
     notify("Changes discarded", "info");
   }, [currentProject?.constants, pagesFound, isPageTargetMode, fieldToPageMap, notify, parsedIni]);
 
@@ -390,7 +350,16 @@ export function useTuningModule(targets, options = {}) {
     parsedIni,
   ]);
 
+  const pinPages = useMemo(() => {
+    const pages = { ...getDecodedPages(currentProject?.constants, parsedIni) };
+    for (const [page, values] of Object.entries(localConstants)) {
+      pages[page] = { ...pages[page], ...values };
+    }
+    return pages;
+  }, [currentProject?.constants, parsedIni, localConstants]);
+
   return {
+    pinPages,
     localConstants,
     getFieldValue,
     setFieldValue,

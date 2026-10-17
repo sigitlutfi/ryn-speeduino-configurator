@@ -10,6 +10,8 @@ import {
   resolveRuntimeTable,
 } from "../../../shared/protocol/runtime-tables.js";
 
+import { profileTableFromDisplay } from "../../../shared/protocol/runtime-profile-table.js";
+
 const EDITABLE_PROFILE_IDS = ["ECO", "RACING", "EXTREME"];
 const EDITOR_TABS = ["Fuel", "Spark", "AFR", "Options"];
 const OPTION_FIELDS = [
@@ -62,10 +64,6 @@ const OPTION_FIELDS = [
   },
 ];
 
-function flattenMatrix(matrix = []) {
-  return matrix.flatMap((row) => Array.from(row || []));
-}
-
 function normalizeProfileKey(profileId) {
   return profileId?.toLowerCase?.() || "";
 }
@@ -83,7 +81,7 @@ function summarizeVe2Preset(tablePreset) {
 }
 
 function summarizeTablePreset(tablePreset, label = "Table") {
-  const rawValues = Array.from(tablePreset?.rawValues || []);
+  const rawValues = Array.from(tablePreset?.displayValues?.flat?.() || tablePreset?.rawValues || []);
   if (!rawValues.length) return `${label} preset belum berisi data.`;
 
   const uniqueValues = Array.from(new Set(rawValues));
@@ -98,24 +96,10 @@ function tableRawValuesEqual(a, b) {
   return JSON.stringify(Array.from(a?.rawValues || [])) === JSON.stringify(Array.from(b?.rawValues || []));
 }
 
-function createFlatTablePresetFromTemplate(template, fillValue) {
+function createFlatTablePresetFromTemplate(template, fillValue, parsedIni, logicalName) {
   if (!template) return null;
-  const totalCells = Math.max(1, (template.rows || 16) * (template.cols || 16));
-  const rawValues = Array(totalCells).fill(fillValue);
-  const cols = template.cols || 16;
-  const rows = template.rows || 16;
-  const displayValues = [];
-  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
-    displayValues.push(rawValues.slice(rowIndex * cols, (rowIndex + 1) * cols));
-  }
-
-  return {
-    ...template,
-    operation: "preset",
-    source: "neutral",
-    rawValues,
-    displayValues,
-  };
+  const def = resolveRuntimeTable(parsedIni, logicalName);
+  return profileTableFromDisplay(template, def, { values: Array.from({ length: def.rows }, () => Array(def.cols).fill(fillValue)) });
 }
 
 function getBaseProjectTable(parsedIni, currentProject, logicalName) {
@@ -226,15 +210,17 @@ export default function RuntimeProfileEditor() {
     if (!existingTable) return;
 
     const nextValues = partial?.values || currentEditorTable.values;
-    const nextTablePreset = {
-      ...existingTable,
-      displayValues: nextValues,
-      rawValues: flattenMatrix(nextValues),
-      displayRpmAxis: existingTable.displayRpmAxis || currentEditorTable.rpmAxis,
-      displayLoadAxis: existingTable.displayLoadAxis || currentEditorTable.loadAxis,
-      rawRpmAxis: existingTable.rawRpmAxis || [],
-      rawLoadAxis: existingTable.rawLoadAxis || [],
-    };
+    let nextTablePreset;
+    try {
+      nextTablePreset = profileTableFromDisplay(existingTable, resolveRuntimeTable(parsedIni, logicalName), {
+        values: nextValues,
+        rpmAxis: partial?.rpmAxis ?? currentEditorTable.rpmAxis,
+        loadAxis: partial?.loadAxis ?? currentEditorTable.loadAxis,
+      });
+    } catch (error) {
+      notify(error.message, "error");
+      return;
+    }
 
     updateRuntimeProfilePreset(profileKey, {
       tablePresets: {
@@ -308,10 +294,15 @@ export default function RuntimeProfileEditor() {
   };
 
   const handleResetTab = (targetTab = activeTab) => {
+    if (targetTab === "Spark") {
+      const next = createFlatTablePresetFromTemplate(editorState.spark.rawTemplate || baseProjectTables.spark2, 0, parsedIni, "spark2");
+      if (next) updateRuntimeProfilePreset(profileKey, { tablePresets: { spark2: next }, options: { spark2Mode: 2 } });
+      return;
+    }
     if (targetTab === "Fuel") {
       const next = createFlatTablePresetFromTemplate(
         editorState.fuel.rawTemplate || baseProjectTables.ve2,
-        100,
+        100, parsedIni, "ve2",
       );
       if (next) {
         updateRuntimeProfilePreset(profileKey, { tablePresets: { ve2: next } });
@@ -322,7 +313,7 @@ export default function RuntimeProfileEditor() {
     if (targetTab === "AFR") {
       const next = createFlatTablePresetFromTemplate(
         editorState.afr.rawTemplate || baseProjectTables.afr1,
-        14.7,
+        14.7, parsedIni, "afr1",
       );
       if (next) {
         updateRuntimeProfilePreset(profileKey, { tablePresets: { afr1: next } });
@@ -395,7 +386,7 @@ export default function RuntimeProfileEditor() {
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-[11px] font-orbitron font-bold uppercase tracking-[0.16em] text-white/80 transition hover:bg-white/10"
               >
                 <ArrowLeft size={14} />
-                Runtime Profiles
+                Drive Mode
               </button>
               <button
                 type="button"
@@ -414,7 +405,7 @@ export default function RuntimeProfileEditor() {
               <div className="flex items-center gap-2">
                 <PencilLine size={14} className="text-neon-cyan" />
                 <div className="text-[10px] font-orbitron font-bold uppercase tracking-[0.18em] text-white">
-                  Editable Preset
+                  Legacy Tune Preset
                 </div>
               </div>
 
@@ -490,14 +481,14 @@ export default function RuntimeProfileEditor() {
                 <Copy size={13} />
                 Copy From Base
               </button>
-              {(activeTab === "Fuel" || activeTab === "AFR" || activeTab === "Options") ? (
+              {(activeTab === "Fuel" || activeTab === "Spark" || activeTab === "AFR" || activeTab === "Options") ? (
                 <button
                   type="button"
                   onClick={() => handleResetTab(activeTab)}
                   className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-[11px] font-orbitron font-bold uppercase tracking-[0.14em] text-white/80 transition hover:bg-white/10"
                 >
                   <RotateCcw size={13} />
-                  {activeTab === "Fuel"
+                  {activeTab === "Spark" ? "Reset Added 0 deg" : activeTab === "Fuel"
                     ? "Reset 100%"
                     : activeTab === "AFR"
                       ? "Reset 14.7"
@@ -526,11 +517,11 @@ export default function RuntimeProfileEditor() {
               rpmAxis={editorState.spark.rpmAxis}
               loadAxis={editorState.spark.loadAxis}
               onUpdate={(partial) => handleProfileGridUpdate("spark2", partial)}
-              minVal={-20}
-              maxVal={60}
+              minVal={Number(editorState.options.spark2Mode ?? baseProjectOptions.spark2Mode) === 1 ? 0 : -40}
+              maxVal={Number(editorState.options.spark2Mode ?? baseProjectOptions.spark2Mode) === 1 ? 215 : 70}
               xAxisLabel="RPM"
               yAxisLabel="Ignition Load"
-              unitLabel="deg"
+              unitLabel={Number(editorState.options.spark2Mode ?? baseProjectOptions.spark2Mode) === 1 ? "%" : "deg"}
               precision={1}
             />
           ) : activeTab === "Options" ? (
@@ -543,6 +534,9 @@ export default function RuntimeProfileEditor() {
                   <div className="text-[10px] font-orbitron font-bold uppercase tracking-[0.12em] text-white/85">
                     {field.label}
                   </div>
+                  {getVarMetadata(parsedIni, field.key)?.requiresPowerCycle && (
+                    <div className="mt-2 text-[11px] text-neon-yellow">Enable harus sudah sesuai ECU. Ubah melalui settings, burn, lalu restart ECU sebelum Apply profil.</div>
+                  )}
 
                   <div className="mt-3">
                     {field.kind === "number" ? (

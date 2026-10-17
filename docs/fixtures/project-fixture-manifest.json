@@ -1,0 +1,26 @@
+{
+  "file": "synthetic-project-v5.rynproj",
+  "bytes": 612070,
+  "sha256": "3350aa7324cb9c1ca4f2d11137c9867d790572d261ab1b71d965568092266dbb",
+  "schemaVersion": 5,
+  "iniSha256": "166ef191c160dffa1399dac1b686b6c9c35ee87ff894e556ba087b53a5537a73",
+  "pageSizes": [
+    0,
+    128,
+    288,
+    288,
+    128,
+    288,
+    143,
+    240,
+    384,
+    192,
+    220,
+    288,
+    192,
+    128,
+    288,
+    256
+  ],
+  "purpose": "Offline parsing, integrity and lossless round-trip. Never an ECU tuning recommendation."
+}

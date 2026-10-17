@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
-import { parseIni } from '../src/shared/ini-parser.js'
+import { parseIni, getTableMetadata } from '../src/shared/ini-parser.js'
 import { metadataContract } from '../src/shared/protocol/metadata-contract.js'
 import { extractAvrPinMappings, renderAvrMapping } from './avr-pin-mapping.mjs'
 
@@ -15,7 +15,28 @@ const sha256 = text => createHash('sha256').update(normalize(text)).digest('hex'
 const pairPath = 'compatibility/firmware.json'
 const metadataPath = 'src/shared/protocol/ini-contract.js'
 const mappingPath = 'src/shared/protocol/avr-pin-mapping.js'
-const ownershipPaths = ['src/shared/protocol/board-pins.js', 'src/renderer/features/shared/utils/pinRegistry.js', 'src/shared/protocol/configuration-validation.js']
+const ownershipPaths = ['src/renderer/core/store/slices/ecu.sync.js', 'src/shared/protocol/contract.js', 'src/shared/protocol/output-channels.js', 'src/shared/protocol/realtime.js', 'src/renderer/core/store/projectSlice.js', 'src/renderer/core/store/connectionSlice.js', 'src/renderer/core/store/realtimeSlice.js', 'src/shared/protocol/drive-modes.js', 'src/shared/protocol/drive-mode-migration.js', 'src/renderer/core/store/slices/drive.modes.js', 'src/shared/protocol/board-pins.js', 'src/shared/protocol/pin-registry.js', 'src/shared/protocol/configuration-policy.js', 'src/renderer/features/shared/utils/pinRegistry.js', 'src/shared/protocol/configuration-validation.js']
+ownershipPaths.push('src/shared/protocol/ini-numeric.js', 'src/shared/protocol/tuning-live.js',
+  'src/shared/protocol/metadata-contract.js', 'src/renderer/core/store/utils/table.drafts.js',
+  'src/renderer/features/shared/hooks/useTableSync.js')
+ownershipPaths.push('src/renderer/features/projects/projectInitialization.js')
+  ownershipPaths.push('src/shared/protocol/curve-presets.js')
+ownershipPaths.push('src/shared/protocol/required-fuel.js', 'src/renderer/core/store/utils/ecu.restart.js',
+  'src/renderer/core/store/slices/ecu.restart.js', 'src/renderer/core/store/slices/project.lifecycle.js')
+ownershipPaths.push('src/shared/protocol/configuration-readiness.js', 'src/shared/protocol/sensor-calibration.js',
+  'src/renderer/core/services/sensorCalibration.js', 'src/main/serial-lifecycle.js', 'src/main/index.js')
+ownershipPaths.push('src/shared/protocol/telemetry-plot.js', 'src/shared/protocol/telemetry-log.js',
+  'src/renderer/features/dashboard/Dashboard.jsx', 'src/renderer/features/dashboard/Analysis.jsx',
+  'src/renderer/features/dashboard/widgets/channelRegistry.js', 'src/renderer/features/dashboard/widgets/telemetry-channels.js',
+  'src/renderer/features/dashboard/widgets/WidgetTile.jsx', 'src/renderer/features/dashboard/widgets/widgetPresets.js',
+  'src/renderer/ui/Gauge/Index.jsx', 'src/renderer/ui/Layout/RealtimeChart.jsx',
+  'src/renderer/features/shared/hooks/useLiveTelemetry.js', 'src/renderer/features/shared/components/IndicatorTray.jsx',
+  'src/renderer/core/store/settingsSlice.js')
+
+ownershipPaths.push('src/renderer/core/services/ecuRecovery.js', 'src/renderer/features/system/FlashFirmware.jsx',
+  'src/renderer/features/system/Communications.jsx', 'src/renderer/core/store/uiSlice.js')
+
+ownershipPaths.push('src/renderer/core/store/connectionSlice.js')
 
 function git(root, args) {
   const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' })
@@ -33,7 +54,11 @@ function revisionState(root) {
 export function renderMetadataContract(content) {
   // All modes the app supports. No symbols currently selects Fahrenheit via
   // the INI's #else; its resulting contract equals the FAHRENHEIT variant.
-  const variants = [{ CELSIUS: true }, { FAHRENHEIT: true }].map(symbols => metadataContract(parseIni(content, symbols)))
+  const variants = [{ CELSIUS: true }, { FAHRENHEIT: true }].map(symbols => {
+    const ini = parseIni(content, symbols)
+    for (const id of Object.keys(ini.tables)) getTableMetadata(ini, id, { strict: true })
+    return metadataContract(ini)
+  })
   // Intern repeated pin enums/metadata and shared Celsius/Fahrenheit fields.
   // This preserves exact comparisons without adding megabytes to the renderer.
   const nodes = [], ids = new Map()
@@ -137,7 +162,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     }
     const value = flag => options[flag]
     const firmwareRoot = value('--firmware')
-    if (!firmwareRoot) throw new Error('Usage: npm run upgrade:check -- --firmware /path/to/firmware [--full] [--report report.json] [--pio /path/to/pio]')
+    if (!firmwareRoot) throw new Error('Usage: bun run upgrade:check -- --firmware /path/to/firmware [--full] [--report report.json] [--pio /path/to/pio]')
     if (value('--report')) {
       reportPath = resolve(value('--report'))
       mkdirSync(dirname(reportPath), { recursive: true })
@@ -151,11 +176,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       // Separate output directory keeps tracked dist artifacts intact.
       run(process.execPath, [resolve(configuratorRoot, 'node_modules/vite/bin/vite.js'), 'build', '--config', 'vite.renderer.config.mjs', '--outDir', '.cache/upgrade-renderer'], configuratorRoot)
       const pio = value('--pio') || 'pio'
-      runNative(resolve(firmwareRoot), ['test', '-e', 'native_base', ...['compatibility', 'storage', 'performance', 'init', 'programmableio', 'n2ocontrol', 'secondary', 'sensors', 'general', 'ign', 'ign_controller', 'engineprotect'].flatMap(name => ['-f', `test_${name}`])], value)
-      for (const environment of ['megaatmega2560', 'megaatmega2560-6-3', 'megaatmega2560-8-1']) {
-        run(pio, ['run', '-e', environment], resolve(firmwareRoot))
-        run(pio, ['test', '-e', environment, '-f', 'test_compatibility', '--without-uploading', '--without-testing'], resolve(firmwareRoot))
-      }
+      runNative(resolve(firmwareRoot), ['test', '-e', 'native_base', ...['compatibility', 'storage', 'performance', 'drive_modes', 'fuel', 'init', 'programmableio', 'n2ocontrol', 'secondary', 'sensors', 'general', 'ign', 'ign_controller', 'engineprotect'].flatMap(name => ['-f', `test_${name}`])], value)
+      // This project validates the standard build for its four-cylinder engine.
+      const environment = 'megaatmega2560'
+      run(pio, ['run', '-e', environment], resolve(firmwareRoot))
+      run(pio, ['test', '-e', environment, '-f', 'test_compatibility', '--without-uploading', '--without-testing'], resolve(firmwareRoot))
       report.status = 'software-validated'
     }
     if (reportPath) writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')

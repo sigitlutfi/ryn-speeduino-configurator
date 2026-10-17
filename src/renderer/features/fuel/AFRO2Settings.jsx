@@ -13,6 +13,11 @@ import {
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
+import {
+  GroupHeader,
+  StatField,
+  SelectField,
+} from "../shared/components/TuningComponents";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 
 const O2_FIELDS = [
@@ -33,6 +38,7 @@ const O2_FIELDS = [
 
 const AFRO2Settings = () => {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -56,71 +62,7 @@ const AFRO2Settings = () => {
     setFieldValue(name, toRaw(val, info?.meta));
   };
 
-  const GroupHeader = ({ title, icon: Icon, colorClass = "bg-neon-cyan shadow-glow-cyan" }) => (
-    <div className="flex items-center gap-4 mb-6">
-      <div className={`w-1.5 h-6 ${colorClass} rounded-full`} />
-      <h3 className="font-orbitron text-[11px] font-black text-white uppercase tracking-[0.3em]">
-        {title}
-      </h3>
-      {Icon && <Icon className="ml-auto text-neon-cyan opacity-20" size={18} />}
-    </div>
-  );
-
-  const StatField = ({ name, label, icon: Icon, unit, step = 1, disabled = false, theme = "cyan" }) => {
-    const val = getValue(name);
-    return (
-      <div className={`p-6 rounded-3xl glass-card border border-white/10 transition-all ${disabled ? "opacity-20 grayscale pointer-events-none" : "hover:border-neon-cyan/30"}`}>
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-            {Icon && <Icon size={12} className={`text-neon-${theme} opacity-40`} />}
-            {label}
-          </span>
-          {unit && <span className="text-[8px] font-black text-white/20 uppercase">{unit}</span>}
-        </div>
-        <input
-          type="number"
-          step={step}
-          value={val}
-          onChange={(e) => updateValue(name, parseFloat(e.target.value))}
-          className={`w-full bg-black/40 border-none text-2xl font-mono font-black text-white focus:text-neon-${theme} outline-none transition-all duration-300`}
-        />
-      </div>
-    );
-  };
-
-  const SelectField = ({ name, label, icon: Icon, disabled = false, theme = "cyan" }) => {
-    const val = getValue(name);
-    const info = getFieldInfo(name);
-    const availableOptions = info?.meta?.options || [];
-    
-    const filteredOptions = availableOptions
-      .map((opt, i) => ({ label: opt, value: i }))
-      .filter(o => o.label && o.label !== "INVALID");
-
-    return (
-      <div className={`p-6 rounded-3xl glass-card border border-white/10 transition-all ${disabled ? "opacity-20 grayscale pointer-events-none" : "hover:border-neon-cyan/30"}`}>
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-            {Icon && <Icon size={12} className={`text-neon-${theme} opacity-40`} />}
-            {label}
-          </span>
-        </div>
-        <select
-          value={val}
-          onChange={(e) => updateValue(name, parseInt(e.target.value))}
-          className={`w-full bg-black/40 border-none text-[10px] font-orbitron font-bold uppercase text-neon-${theme} outline-none py-1.5 appearance-none cursor-pointer`}
-        >
-          {filteredOptions.length > 0 ? (
-             filteredOptions.map((opt) => (
-                <option key={opt.value} value={opt.value} className="bg-bg-deep text-white">{opt.label}</option>
-             ))
-          ) : (
-             <option value={val}>Loading...</option>
-          )}
-        </select>
-      </div>
-    );
-  };
+  const fieldProps = { getValue, updateValue, getFieldInfo, pinPages };
 
   const egoType = getValue("egoType");
   const egoAlgorithm = getValue("egoAlgorithm");
@@ -156,7 +98,7 @@ const AFRO2Settings = () => {
             <div className="p-8 rounded-[40px] glass-card border border-neon-cyan/20 bg-gradient-to-br from-bg-deep/40 to-black">
               <GroupHeader title="Oxygen Sensor Hardware" icon={Settings} />
               <div className="grid grid-cols-1 gap-6 pb-6">
-                <SelectField name="egoType" label="Sensor Type" icon={ShieldAlert} />
+                <SelectField {...fieldProps} name="egoType" label="Sensor Type" icon={ShieldAlert} />
               </div>
               <div className="p-6 rounded-3xl bg-black/40 border border-white/5 flex items-center justify-between">
                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-2">Closed Loop Status</span>
@@ -171,13 +113,13 @@ const AFRO2Settings = () => {
                <GroupHeader title="Closed Loop Algorithm" icon={Zap} colorClass="bg-white/20 shadow-none" />
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  <div className="md:col-span-2">
-                    <SelectField name="egoAlgorithm" label="Control Strategy" disabled={egoType === 0} />
+                    <SelectField {...fieldProps} name="egoAlgorithm" label="Control Strategy" disabled={egoType === 0} />
                  </div>
                  {isPID ? (
                    <>
-                    <StatField name="egoKP" label="Proportional (P)" unit="%" disabled={!isActive} />
-                    <StatField name="egoKI" label="Integral (I)" unit="%" disabled={!isActive} />
-                    <StatField name="egoKD" label="Derivative (D)" unit="%" disabled={!isActive} />
+                    <StatField {...fieldProps} name="egoKP" label="Proportional (P)" unit="%" disabled={!isActive} />
+                    <StatField {...fieldProps} name="egoKI" label="Integral (I)" unit="%" disabled={!isActive} />
+                    <StatField {...fieldProps} name="egoKD" label="Derivative (D)" unit="%" disabled={!isActive} />
                    </>
                  ) : (
                     <div className="md:col-span-2 p-4 bg-white/5 border border-white/10 rounded-2xl">
@@ -186,19 +128,19 @@ const AFRO2Settings = () => {
                         </p>
                     </div>
                  )}
-                 <StatField name="egoCount" label="Cycles per Step" disabled={!isActive} />
-                 <StatField name="egoLimit" label="Max Correction (±)" unit="%" disabled={!isActive} />
+                 <StatField {...fieldProps} name="egoCount" label="Cycles per Step" disabled={!isActive} />
+                 <StatField {...fieldProps} name="egoLimit" label="Max Correction (±)" unit="%" disabled={!isActive} />
                </div>
             </div>
           </div>
 
           <div className="p-8 rounded-[40px] glass-card border border-white/5 bg-black/40">
-             <GroupHeader title="Activation Thresholds" icon={Gauge} colorClass="bg-neon-orange shadow-glow-orange" />
+             <GroupHeader title="Activation Thresholds" icon={Gauge} theme="orange" />
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 pb-8">
-               <StatField name="egoRPM" label="Min RPM" theme="orange" disabled={!isActive} />
-               <StatField name="egoTPSMax" label="Max TPS" unit="%" theme="orange" disabled={!isActive} />
-               <StatField name="egoTemp" label="Min Coolant" unit="°C" theme="orange" disabled={!isActive} />
-               <StatField name="ego_sdelay" label="Start Delay" unit="S" theme="orange" disabled={!isActive} />
+               <StatField {...fieldProps} name="egoRPM" label="Min RPM" theme="orange" disabled={!isActive} />
+               <StatField {...fieldProps} name="egoTPSMax" label="Max TPS" unit="%" theme="orange" disabled={!isActive} />
+               <StatField {...fieldProps} name="egoTemp" label="Min Coolant" unit="°C" theme="orange" disabled={!isActive} />
+               <StatField {...fieldProps} name="ego_sdelay" label="Start Delay" unit="S" theme="orange" disabled={!isActive} />
              </div>
              
              <div className="border-t border-white/5 pt-8">
@@ -207,8 +149,8 @@ const AFRO2Settings = () => {
                    <span className="text-[10px] font-black text-white/50 uppercase tracking-widest">Safe Correction Window (AFR)</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <StatField name="ego_min_afr" label="Lower Bound (Leanest)" unit="AFR" theme="orange" disabled={!isActive} />
-                  <StatField name="ego_max_afr" label="Upper Bound (Richest)" unit="AFR" theme="orange" disabled={!isActive} />
+                  <StatField {...fieldProps} name="ego_min_afr" label="Lower Bound (Leanest)" unit="AFR" theme="orange" disabled={!isActive} />
+                  <StatField {...fieldProps} name="ego_max_afr" label="Upper Bound (Richest)" unit="AFR" theme="orange" disabled={!isActive} />
                 </div>
              </div>
           </div>

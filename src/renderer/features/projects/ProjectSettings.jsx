@@ -11,7 +11,7 @@ import {
   Database,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
- 
+
 const COLORS = [
   { id: "cyan", hex: "#00d4ff", class: "bg-neon-cyan" },
   { id: "purple", hex: "#bc13fe", class: "bg-neon-purple" },
@@ -43,7 +43,7 @@ function UnitGroup({ options, value, onChange }) {
 }
 
 export default function ProjectSettings({ isOpen, onClose }) {
-  const { currentProject, updateProjectField } = useStore();
+  const { currentProject, updateProjectSettings, projectEpoch, notify, setProjectSettingsDirty } = useStore();
 
   // Local state mirrors project fields — only committed on Save
   const [projectName, setProjectName] = useState("");
@@ -55,12 +55,15 @@ export default function ProjectSettings({ isOpen, onClose }) {
   const [tempUnit, setTempUnit] = useState(DEFAULT_PROJECT_UNITS.temperature);
   const [pressUnit, setPressUnit] = useState(DEFAULT_PROJECT_UNITS.pressure);
   const [speedUnit, setSpeedUnit] = useState(DEFAULT_PROJECT_UNITS.speed);
+  const [pendingIniPath, setPendingIniPath] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (isOpen && currentProject) {
+      setPendingIniPath('');
       setProjectName(currentProject.projectName ?? "");
       setDescription(currentProject.description ?? "");
-      setProjectColor(currentProject.color ?? "cyan");
+      setProjectColor(currentProject.ui?.accentColor ?? currentProject.color ?? "cyan");
       setDisplacement(currentProject.engine?.displacement ?? "");
       setCylinders(currentProject.engine?.cylinders ?? "");
       setEngineType(currentProject.engine?.type ?? "");
@@ -72,35 +75,46 @@ export default function ProjectSettings({ isOpen, onClose }) {
       );
       setSpeedUnit(currentProject.units?.speed ?? DEFAULT_PROJECT_UNITS.speed);
     }
-  }, [isOpen, currentProject]);
+  }, [isOpen, projectEpoch]);
 
-  const handleSave = () => {
-    updateProjectField("projectName", projectName.trim() || "Unnamed Project");
-    updateProjectField("description", description);
-    updateProjectField("color", projectColor);
-    updateProjectField(
-      "engine.displacement",
-      displacement ? Number(displacement) : null,
-    );
-    updateProjectField(
-      "engine.cylinders",
-      cylinders ? Number(cylinders) : null,
-    );
-    updateProjectField("engine.type", engineType || null);
-    updateProjectField("units.temperature", tempUnit);
-    updateProjectField("units.pressure", pressUnit);
-    updateProjectField("units.speed", speedUnit);
-    onClose();
+  useEffect(() => {
+    const dirty = isOpen && !!currentProject && (pendingIniPath ||
+      projectName !== (currentProject.projectName || '') || description !== (currentProject.description || '') ||
+      projectColor !== (currentProject.ui?.accentColor || 'cyan') ||
+      String(displacement) !== String(currentProject.engine?.displacement ?? '') ||
+      String(cylinders) !== String(currentProject.engine?.cylinders ?? '') ||
+      engineType !== (currentProject.engine?.type || '') ||
+      tempUnit !== currentProject.units.temperature || pressUnit !== currentProject.units.pressure || speedUnit !== currentProject.units.speed);
+    setProjectSettingsDirty(!!dirty);
+    return () => setProjectSettingsDirty(false);
+  }, [isOpen, currentProject, projectName, description, projectColor, displacement, cylinders, engineType,
+    tempUnit, pressUnit, speedUnit, pendingIniPath, setProjectSettingsDirty]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (pendingIniPath) {
+        const changed = await useStore.getState().updateIni(pendingIniPath);
+        if (!changed.ok) { notify(changed.error, 'error'); return; }
+        setPendingIniPath('');
+      }
+      const result = updateProjectSettings({ projectName: projectName.trim() || 'Unnamed Project', description,
+        ui: { accentColor: projectColor },
+        engine: { displacement: displacement ? Number(displacement) : null,
+          cylinders: cylinders ? Number(cylinders) : null, type: engineType || null },
+        units: { temperature: tempUnit, pressure: pressUnit, speed: speedUnit } });
+      if (!result.ok) { notify(result.error, 'error'); return; }
+      setProjectSettingsDirty(false);
+      const saved = await useStore.getState().saveProject();
+      if (saved.ok) { notify('Project settings saved', 'success'); onClose(); }
+      else notify(saved.error, 'error');
+    } finally { setSaving(false); }
   };
 
   const handlePickIni = async () => {
     const path = await window.projects.pickIni();
     if (!path) return;
-    const { updateIni } = useStore.getState();
-    const result = await updateIni(path);
-    if (!result.ok) {
-      alert(`Failed to update INI: ${result.error}`);
-    }
+    setPendingIniPath(path);
   };
 
   if (!isOpen) return null;
@@ -125,6 +139,8 @@ export default function ProjectSettings({ isOpen, onClose }) {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.9, y: 20 }}
           className="relative w-full max-w-xl glass-strong rounded-[32px] border border-white/10 shadow-2xl overflow-hidden"
+          inert={saving ? true : undefined}
+          aria-busy={saving}
         >
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-white/5 bg-white/5">
@@ -180,7 +196,7 @@ export default function ProjectSettings({ isOpen, onClose }) {
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:border-neon-cyan outline-none transition-all resize-none shadow-inner"
                   />
                 </div>
-                
+
                 {/* Color Picker Addition */}
                 <div className="space-y-2">
                   <label className="text-[10px] text-gray-500 uppercase tracking-widest block ml-1">
@@ -190,6 +206,8 @@ export default function ProjectSettings({ isOpen, onClose }) {
                     {COLORS.map((c) => (
                       <button
                         key={c.id}
+                        aria-label={`${c.id} project color`}
+                        aria-pressed={projectColor === c.id}
                         onClick={() => setProjectColor(c.id)}
                         className={`w-8 h-8 rounded-full border-2 transition-all ${
                           projectColor === c.id
@@ -352,18 +370,20 @@ export default function ProjectSettings({ isOpen, onClose }) {
                           className="text-[9px] text-gray-400 font-mono text-right break-all max-w-[280px]"
                           title={ini.path}
                         >
-                          {ini.path}
+                          {pendingIniPath || ini.path}
                         </span>
                       </div>
                     )}
                   </div>
-                  
+
                   <button
                     onClick={handlePickIni}
+                    disabled={saving}
                     className="w-full py-2 bg-neon-cyan/10 hover:bg-neon-cyan/20 border border-neon-cyan/30 rounded-xl text-[10px] font-bold text-neon-cyan uppercase tracking-widest transition-all"
                   >
                     Change INI File
                   </button>
+                  {pendingIniPath && <p className="mt-2 text-xs text-neon-yellow">INI replacement is pending. Save Project validates it; Cancel keeps the current INI.</p>}
                 </div>
               </div>
             )}
@@ -372,7 +392,7 @@ export default function ProjectSettings({ isOpen, onClose }) {
           {/* Footer */}
           <div className="p-6 bg-black/40 border-t border-white/5 flex justify-between items-center">
             <span className="text-[9px] text-gray-600 uppercase tracking-widest">
-              Changes saved to project — use File &gt; Save to persist
+              Saves settings and pending tuning edits to the project file
             </span>
             <div className="flex gap-3">
               <button
@@ -383,9 +403,10 @@ export default function ProjectSettings({ isOpen, onClose }) {
               </button>
               <button
                 onClick={handleSave}
+                disabled={saving}
                 className="px-8 py-3 bg-neon-cyan text-bg-deep text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all hover:opacity-90 shadow-[0_0_20px_rgba(0,212,255,0.3)]"
               >
-                Save
+                Save Project
               </button>
             </div>
           </div>

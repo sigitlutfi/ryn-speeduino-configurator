@@ -1,3 +1,4 @@
+import { useLiveTelemetry } from '../shared/hooks/useLiveTelemetry.js';
 import React from "react";
 import {
   Flame,
@@ -43,6 +44,7 @@ const ALS_FIELDS = [
 
 export default function AntiLag() {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -55,7 +57,8 @@ export default function AntiLag() {
     isReady,
   } = useTuningModule(ALS_FIELDS);
 
-  const { realtime, notify } = useStore();
+  const notify = useStore(s => s.notify);
+  const { realtime, status: telemetryStatus } = useLiveTelemetry();
   const isActive = realtime?.performance?.alsActive;
   const activeTimeMs = realtime?.performance?.alsActiveTime ?? 0;
   const activeTimeSeconds = activeTimeMs / 1000;
@@ -139,7 +142,7 @@ export default function AntiLag() {
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${isActive ? "text-neon-red" : "text-white/20"}`}
                 >
-                  {isActive ? "CONDITIONS MET" : "STBY"}
+                  {!realtime ? 'NO LIVE DATA' : isActive ? 'CONDITIONS MET' : 'STBY'}
                 </span>
               </div>
             </div>
@@ -152,7 +155,7 @@ export default function AntiLag() {
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${isActive ? "text-white" : "text-white/20"}`}
                 >
-                  {activeTimeSeconds.toFixed(activeTimeSeconds < 10 ? 1 : 0)}S{" "}
+                  {realtime ? activeTimeSeconds.toFixed(activeTimeSeconds < 10 ? 1 : 0) : '—'}S{" "}
                   <span className="text-[8px] opacity-40">ELAPSED</span>
                 </span>
               </div>
@@ -166,7 +169,7 @@ export default function AntiLag() {
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${isActive ? "text-neon-orange" : "text-white/20"}`}
                 >
-                  {realtime?.performance?.alsTimingCorr ?? 0}°{" "}
+                  {realtime?.performance?.alsTimingCorr ?? '—'}°{" "}
                   <span className="text-[8px] opacity-40">CORR</span>
                 </span>
               </div>
@@ -180,7 +183,7 @@ export default function AntiLag() {
                 <span
                   className={`text-xs font-orbitron font-black uppercase ${isActive ? "text-neon-cyan" : "text-white/20"}`}
                 >
-                  {realtime?.performance?.alsFuelCorr ?? 100}%{" "}
+                  {realtime?.performance?.alsFuelCorr ?? '—'}%{" "}
                   <span className="text-[8px] opacity-40">VE</span>
                 </span>
               </div>
@@ -203,7 +206,7 @@ export default function AntiLag() {
                   Engagement Trigger
                 </h3>
                 <div className="space-y-4">
-                  <PinSelect
+                  <PinSelect decodedPages={pinPages}
                     label="Activation Switch"
                     fieldName="alsSwitchPin"
                     value={getValue("alsSwitchPin")}

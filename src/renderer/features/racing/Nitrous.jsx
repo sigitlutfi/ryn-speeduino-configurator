@@ -12,6 +12,7 @@ import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
 import PinSelect from "../shared/components/PinSelect";
 import {
+  GroupHeader,
   SelectRow,
   InputField,
   InfoCard,
@@ -42,6 +43,7 @@ const NITROUS_FIELDS = [
 
 const Nitrous = () => {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -74,20 +76,6 @@ const Nitrous = () => {
       getValue("n2o_pin_polarity")
     ] || "Unknown";
 
-  const SectionHeader = ({ title, icon: Icon, theme = "purple" }) => (
-    <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-2">
-      <div
-        className={`w-1 h-3 bg-neon-${theme} shadow-glow-${theme} rounded-full`}
-      />
-      <span className="text-[9px] font-black text-white/80 uppercase tracking-[0.2em]">
-        {title}
-      </span>
-      {Icon && (
-        <Icon size={12} className={`ml-auto text-neon-${theme} opacity-30`} />
-      )}
-    </div>
-  );
-
   const StageCard = ({
     stage,
     pin,
@@ -109,14 +97,14 @@ const Nitrous = () => {
             : `bg-gradient-to-r from-neon-${theme}/80 via-white/20 to-transparent`
         }`}
       />
-      <SectionHeader
+      <GroupHeader
         title={`Nitrous Stage ${stage}`}
         icon={Flame}
         theme={theme}
       />
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="space-y-4">
-          <PinSelect
+          <PinSelect decodedPages={pinPages}
             label="Output Pin"
             fieldName={pin}
             value={getValue(pin)}
@@ -298,7 +286,7 @@ const Nitrous = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-5 p-6 rounded-[36px] glass-card border border-neon-purple/20 bg-gradient-to-br from-neon-purple/[0.06] to-transparent">
-              <SectionHeader
+              <GroupHeader
                 title="Hardware & Arming"
                 icon={Settings}
                 theme="purple"
@@ -310,7 +298,7 @@ const Nitrous = () => {
                   onChange={(val) => updateValue("n2o_enable", val)}
                   options={getFieldInfo("n2o_enable")?.meta?.options}
                 />
-                <PinSelect
+                <PinSelect decodedPages={pinPages}
                   label="Arming Input"
                   fieldName="n2o_arming_pin"
                   value={getValue("n2o_arming_pin")}
@@ -328,7 +316,7 @@ const Nitrous = () => {
             </div>
 
             <div className="lg:col-span-7 p-6 rounded-[36px] glass-card border border-white/10 bg-black/35">
-              <SectionHeader
+              <GroupHeader
                 title="Global Safety Window"
                 icon={ShieldAlert}
                 theme="cyan"

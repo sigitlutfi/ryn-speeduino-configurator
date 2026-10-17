@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, ChevronDown, ChevronUp, Download, Upload, GitCompare, X } from 'lucide-react';
 import { useStore } from '../core/store.js';
@@ -7,6 +7,9 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
   const { syncAllFromECU, uploadToECU, notify, operation } = useStore();
   const [loading, setLoading] = useState(false);
   const [expandedDiffPage, setExpandedDiffPage] = useState(null);
+  const [uploadError, setUploadError] = useState('');
+
+  useEffect(() => { if (!isOpen) setUploadError(''); }, [isOpen]);
 
   if (!isOpen || !diffResults) return null;
 
@@ -78,23 +81,13 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
   const handleDownload = async () => {
     setLoading(true);
     try {
-      const beforeOperation = operation;
       const result = await syncAllFromECU();
-      const stillOpenOperation = useStore.getState().operation;
-      const project = useStore.getState().currentProject;
-      const syncState = project?.ecu?.sync?.state;
-
-      if (
-        result === undefined &&
-        (syncState === 'needs-initial-sync' || syncState === 'partially-synced') &&
-        !stillOpenOperation &&
-        beforeOperation === operation
-      ) {
-        notify('Download did not complete successfully', 'error');
+      if (!result?.ok) {
+        notify(`Download failed: ${result?.error || result?.errors?.[0]?.error || 'Unknown error'}`, 'error');
         return;
       }
 
-      notify("Downloaded data from ECU successfully", "success");
+      notify("Downloaded ECU data. Save the project to keep it in the .rynproj file.", "success");
       onClose();
     } catch (err) {
       notify(`Download failed: ${err.message}`, "error");
@@ -104,6 +97,7 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
   };
 
   const handleUpload = async () => {
+    setUploadError('');
     setLoading(true);
     try {
       const result = await uploadToECU(uploadPages.length > 0 ? uploadPages : null);
@@ -116,10 +110,13 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
         const detail =
           firstError?.pageId !== undefined
             ? ` Page ${firstError.pageId}: ${firstError.error}`
-            : firstError?.error || " Unknown issue";
-        notify(`Upload completed with errors.${detail}`, "warning", 12000);
+            : ` ${firstError?.error || result?.error || 'Unknown issue'}`;
+        const message = `Upload failed.${detail}`;
+        setUploadError(message);
+        notify(message, "error", 12000);
       }
     } catch (err) {
+      setUploadError(`Upload failed: ${err.message}`);
       notify(`Upload failed: ${err.message}`, "error", 12000);
     } finally {
       setLoading(false);
@@ -205,6 +202,12 @@ export default function SyncDialog({ isOpen, onClose, diffResults }) {
                         ? "Project sedang menulis perubahan ke RAM ECU dan melakukan verifikasi baca balik."
                         : "Operasi sinkronisasi ECU sedang berjalan."}
                 </div>
+              </div>
+            )}
+
+            {uploadError && (
+              <div role="alert" className="p-4 rounded-xl bg-neon-red/10 border border-neon-red/30 text-sm text-neon-red">
+                {uploadError}
               </div>
             )}
 

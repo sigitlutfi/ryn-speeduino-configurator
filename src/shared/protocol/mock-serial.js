@@ -1,3 +1,4 @@
+import { encodeDriveConfig, decodeDriveConfig } from './drive-modes.js'
 /**
  * Mock serial port that simulates a Speeduino ECU response.
  * Used for development/testing without physical hardware.
@@ -7,7 +8,7 @@
 
 import iniContract from './ini-contract.js';
 
-const PACKET_SIZE = 152;
+const PACKET_SIZE = 167;
 const OUTPUT_CHANNELS_SIZE = PACKET_SIZE;
 const FIRMWARE_SIGNATURE = iniContract.signature;
 const NUM_PAGES = 16; // Pages 0-15
@@ -147,7 +148,7 @@ function buildOutputChannelsBlock() {
  * @param {(data: Uint8Array) => void} onData - callback when data is emitted
  * @returns {{ write: Function, close: Function }}
  */
-export function createMockSerial(onData) {
+export function createMockSerial(onData, options = {}) {
   // Simulated ECU memory (16 pages x 512 bytes each)
   const ecuMemory = [];
   for (let i = 0; i < NUM_PAGES; i++) {
@@ -156,9 +157,48 @@ export function createMockSerial(onData) {
     ecuMemory[i].fill(0);
   }
 
+  encodeDriveConfig().copy(ecuMemory[15], 106)
+  let active = 0, requested = 0, state = 0, reason = 0, token = 0, appliedToken = 0, requestedAt = 0
+  let configCRC = ecuMemory[15].readUInt16LE(122)
+  let activePreset = { fuel: 100, ignition: 0, features: 7 }
+  const engine = () => options.telemetry?.() || { rpm: _rpm, tps: _tps, running: true, sync: true }
+  function driveStatus() {
+    const e = engine()
+    let config
+    try { config = decodeDriveConfig(ecuMemory[15].subarray(106, 124)) } catch {}
+    const valid = !!config
+    const crc = ecuMemory[15].readUInt16LE(122)
+    if (e.rpm === 0 && !e.running && !e.cranking && valid && crc !== configCRC) {
+      active = requested = state = reason = 0; appliedToken = token; configCRC = crc
+      activePreset = { fuel: 100, ignition: 0, features: 7 }
+    }
+    if (state === 1) {
+      reason = !valid || configCRC !== crc ? 8 : Date.now() - requestedAt >= 3000 ? 7 : e.rpm === 0 && !e.running && !e.cranking ? 0 : e.cranking || !e.running ? 3 : !e.sync ? 4 : e.tps > config.maxTPS ? 1 : e.rpm > 6000 ? 2 : e.protection ? 5 : 0
+      if (reason === 7 || reason === 8) state = 2
+      else if (reason === 0) {
+        active = requested; appliedToken = token; state = 0
+        activePreset = active ? config.presets[active - 1] : { fuel: 100, ignition: 0, features: 7 }
+      }
+    }
+    const bytes = Buffer.from([1, active, requested, state, reason, 0, 0, 0, 0, 0, 0, e.running && !e.cranking ? activePreset.fuel : 100, e.running && !e.cranking ? activePreset.ignition & 255 : 0, activePreset.features, valid ? 1 : 0])
+    bytes.writeUInt16LE(token, 5); bytes.writeUInt16LE(appliedToken, 7); bytes.writeUInt16LE(configCRC, 9)
+    return bytes
+  }
+  function outputBlockForRead() {
+    const bytes = buildOutputChannelsBlock()
+    if (options.telemetry) {
+      const e = engine(); bytes.writeUInt16LE(e.rpm, 14); bytes[24] = Math.round(e.tps * 2)
+      bytes[2] = (e.running ? 1 : 0) | (e.cranking ? 2 : 0)
+    }
+    driveStatus().copy(bytes, 152)
+    return bytes
+  }
+
   // Buffer for accumulating incoming bytes
   let receiveBuffer = Buffer.alloc(0);
   let expectedLength = null;
+  const calibrationCRCs = [0xffffffff, 0xffffffff, 0xffffffff]
+  let oxygenStream = Buffer.alloc(0)
 
   /**
    * Process a complete modern protocol command
@@ -168,7 +208,42 @@ export function createMockSerial(onData) {
 
     console.log(`[Mock ECU] Received modern protocol command: '${cmd}' (${payload.length} bytes)`);
 
-    if (cmd === 'M') {
+    if (cmd === 'k') {
+      const id = payload[2]
+      const reply = Buffer.alloc(id <= 2 ? 5 : 1)
+      reply[0] = id <= 2 ? 0 : 0x84
+      if (id <= 2) reply.writeUInt32BE(calibrationCRCs[id], 1)
+      setTimeout(() => onData(wrapResponse(reply)), 5)
+      return
+    }
+    if (cmd === 't') {
+      const id = payload[2], offset = payload.readUInt16BE(3), length = payload.readUInt16BE(5)
+      let status = 0
+      if (payload.length !== length + 7 || id > 2 || (id !== 2 && (offset !== 0 || length !== 64)) ||
+          (id === 2 && (offset % 32 || length % 32 || offset + length > 1024))) status = 0x84
+      else if (id !== 2) calibrationCRCs[id] = crc32(payload.subarray(7))
+      else {
+        if (offset === 0) oxygenStream = Buffer.alloc(0)
+        oxygenStream = Buffer.concat([oxygenStream, payload.subarray(7)])
+        if (offset + length >= 1023) calibrationCRCs[id] = crc32(oxygenStream)
+      }
+      setTimeout(() => onData(wrapResponse(Buffer.from([status]))), 5)
+      return
+    }
+
+    if (cmd === 'D') {
+      driveStatus()
+      let accepted = payload.length === 2 && payload[1] === 0
+      if (payload.length === 7 && payload[1] === 1) {
+        const next = payload.readUInt16LE(3), mode = payload[2]
+        let valid = true
+        try { decodeDriveConfig(ecuMemory[15].subarray(106, 124)) } catch { valid = false }
+        accepted = valid && mode <= 3 && next !== 0 && payload.readUInt16LE(5) === ecuMemory[15].readUInt16LE(122) && (next === token ? requested === mode : token === 0 || ((next - token) & 65535) < 32768)
+        if (accepted && next !== token) { token = next; requested = mode; state = 1; reason = 0; requestedAt = Date.now() }
+      }
+      const result = accepted ? Buffer.concat([Buffer.from([0]), driveStatus()]) : Buffer.from([0x84])
+      setTimeout(() => onData(wrapResponse(result)), 5)
+    } else if (cmd === 'M') {
       // Write command
       // Payload: ['M'] [reserved] [page] [offset_low] [offset_high] [length_low] [length_high] [data...]
       const page = payload[2];
@@ -179,7 +254,7 @@ export function createMockSerial(onData) {
       console.log(`[Mock ECU] WRITE: Page ${page}, Offset ${offset}, Length ${length}`);
 
       // Write to simulated ECU memory
-      if (page < NUM_PAGES && offset + length <= PAGE_SIZE) {
+      if (page < NUM_PAGES && offset + length <= PAGE_SIZE && active === 0 && state !== 1 && !(page === 15 && offset < 124 && offset + length > 106 && (engine().rpm !== 0 || engine().running || engine().cranking))) {
         data.copy(ecuMemory[page], offset);
         console.log(`[Mock ECU] Data written to memory:`, data);
 
@@ -245,7 +320,7 @@ export function createMockSerial(onData) {
         const response = Buffer.from([0x83]);
         setTimeout(() => onData(wrapResponse(response)), 5);
       } else {
-        const outputBlock = buildOutputChannelsBlock();
+        const outputBlock = outputBlockForRead();
         const safeOffset = Math.max(0, Math.min(offset, outputBlock.length));
         const safeLength = Math.max(0, Math.min(length, outputBlock.length - safeOffset));
         const responsePayload = Buffer.alloc(1 + safeLength);
@@ -361,15 +436,16 @@ export function createMockSerial(onData) {
   }
 
   return {
-    write(buf) {
+    write(buf, callback) {
       processIncomingData(Buffer.from(buf));
+      callback?.(null);
     },
+    drain(callback) { callback?.(null); },
     flush(callback) {
       receiveBuffer = Buffer.alloc(0);
       expectedLength = null;
       if (callback) callback(null);
     },
-    close() {
-    },
+    close(callback) { callback?.(null); },
   };
 }

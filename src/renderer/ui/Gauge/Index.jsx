@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useId, useMemo } from "react";
 import { useStore } from "../../core/store";
 import { getAccent } from "../../core/theme.js";
 
@@ -67,13 +67,16 @@ export default function Gauge({
   warning,
   danger,
   warningMode = "high",
+  color,
   size = 140,
 }) {
   const settings = useStore((s) => s.settings);
   const accent = getAccent(settings?.accentColor);
 
   const safeMax = max === min ? min + 1 : max;
-  const displayValue = Number.isFinite(value) ? value.toFixed(decimals) : "0";
+  const valid = Number.isFinite(value);
+  const displayValue = valid ? value.toFixed(decimals) : '—';
+  const baseColor = color || accent.main;
   const cx = 90;
   const cy = 90;
   const outerRadius = 64;
@@ -82,26 +85,14 @@ export default function Gauge({
   const endAngle = startAngle + sweepAngle;
   const warningValue = warning ?? safeMax + 1;
   const dangerValue = danger ?? safeMax + 1;
-  const fillAngle = angleForValue(value, min, safeMax, startAngle, sweepAngle);
+  const fillAngle = angleForValue(valid ? value : min, min, safeMax, startAngle, sweepAngle);
   const warningAngle = angleForValue(warningValue, min, safeMax, startAngle, sweepAngle);
   const dangerAngle = angleForValue(dangerValue, min, safeMax, startAngle, sweepAngle);
   const isLowMode = warningMode === "low";
-  const activeColor = isLowMode
-    ? value <= dangerValue
-      ? "#f43f5e"
-      : value <= warningValue
-        ? "#f59e0b"
-        : accent.main
-    : value >= dangerValue
-      ? "#f43f5e"
-      : value >= warningValue
-        ? "#f59e0b"
-        : accent.main;
+  const exceeds = threshold => valid && Number.isFinite(threshold) && (isLowMode ? value <= threshold : value >= threshold);
+  const activeColor = exceeds(danger) ? '#f43f5e' : exceeds(warning) ? '#f59e0b' : baseColor;
   const tickConfig = useMemo(() => getTickConfig(min, safeMax), [min, safeMax]);
-  const idBase = useMemo(
-    () => `gauge-${String(label ?? unit ?? "metric").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-    [label, unit],
-  );
+  const idBase = `gauge-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const ticks = useMemo(() => {
     const output = [];
@@ -157,15 +148,15 @@ export default function Gauge({
 
   return (
     <div className="flex h-full w-full items-center justify-center">
-      <svg viewBox="0 0 180 180" width={size} height={size} className="overflow-visible">
+      <svg viewBox="0 0 180 180" width={size} height={size} className="max-w-full overflow-visible" role="img" aria-label={`${label}: ${displayValue} ${unit}`}>
         <defs>
           <linearGradient id={`${idBase}-progress`} x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="#ffffff" stopOpacity="0.78" />
-            <stop offset="12%" stopColor={accent.main} stopOpacity="0.92" />
+            <stop offset="12%" stopColor={baseColor} stopOpacity="0.92" />
             <stop offset="100%" stopColor={activeColor} stopOpacity="1" />
           </linearGradient>
           <filter id={`${idBase}-glow`} x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feGaussianBlur stdDeviation="1.5" result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />

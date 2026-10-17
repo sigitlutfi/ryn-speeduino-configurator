@@ -1,3 +1,4 @@
+import { useLiveTelemetry } from '../shared/hooks/useLiveTelemetry.js';
 import React from "react";
 import { Activity, Zap, Music, Settings, Gauge } from "lucide-react";
 import { useStore } from "../../core/store.js";
@@ -31,6 +32,7 @@ const RUMBLE_IDLE_FIELDS = [
 
 export default function RumbleIdle() {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -43,7 +45,8 @@ export default function RumbleIdle() {
     isReady,
   } = useTuningModule(RUMBLE_IDLE_FIELDS);
 
-  const { realtime, notify } = useStore();
+  const notify = useStore(s => s.notify);
+  const { realtime, status: telemetryStatus } = useLiveTelemetry();
   const isActive = realtime?.performance?.rumbleIdleActive;
   const beatState = realtime?.performance?.rumbleIdleBeat;
 
@@ -113,7 +116,7 @@ export default function RumbleIdle() {
                   <span
                     className={`text-sm font-orbitron font-black uppercase tracking-widest ${isActive ? "text-white" : "text-white/20"}`}
                   >
-                    {isActive ? "CONDITIONS MET" : "SYSTEM STANDBY"}
+                    {!realtime ? 'NO LIVE DATA' : isActive ? 'CONDITIONS MET' : 'SYSTEM STANDBY'}
                   </span>
                 </div>
               </div>
@@ -133,7 +136,7 @@ export default function RumbleIdle() {
                 <span
                   className={`text-sm font-orbitron font-black uppercase tracking-widest ${isActive ? (beatState ? "text-neon-cyan" : "text-neon-red") : "text-white/20"}`}
                 >
-                  {isActive
+                  {!realtime ? 'NO LIVE DATA' : isActive
                     ? beatState
                       ? "COMBUSTION"
                       : "PATTERN CUT STEP"
@@ -238,7 +241,7 @@ export default function RumbleIdle() {
                 <h3 className="text-[9px] font-black text-white/60 uppercase tracking-[0.3em] pl-4 mb-6 border-l-2 border-neon-orange/50">
                   Triggers & IO
                 </h3>
-                <PinSelect
+                <PinSelect decodedPages={pinPages}
                   label="Control Input"
                   fieldName="rumbleIdlePin"
                   value={getValue("rumbleIdlePin")}

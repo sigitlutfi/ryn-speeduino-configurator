@@ -1,1071 +1,346 @@
-// ECU sync, burn, compare, and upload operations
-
-import { Buffer } from "buffer";
-import { assertWritableContract } from "../../../../shared/protocol/contract.js";
-import {
-  createPageSnapshot,
-  decodePageSnapshot,
-  findDirtyRegion,
-  serializeDecodedPage,
-} from "../../../../shared/protocol/page-cache.js";
-import {
-  readRuntimeTableFromDecodedPage,
-  resolveRuntimeTable,
-} from "../../../../shared/protocol/runtime-tables.js";
-import { serialService } from "../../services/serialService.js";
-import { DEFAULT_ACTIVE_PAGES } from "../utils/project.constants.js";
-import {
-  getActiveProjectPages,
-  getPendingBurnPages,
-  getDecodedPages,
-  updatePageSnapshotStates,
-} from "../utils/page.utils.js";
-import {
-  delay,
-  nowIso,
-  deriveProjectSyncState,
-} from "../utils/project.utils.js";
-import { buildDisplayTablesFromDecodedPages } from "../utils/table.transforms.js";
+// Tune pages use the same read/write/CRC/burn commands and INI as TunerStudio.
+import { Buffer } from 'buffer'
+import { assertCompatibleContract } from '../../../../shared/protocol/contract.js'
+import { configurationWriteOptions } from '../../../../shared/protocol/board-pins.js'
+import { recordRestartWrite, recordRestartBurn } from '../utils/ecu.restart.js'
+import { prepareConfigurationWrite } from '../../../../shared/protocol/configuration-policy.js'
+import { createPageSnapshot, validatePageSnapshot, findDirtyRegion } from '../../../../shared/protocol/page-cache.js'
+import { serialService } from '../../services/serialService.js'
+import { DEFAULT_ACTIVE_PAGES } from '../utils/project.constants.js'
+import { getPendingBurnPages, updatePageSnapshotStates } from '../utils/page.utils.js'
+import { delay, nowIso, deriveProjectSyncState } from '../utils/project.utils.js'
+import { buildDisplayTablesFromDecodedPages } from '../utils/table.transforms.js'
+import { decodeDriveConfig } from '../../../../shared/protocol/drive-modes.js'
 
 export function createECUSyncSlice(set, get) {
-  const MAX_PAGE_WRITE_CHUNK = 64;
+  let running = false
+  const failure = error => ({ ok: false, error: error?.message || String(error), errors: [{ error: error?.message || String(error) }] })
 
-  const formatDiffHex = (buffer, maxBytes = 16) => {
-    const bytes = Array.from(Buffer.from(buffer || []).slice(0, maxBytes));
-    return bytes.map((value) => value.toString(16).toUpperCase().padStart(2, "0")).join(" ");
-  };
+  function capture() {
+    const state = get()
+    if (state.connection.status !== 'connected') throw new Error('Not connected')
+    if (!state.currentProject || !state.parsedIni) throw new Error('No project or INI loaded')
+    assertCompatibleContract(state)
+    return { epoch: state.projectEpoch, session: state.connection.sessionId,
+      connectedAt: state.connection.lastConnectedAt, ini: state.parsedIni,
+      project: state.currentProject, constants: state.currentProject.constants, tables: state.tables }
+  }
 
-  const formatErrorMessage = (error) => {
-    if (!error) return "Unknown ECU sync error";
-    if (typeof error === "string") return error;
-    if (error instanceof Error) return error.message || error.toString();
-    if (typeof error?.message === "string" && error.message) return error.message;
-
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return String(error);
+  function check(context) {
+    const state = get()
+    if (state.connection.status !== 'connected' || state.projectEpoch !== context.epoch ||
+        state.connection.sessionId !== context.session || state.connection.lastConnectedAt !== context.connectedAt ||
+        state.parsedIni !== context.ini || !state.currentProject) {
+      throw new Error('Project, INI or connection changed during sync; reconnect and compare again')
     }
-  };
+    assertCompatibleContract(state)
+  }
+
+  function targets(context, requested) {
+    const pages = [...new Set((requested ?? context.project.ecu?.sync?.activePages ?? DEFAULT_ACTIVE_PAGES).map(Number))]
+    if (!pages.length) throw new Error('No tune pages selected')
+    for (const page of pages) {
+      if (!Number.isInteger(page) || !context.ini.constants?.pages?.[page] ||
+          !Number.isInteger(context.ini.constants?.pageSizes?.[page]) || context.ini.constants.pageSizes[page] <= 0) {
+        throw new Error(`Invalid INI page ${page}`)
+      }
+    }
+    return pages
+  }
+
+  function localTarget(context, page) {
+    const snapshot = context.project.constants?.pages?.[page]
+    if (!snapshot) throw new Error(`Page ${page} has no complete local snapshot; download a baseline first`)
+    if (snapshot.source === 'legacy-partial') throw new Error(`Page ${page} is a partial legacy tune; download a complete baseline before upload`)
+    return { snapshot, ...validatePageSnapshot(snapshot, context.ini.constants.pageSizes[page]) }
+  }
+
+  function checkTarget(context, page, target) {
+    check(context)
+    if (Object.keys(get().tableDrafts || {}).length) throw new Error('Table edited during ECU sync')
+    if (get().currentProject.constants?.pages?.[page]?.rawData !== target.snapshot.rawData) {
+      throw new Error(`Page ${page} changed locally during sync`)
+    }
+  }
+
+  function patchPages(context, patches) {
+    check(context)
+    set(state => {
+      const pages = updatePageSnapshotStates(state.currentProject, patches)
+      return { currentProject: { ...state.currentProject,
+        constants: { ...state.currentProject.constants, pages },
+        ecu: { ...state.currentProject.ecu, sync: { ...state.currentProject.ecu.sync,
+          state: deriveProjectSyncState({ pages }, state.currentProject.ecu.sync.activePages) } } } }
+    })
+  }
+
+  // Validate the complete page, not only individual serial packet envelopes.
+  async function readVerified(context, page, attempts = 3) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      check(context)
+      const result = await get().readPageFromECU(page)
+      check(context)
+      if (result.buffer.length !== context.ini.constants.pageSizes[page]) throw new Error(`Wrong read size on page ${page}`)
+      const snapshot = createPageSnapshot({ pageId: page, size: result.buffer.length, buffer: result.buffer,
+        source: 'ecu-read', syncState: 'verified', lastReadAt: nowIso(), lastVerifiedAt: nowIso() })
+      const ecuCRC = await serialService.readPageCRC(page)
+      check(context)
+      if (snapshot.crc32 === ecuCRC) return { ...result, snapshot }
+    }
+    throw new Error(`Page ${page} CRC/readback mismatch after ${attempts} reads`)
+  }
+
+  async function verifyTarget(context, page, target) {
+    const actual = await readVerified(context, page)
+    checkTarget(context, page, target)
+    if (!Buffer.from(actual.buffer).equals(target.buffer)) throw new Error(`Page ${page} RAM verify mismatch`)
+    return actual
+  }
+
+  async function waitForBurn(context) {
+    if (!context.ini.outputChannels?.channels?.burnPending) {
+      throw new Error('This INI cannot confirm EEPROM completion (missing burnPending)')
+    }
+    const deadline = Date.now() + 15000
+    do {
+      check(context)
+      const status = await serialService.readOutputChannels(context.ini)
+      check(context)
+      const pending = status?.outputChannels?.burnPending
+      if (pending === 0 || pending === false) return
+      if (pending !== 1 && pending !== true) throw new Error('Invalid EEPROM burnPending response')
+      await delay(100)
+    } while (Date.now() < deadline)
+    throw new Error('EEPROM burn did not finish before timeout')
+  }
+
+  async function burn(context, page, target) {
+    // Standalone burn must also prove RAM matches the local target first.
+    await prepareConfigurationWrite(context.ini, { [page]: target.buffer }, id => readVerified(context, id), configurationWriteOptions(get().currentProject))
+    await verifyTarget(context, page, target)
+    if (!context.ini.outputChannels?.channels?.burnPending) throw new Error('Missing INI burnPending; EEPROM completion cannot be verified')
+    checkTarget(context, page, target)
+    patchPages(context, { [page]: { crc32: target.crc32, syncState: 'burn-pending', lastVerifiedAt: null } })
+    await serialService.burnPage(page)
+    checkTarget(context, page, target)
+    await waitForBurn(context)
+    await verifyTarget(context, page, target)
+    patchPages(context, { [page]: { crc32: target.crc32, syncState: 'verified', lastVerifiedAt: nowIso() } })
+    await recordRestartBurn(set, get, page)
+    return { ok: true, verified: true, burned: true }
+  }
+
+  async function transaction(type, work) {
+    if (running || get().operation) return failure(new Error('Another ECU operation is running'))
+    running = true
+    const owner = {}, pollingSession = serialService.sessionGeneration
+    let entered = false
+    try {
+      if (Object.keys(get().fieldDrafts || {}).length) throw new Error('Save or discard field drafts before ECU sync')
+      if (type === 'download' && Object.keys(get().tableDrafts || {}).length) throw new Error('Save or discard table drafts before downloading ECU RAM')
+      const profile = get().runtimeProfileSession
+      if (['write', 'upload', 'burn'].includes(type) && ['ProfileActive', 'Unknown'].includes(profile?.state)) throw new Error('Return the runtime profile to DEFAULT before upload or burn; download ECU RAM to recover an unknown state')
+      const context = capture()
+      get().setOperation({ owner, type, stage: 'read', label: `${type} ECU pages`, current: 0, total: 0, scope: 'sync' })
+      entered = true
+      await serialService.enterExclusiveMode()
+      check(context)
+      if (['write', 'upload', 'burn'].includes(type) && context.ini.info.signature === 'speeduino 202504-ryn-perf-v5') {
+        const telemetry = await serialService.readOutputChannels(context.ini)
+        check(context)
+        get().setRealtime?.(telemetry)
+        if (telemetry?.driveMode?.version !== 1 || !telemetry.driveMode.valid) throw new Error('Refresh or repair ECU Drive Mode status before tune writes')
+        if (telemetry.driveMode.active !== 0 || telemetry.driveMode.state === 1) throw new Error('Select Drive Mode DEFAULT before uploading or burning the base tune')
+      }
+      return await work(context)
+    } catch (error) {
+      get().notify(`ECU ${type} failed: ${error.message || error}`, 'error', 12000)
+      return failure(error)
+    } finally {
+      if (entered) {
+        serialService.resumeOutputChannelsPolling(pollingSession)
+        if (get().operation?.owner === owner) get().clearOperation()
+      }
+      running = false
+    }
+  }
 
   return {
-    syncPagesToECU: async (pageIds = [], options = {}) => {
-      const {
-        connection,
-        currentProject,
-        parsedIni,
-        notify,
-        readPageFromECU,
-        burnPage,
-        setOperation,
-        updateOperation,
-        clearOperation,
-      } = get();
-      if (connection.status !== "connected") {
-        return { ok: false, error: "Not connected" };
+    syncPagesToECU: (pageIds = [], options = {}) => transaction(options.burn ? 'upload' : 'write', async context => {
+      if (Object.keys(get().tableDrafts || {}).length) throw new Error('Save table edits to the project before uploading')
+      const pages = targets(context, pageIds.length ? pageIds : undefined)
+      if (options.burn && !context.ini.outputChannels?.channels?.burnPending) throw new Error('Missing INI burnPending; EEPROM completion cannot be verified')
+      // Validate every target before sending the first write.
+      const local = Object.fromEntries(pages.map(page => [page, localTarget(context, page)]))
+      const prepared = await prepareConfigurationWrite(context.ini,
+        Object.fromEntries(pages.map(page => [page, local[page].buffer])),
+        id => readVerified(context, id), configurationWriteOptions(get().currentProject))
+      if (local[15] && context.ini.info.signature === 'speeduino 202504-ryn-perf-v5') {
+        const region = findDirtyRegion(prepared.buffers[15], local[15].buffer)
+        if (region && region.offset < 124 && region.offset + region.length > 106) {
+          decodeDriveConfig(local[15].buffer.subarray(106, 124))
+          const telemetry = await serialService.readOutputChannels(context.ini)
+          checkTarget(context, 15, local[15])
+          if (telemetry.rpm !== 0 || telemetry.engine?.running || telemetry.engine?.cranking) throw new Error('Stop the engine before uploading a tune that writes Drive Mode presets')
+        }
       }
-      try { assertWritableContract(get()); }
-      catch (error) { return { ok: false, error: error.message, errors: [{ error: error.message }] }; }
-
-      const targetPages = (
-        pageIds?.length ? pageIds : getActiveProjectPages(currentProject)
-      )
-        .map(Number)
-        .filter((value) => !Number.isNaN(value));
-
-      const results = { ok: true, pages: {}, errors: [] };
-
-      await serialService.enterExclusiveMode();
-      try {
-        setOperation({
-          type: options.burn ? "upload" : "write",
-          stage: "read",
-          label: options.burn ? "Preparing ECU upload" : "Preparing RAM sync",
-          current: 0,
-          total: targetPages.length,
-          scope: "sync",
-        });
-
-        for (let index = 0; index < targetPages.length; index += 1) {
-          const pageId = targetPages[index];
-          try {
-            const localSnapshot =
-              currentProject?.constants?.pages?.[pageId] ||
-              currentProject?.constants?.pages?.[String(pageId)];
-            let effectiveLocalSnapshot = localSnapshot;
-
-            if (!effectiveLocalSnapshot && parsedIni) {
-              const decodedPage =
-                currentProject?.constants?.decodedPages?.[pageId] ||
-                currentProject?.constants?.decodedPages?.[String(pageId)];
-              const rebuiltBuffer = serializeDecodedPage(
-                parsedIni,
-                Number(pageId),
-                decodedPage || {},
-              );
-
-              if (rebuiltBuffer.length > 0) {
-                effectiveLocalSnapshot = createPageSnapshot({
-                  pageId: Number(pageId),
-                  size: rebuiltBuffer.length,
-                  buffer: rebuiltBuffer,
-                  source: "generated",
-                  syncState: "dirty-local",
-                  lastReadAt: null,
-                  lastVerifiedAt: null,
-                });
-
-                set((s) => {
-                  if (!s.currentProject) return {};
-                  return {
-                    currentProject: {
-                      ...s.currentProject,
-                      constants: {
-                        ...(s.currentProject.constants || {}),
-                        pages: {
-                          ...(s.currentProject.constants?.pages || {}),
-                          [pageId]: effectiveLocalSnapshot,
-                        },
-                      },
-                    },
-                  };
-                });
-              }
+      const result = { ok: true, pages: {}, errors: [] }
+      await recordRestartWrite(set, get, context.ini, prepared.before, prepared.after)
+      get().updateOperation({ total: pages.length })
+      for (const [index, page] of pages.entries()) {
+        const target = local[page]
+        try {
+          checkTarget(context, page, target)
+          const actual = { buffer: prepared.buffers[page] }
+          checkTarget(context, page, target)
+          const dirtyRegion = findDirtyRegion(actual.buffer, target.buffer)
+          patchPages(context, { [page]: { crc32: target.crc32, syncState: 'write-pending', lastVerifiedAt: null } })
+          get().updateOperation({ stage: 'write', label: `Writing page ${page}`, current: index })
+          if (dirtyRegion) {
+            for (let offset = 0; offset < dirtyRegion.length; offset += 64) {
+              checkTarget(context, page, target)
+              const chunk = dirtyRegion.after.subarray(offset, offset + 64)
+              await serialService.writePage(page, dirtyRegion.offset + offset, chunk.length, Array.from(chunk))
+              checkTarget(context, page, target)
             }
-
-            if (!effectiveLocalSnapshot) {
-              results.ok = false;
-              results.errors.push({ pageId, error: "Missing local snapshot" });
-              updateOperation({
-                stage: "error",
-                label: `Missing local snapshot for page ${pageId}`,
-                current: index + 1,
-                total: targetPages.length,
-              });
-              continue;
-            }
-
-            updateOperation({
-              stage: "read",
-              label: `Reading ECU page ${pageId}`,
-              current: index,
-              total: targetPages.length,
-            });
-
-            set((s) => {
-              if (!s.currentProject) return {};
-              const nextPages = updatePageSnapshotStates(s.currentProject, {
-                [pageId]: { syncState: "write-pending" },
-              });
-              return {
-                currentProject: {
-                  ...s.currentProject,
-                  constants: {
-                    ...(s.currentProject.constants || {}),
-                    pages: nextPages,
-                  },
-                },
-              };
-            });
-
-            const ecuPage = await readPageFromECU(pageId);
-            const localBuffer = decodePageSnapshot(effectiveLocalSnapshot);
-            const dirtyRegion = findDirtyRegion(ecuPage.buffer, localBuffer);
-
-            if (dirtyRegion) {
-              updateOperation({
-                stage: "write",
-                label: `Writing page ${pageId}`,
-                current: index,
-                total: targetPages.length,
-              });
-
-              for (
-                let chunkOffset = 0;
-                chunkOffset < dirtyRegion.length;
-                chunkOffset += MAX_PAGE_WRITE_CHUNK
-              ) {
-                const chunkLength = Math.min(
-                  MAX_PAGE_WRITE_CHUNK,
-                  dirtyRegion.length - chunkOffset,
-                );
-                const chunkData = Array.from(
-                  dirtyRegion.after.slice(chunkOffset, chunkOffset + chunkLength),
-                );
-
-                console.log("[ECU Sync] Writing chunk", {
-                  pageId,
-                  offset: dirtyRegion.offset + chunkOffset,
-                  length: chunkLength,
-                });
-
-                await serialService.writePage(
-                  pageId,
-                  dirtyRegion.offset + chunkOffset,
-                  chunkLength,
-                  chunkData,
-                );
-              }
-
-              await delay(options.writeSettleMs ?? 1200);
-            }
-
-            if (options.burn) {
-              updateOperation({
-                stage: "burn",
-                label: `Burning page ${pageId}`,
-                current: index,
-                total: targetPages.length,
-              });
-              const burnResult = await burnPage(pageId);
-              if (!burnResult.ok) {
-                results.ok = false;
-                results.errors.push({
-                  pageId,
-                  error: burnResult.error || "Burn failed",
-                });
-                updateOperation({
-                  stage: "error",
-                  label: `Burn failed on page ${pageId}`,
-                  current: index + 1,
-                  total: targetPages.length,
-                });
-                continue;
-              }
-              results.pages[pageId] = {
-                dirtyRegion,
-                verified: true,
-                burned: true,
-              };
-            } else {
-              updateOperation({
-                stage: "verify",
-                label: `Verifying page ${pageId}`,
-                current: index,
-                total: targetPages.length,
-              });
-              const verifyPage = await readPageFromECU(pageId);
-              const verified =
-                Buffer.compare(
-                  Buffer.from(verifyPage.buffer),
-                  Buffer.from(localBuffer),
-                ) === 0;
-
-              const verifiedAt = nowIso();
-              set((s) => {
-                if (!s.currentProject) return {};
-                const nextPages = updatePageSnapshotStates(s.currentProject, {
-                  [pageId]: {
-                    syncState: verified ? "burn-pending" : "different",
-                    crc32: verified
-                      ? effectiveLocalSnapshot.crc32
-                      : s.currentProject.constants?.pages?.[pageId]?.crc32,
-                    lastReadAt: verifiedAt,
-                    lastVerifiedAt: verifiedAt,
-                  },
-                });
-                return {
-                  currentProject: {
-                    ...s.currentProject,
-                    ecu: {
-                      ...s.currentProject.ecu,
-                      sync: {
-                        ...s.currentProject.ecu.sync,
-                        state: deriveProjectSyncState(
-                          { pages: nextPages },
-                          s.currentProject.ecu.sync.activePages,
-                        ),
-                      },
-                    },
-                    constants: {
-                      ...(s.currentProject.constants || {}),
-                      pages: nextPages,
-                      decodedPages: {
-                        ...(s.currentProject.constants?.decodedPages || {}),
-                        [pageId]: verifyPage.decoded,
-                      },
-                    },
-                  },
-                };
-              });
-
-              if (!verified) {
-                results.ok = false;
-                results.errors.push({ pageId, error: "RAM verify mismatch" });
-                updateOperation({
-                  stage: "error",
-                  label: `Verify mismatch on page ${pageId}`,
-                  current: index + 1,
-                  total: targetPages.length,
-                });
-              }
-              results.pages[pageId] = {
-                dirtyRegion,
-                verified,
-                burned: false,
-                syncState: verified ? "burn-pending" : "different",
-              };
-            }
-          } catch (error) {
-            results.ok = false;
-            results.errors.push({ pageId, error: error.message });
-            updateOperation({
-              stage: "error",
-              label: `Failed on page ${pageId}`,
-              current: index + 1,
-              total: targetPages.length,
-            });
+            await delay(options.writeSettleMs ?? 100)
           }
-
-          updateOperation({
-            current: index + 1,
-            total: targetPages.length,
-          });
-        }
-      } finally {
-        serialService.resumeOutputChannelsPolling();
-        clearOperation();
-      }
-
-      if (results.errors.length > 0) {
-        const firstError = results.errors[0];
-        const detail = firstError?.pageId !== undefined
-          ? ` Page ${firstError.pageId}: ${firstError.error}.`
-          : firstError?.error
-            ? ` ${firstError.error}.`
-            : "";
-        console.error("[ECU Sync] Upload/write completed with issues", {
-          targetPages,
-          errors: results.errors,
-          pages: results.pages,
-          options,
-        });
-        notify(
-          `ECU sync completed with ${results.errors.length} issue(s).${detail}`,
-          "warning",
-          12000,
-        );
-      }
-
-      return results;
-    },
-
-    writePagesToRAM: async (pageIds = []) => {
-      return get().syncPagesToECU(pageIds, { burn: false });
-    },
-
-    burnPage: async (pageId) => {
-      const { connection, notify, readPageFromECU } = get();
-      if (connection.status !== "connected") {
-        notify("Device not connected", "error");
-        return { ok: false };
-      }
-
-      try {
-        set((s) => {
-          if (!s.currentProject) return {};
-          const nextPages = updatePageSnapshotStates(s.currentProject, {
-            [pageId]: {
-              syncState: "write-pending",
-            },
-          });
-          return {
-            currentProject: {
-              ...s.currentProject,
-              constants: {
-                ...(s.currentProject.constants || {}),
-                pages: nextPages,
-              },
-            },
-          };
-        });
-
-        assertWritableContract(get());
-        await serialService.burnPage(pageId);
-        await delay(2000);
-
-        const currentState = get();
-        const localSnapshot =
-          currentState?.currentProject?.constants?.pages?.[pageId] ||
-          currentState?.currentProject?.constants?.pages?.[String(pageId)];
-        const ecuCRC = await serialService.readPageCRC(pageId);
-
-        if (localSnapshot?.crc32 === ecuCRC) {
-          set((s) => {
-            if (!s.currentProject) return {};
-            const nextPages = updatePageSnapshotStates(s.currentProject, {
-              [pageId]: {
-                crc32: ecuCRC,
-                syncState: "verified",
-                lastVerifiedAt: nowIso(),
-              },
-            });
-            return {
-              currentProject: {
-                ...s.currentProject,
-                ecu: {
-                  ...s.currentProject.ecu,
-                  sync: {
-                    ...s.currentProject.ecu.sync,
-                    state: deriveProjectSyncState(
-                      { pages: nextPages },
-                      s.currentProject.ecu.sync.activePages,
-                    ),
-                  },
-                },
-                constants: {
-                  ...(s.currentProject.constants || {}),
-                  pages: nextPages,
-                },
-              },
-            };
-          });
-          notify(`Page ${pageId} burned and verified`, "success");
-          return { ok: true, verified: true };
-        }
-
-        const ecuPage = await readPageFromECU(pageId);
-        const localBuffer = decodePageSnapshot(localSnapshot);
-        const rawMatch =
-          localBuffer.length === ecuPage.buffer.length &&
-          Buffer.compare(
-            Buffer.from(localBuffer),
-            Buffer.from(ecuPage.buffer),
-          ) === 0;
-
-        if (rawMatch) {
-          set((s) => {
-            if (!s.currentProject) return {};
-            const nextPages = updatePageSnapshotStates(s.currentProject, {
-              [pageId]: {
-                crc32: ecuCRC,
-                syncState: "verified",
-                lastReadAt: nowIso(),
-                lastVerifiedAt: nowIso(),
-              },
-            });
-            return {
-              currentProject: {
-                ...s.currentProject,
-                ecu: {
-                  ...s.currentProject.ecu,
-                  sync: {
-                    ...s.currentProject.ecu.sync,
-                    state: deriveProjectSyncState(
-                      { pages: nextPages },
-                      s.currentProject.ecu.sync.activePages,
-                    ),
-                  },
-                },
-                constants: {
-                  ...(s.currentProject.constants || {}),
-                  pages: nextPages,
-                  decodedPages: {
-                    ...(s.currentProject.constants?.decodedPages || {}),
-                    [pageId]: ecuPage.decoded,
-                  },
-                },
-              },
-            };
-          });
-          notify(`Page ${pageId} burned and verified`, "success");
-          return { ok: true, verified: true, healed: true };
-        }
-
-        const dirtyRegion = findDirtyRegion(localBuffer, ecuPage.buffer);
-        console.error("[ECU Sync] Burn verify mismatch", {
-          pageId,
-          localCRC: localSnapshot?.crc32 || null,
-          ecuCRC,
-          localSize: localBuffer.length,
-          ecuSize: ecuPage.buffer.length,
-          dirtyOffset: dirtyRegion?.offset ?? null,
-          dirtyLength: dirtyRegion?.length ?? null,
-          localHex: formatDiffHex(dirtyRegion?.before),
-          ecuHex: formatDiffHex(dirtyRegion?.after),
-        });
-
-        const rebuiltSnapshot = createPageSnapshot({
-          pageId,
-          size: ecuPage.buffer.length,
-          buffer: ecuPage.buffer,
-          source: "ecu-read",
-          syncState: "different",
-          lastReadAt: nowIso(),
-          lastVerifiedAt: nowIso(),
-        });
-
-        set((s) => {
-          if (!s.currentProject) return {};
-          const nextPages = updatePageSnapshotStates(s.currentProject, {
-            [pageId]: rebuiltSnapshot,
-          });
-          return {
-            currentProject: {
-              ...s.currentProject,
-              ecu: {
-                ...s.currentProject.ecu,
-                sync: {
-                  ...s.currentProject.ecu.sync,
-                  state: deriveProjectSyncState(
-                    { pages: nextPages },
-                    s.currentProject.ecu.sync.activePages,
-                  ),
-                },
-              },
-              constants: {
-                pages: nextPages,
-                decodedPages: {
-                  ...(s.currentProject.constants?.decodedPages || {}),
-                  [pageId]: ecuPage.decoded,
-                },
-              },
-            },
-          };
-        });
-
-        notify(
-          `Page ${pageId} burn verify failed: CRC/readback mismatch`,
-          "warning",
-          12000,
-        );
-        return { ok: false, verified: false, error: "CRC/readback mismatch" };
-      } catch (e) {
-        console.error("[ECU Sync] Burn failed", {
-          pageId,
-          message: formatErrorMessage(e),
-          error: e,
-        });
-        set((s) => {
-          if (!s.currentProject) return {};
-          const nextPages = updatePageSnapshotStates(s.currentProject, {
-            [pageId]: {
-              syncState: "verify-failed",
-              lastVerifiedAt: nowIso(),
-            },
-          });
-          return {
-            currentProject: {
-              ...s.currentProject,
-              constants: {
-                ...(s.currentProject.constants || {}),
-                pages: nextPages,
-              },
-            },
-          };
-        });
-        notify(
-          `Burn failed for Page ${pageId}: ${formatErrorMessage(e)}`,
-          "error",
-          12000,
-        );
-        return { ok: false, error: e.message };
-      }
-    },
-
-    burnPendingPages: async (pageIds = null) => {
-      const {
-        currentProject,
-        burnPage,
-        notify,
-        setOperation,
-        updateOperation,
-        clearOperation,
-      } = get();
-      if (!currentProject?.constants) return;
-
-      const pages = (
-        pageIds?.length ? pageIds : getPendingBurnPages(currentProject)
-      )
-        .map(Number)
-        .filter((value) => !Number.isNaN(value));
-
-      if (!pages.length) {
-        notify("No pending RAM changes to burn", "info");
-        return { ok: true, pages: [] };
-      }
-
-      const results = { ok: true, pages: [], errors: [] };
-      setOperation({
-        type: "burn",
-        stage: "burn",
-        label: "Burning ECU pages",
-        current: 0,
-        total: pages.length,
-        scope: "sync",
-      });
-
-      await serialService.enterExclusiveMode();
-      try {
-        for (let index = 0; index < pages.length; index += 1) {
-          const pId = pages[index];
-          updateOperation({
-            stage: "burn",
-            label: `Burning page ${pId}`,
-            current: index,
-            total: pages.length,
-          });
-
-          const result = await burnPage(pId);
-          if (!result?.ok) {
-            results.ok = false;
-            results.errors.push({
-              pageId: pId,
-              error: result?.error || "Burn failed",
-            });
-          } else {
-            results.pages.push(pId);
+          get().updateOperation({ stage: 'verify', label: `Verifying RAM page ${page}` })
+          await verifyTarget(context, page, target)
+          // Matching RAM may still contain unburned changes from TunerStudio.
+          patchPages(context, { [page]: { crc32: target.crc32, syncState: 'burn-pending', lastReadAt: nowIso() } })
+          if (options.burn) {
+            get().updateOperation({ stage: 'burn', label: `Burning page ${page}` })
+            await burn(context, page, target)
           }
-
-          updateOperation({
-            stage: "verify",
-            label: `Verified page ${pId}`,
-            current: index + 1,
-            total: pages.length,
-          });
-          await new Promise((r) => setTimeout(r, 200));
+          result.pages[page] = { dirtyRegion, verified: true, burned: !!options.burn }
+        } catch (error) {
+          result.ok = false
+          result.errors.push({ pageId: page, error: error.message })
+          // Keep both raw and decoded target intact, even on failed verification.
+          try { checkTarget(context, page, target); patchPages(context, { [page]: { syncState: 'verify-failed', lastVerifiedAt: null } }) } catch {}
+          break
         }
-        return results;
-      } finally {
-        serialService.resumeOutputChannelsPolling();
-        clearOperation();
+        get().updateOperation({ current: index + 1 })
       }
-    },
+      return result
+    }),
 
-    burnActiveProjectPages: async () => {
-      return get().burnPendingPages();
-    },
+    writePagesToRAM: (pages = []) => get().syncPagesToECU(pages, { burn: false }),
+    uploadToECU: (pages = null) => get().syncPagesToECU(pages || [], { burn: true }),
+
+    burnPage: page => transaction('burn', async context => {
+      const [pageId] = targets(context, [page])
+      const target = localTarget(context, pageId)
+      try { return await burn(context, pageId, target) }
+      catch (error) {
+        try { checkTarget(context, pageId, target); patchPages(context, { [pageId]: { syncState: 'verify-failed', lastVerifiedAt: null } }) } catch {}
+        throw error
+      }
+    }),
+
+    burnPendingPages: (pageIds = null) => transaction('burn', async context => {
+      const requested = pageIds?.length ? pageIds : getPendingBurnPages(context.project)
+      if (!requested.length) return { ok: true, pages: [], errors: [] }
+      const pages = targets(context, requested)
+      const local = Object.fromEntries(pages.map(page => [page, localTarget(context, page)]))
+      const result = { ok: true, pages: [], errors: [] }
+      get().updateOperation({ total: pages.length })
+      for (const [index, page] of pages.entries()) {
+        try { await burn(context, page, local[page]); result.pages.push(page) }
+        catch (error) {
+          result.ok = false
+          result.errors.push({ pageId: page, error: error.message })
+          try { checkTarget(context, page, local[page]); patchPages(context, { [page]: { syncState: 'verify-failed', lastVerifiedAt: null } }) } catch {}
+          break
+        }
+        get().updateOperation({ current: index + 1 })
+      }
+      return result
+    }),
+    burnActiveProjectPages: () => get().burnPendingPages(),
 
     compareWithECU: async () => {
-      const {
-        currentProject,
-        parsedIni,
-        connection,
-        readPageFromECU,
-        setOperation,
-        updateOperation,
-        clearOperation,
-      } = get();
-      if (connection.status !== "connected") return { error: "Not connected" };
-      if (!currentProject?.constants || !parsedIni)
-        return { error: "No project loaded" };
-
-      const pagesToSync =
-        currentProject.ecu?.sync?.activePages || DEFAULT_ACTIVE_PAGES;
-      const localSnapshots = currentProject.constants.pages || {};
-      const results = {
-        matching: [],
-        different: [],
-        generated: [],
-        missing: [],
-        errors: [],
-        pageStates: {},
-        pageDiffs: {},
-      };
-      const pageStateUpdates = {};
-
-      setOperation({
-        type: "compare",
-        stage: "compare",
-        label: "Checking ECU",
-        current: 0,
-        total: pagesToSync.length,
-        scope: "sync",
-      });
-
-      await serialService.enterExclusiveMode();
-      try {
-        for (let index = 0; index < pagesToSync.length; index += 1) {
-          const pId = pagesToSync[index];
-          if (!parsedIni.constants.pages[pId]) continue;
-
-          updateOperation({
-            stage: "compare",
-            label: `Checking page ${pId}`,
-            current: index,
-            total: pagesToSync.length,
-          });
-
+      const result = await transaction('compare', async context => {
+        if (Object.keys(get().tableDrafts || {}).length) throw new Error('Save table edits before comparing with ECU')
+        const pages = targets(context)
+        const comparison = { ok: true, matching: [], different: [], generated: [], missing: [], errors: [], pageStates: {}, pageDiffs: {} }
+        const patches = {}
+        get().updateOperation({ total: pages.length })
+        for (const [index, page] of pages.entries()) {
+          check(context)
+          const snapshot = context.project.constants?.pages?.[page]
           try {
-            const localSnapshot =
-              localSnapshots[pId] || localSnapshots[String(pId)];
-            let effectiveLocalSnapshot = localSnapshot;
-            if (!effectiveLocalSnapshot) {
-              const decodedPage =
-                currentProject?.constants?.decodedPages?.[pId] ||
-                currentProject?.constants?.decodedPages?.[String(pId)] ||
-                {};
-              const rebuiltBuffer = serializeDecodedPage(parsedIni, pId, decodedPage);
-
-              if (rebuiltBuffer.length > 0) {
-                effectiveLocalSnapshot = createPageSnapshot({
-                  pageId: pId,
-                  size: rebuiltBuffer.length,
-                  buffer: rebuiltBuffer,
-                  source: "generated",
-                  syncState: "unknown",
-                  lastReadAt: null,
-                  lastVerifiedAt: null,
-                });
-
-                pageStateUpdates[pId] = effectiveLocalSnapshot;
-              } else {
-                results.missing.push(pId);
-                results.pageStates[pId] = "missing-local";
-                results.pageDiffs[pId] = {
-                  pageId: pId,
-                  status: "missing-local",
-                  summary: "Local snapshot is missing",
-                };
-                pageStateUpdates[pId] = {
-                  syncState: "missing-local",
-                  lastVerifiedAt: nowIso(),
-                };
-                console.warn("[project] compareWithECU missing local snapshot", {
-                  pageId: pId,
-                  status: "missing-local",
-                });
-                continue;
-              }
+            if (!snapshot) {
+              comparison.missing.push(page)
+              comparison.pageStates[page] = 'missing-local'
+              continue
             }
-
-            const ecuCRC = await serialService.readPageCRC(pId);
-            if (effectiveLocalSnapshot.crc32 === ecuCRC) {
-              results.matching.push(pId);
-              results.pageStates[pId] = "verified";
-              pageStateUpdates[pId] = {
-                crc32: ecuCRC,
-                syncState: "verified",
-                lastVerifiedAt: nowIso(),
-              };
-            } else {
-              updateOperation({
-                stage: "verify",
-                label: `Verifying page ${pId}`,
-                current: index,
-                total: pagesToSync.length,
-              });
-
-              const localBuffer = decodePageSnapshot(effectiveLocalSnapshot);
-              const ecuPage = await readPageFromECU(pId);
-              const buffersMatch =
-                localBuffer.length === ecuPage.buffer.length &&
-                Buffer.compare(
-                  Buffer.from(localBuffer),
-                  Buffer.from(ecuPage.buffer),
-                ) === 0;
-
-              if (buffersMatch) {
-                results.matching.push(pId);
-                results.pageStates[pId] = "verified";
-                results.pageDiffs[pId] = {
-                  pageId: pId,
-                  status: "verified",
-                  localCRC: effectiveLocalSnapshot.crc32,
-                  ecuCRC,
-                  summary: "Raw page matches after readback",
-                };
-                pageStateUpdates[pId] = {
-                  crc32: ecuCRC,
-                  syncState: "verified",
-                  lastReadAt: nowIso(),
-                  lastVerifiedAt: nowIso(),
-                };
-                console.warn(
-                  "[project] compareWithECU healed CRC mismatch from raw page match",
-                  {
-                    pageId: pId,
-                    localCRC: localSnapshot.crc32,
-                    ecuCRC,
-                    status: "verified",
-                  },
-                );
-              } else {
-                const dirtyRegion = findDirtyRegion(localBuffer, ecuPage.buffer);
-                const isGeneratedLocal =
-                  effectiveLocalSnapshot?.source === "generated";
-                const ecuNonZeroBytes = Array.from(ecuPage.buffer || []).reduce(
-                  (count, value) => count + (value !== 0 ? 1 : 0),
-                  0,
-                );
-                const generatedState = isGeneratedLocal
-                  ? "generated-local"
-                  : "different";
-
-                if (isGeneratedLocal) {
-                  results.generated.push(pId);
-                } else {
-                  results.different.push(pId);
-                }
-
-                results.pageStates[pId] = generatedState;
-                results.pageDiffs[pId] = {
-                  pageId: pId,
-                  status: generatedState,
-                  source: effectiveLocalSnapshot?.source || "unknown",
-                  localCRC: effectiveLocalSnapshot.crc32,
-                  ecuCRC,
-                  offset: dirtyRegion?.offset ?? 0,
-                  length: dirtyRegion?.length ?? ecuPage.buffer.length,
-                  localHex: formatDiffHex(dirtyRegion?.before),
-                  ecuHex: formatDiffHex(dirtyRegion?.after),
-                  ecuNonZeroBytes,
-                  ecuLooksBlank: ecuNonZeroBytes === 0,
-                  summary: isGeneratedLocal
-                    ? dirtyRegion
-                      ? `Generated local page differs from ECU baseline at offset ${dirtyRegion.offset}`
-                      : "Generated local page differs from ECU baseline"
-                    : dirtyRegion
-                      ? `${dirtyRegion.length} byte(s) differ starting at offset ${dirtyRegion.offset}`
-                      : "Raw page differs",
-                };
-                pageStateUpdates[pId] = {
-                  syncState: generatedState,
-                  lastVerifiedAt: nowIso(),
-                };
-                console.warn("[project] compareWithECU page differs", {
-                    pageId: pId,
-                    localCRC: effectiveLocalSnapshot.crc32,
-                    ecuCRC,
-                    status: generatedState,
-                    source: effectiveLocalSnapshot?.source || "unknown",
-                    ecuNonZeroBytes,
-                  });
-              }
+            const local = localTarget(context, page)
+            const ecuCRC = await serialService.readPageCRC(page)
+            checkTarget(context, page, local)
+            let matches = local.crc32 === ecuCRC
+            let actual
+            if (!matches) {
+              actual = await readVerified(context, page)
+              checkTarget(context, page, local)
+              matches = Buffer.from(actual.buffer).equals(local.buffer)
             }
-          } catch (e) {
-            results.errors.push(pId);
-            results.pageStates[pId] = "unknown";
-            results.pageDiffs[pId] = {
-              pageId: pId,
-              status: "unknown",
-              summary: e?.message || String(e),
-            };
-            pageStateUpdates[pId] = {
-              syncState: "unknown",
-              lastVerifiedAt: nowIso(),
-            };
-            console.error("[project] compareWithECU page error", {
-              pageId: pId,
-              status: "unknown",
-              error: e?.message || String(e),
-            });
+            const status = matches ? 'verified' : snapshot.source === 'generated' ? 'generated-local' : 'different'
+            comparison[matches ? 'matching' : status === 'generated-local' ? 'generated' : 'different'].push(page)
+            comparison.pageStates[page] = status
+            const diff = actual ? findDirtyRegion(local.buffer, actual.buffer) : null
+            const hex = buffer => Buffer.from(buffer || []).subarray(0, 16).toString('hex').toUpperCase().match(/../g)?.join(' ') || ''
+            comparison.pageDiffs[page] = { pageId: page, status, source: snapshot.source, localCRC: local.crc32,
+              ecuCRC: actual?.snapshot.crc32 || ecuCRC, offset: diff?.offset || 0, length: diff?.length || 0,
+              localHex: hex(diff?.before), ecuHex: hex(diff?.after),
+              ecuLooksBlank: actual ? actual.buffer.every(value => value === 0) : false,
+              summary: matches ? 'Local bytes match ECU RAM' : `${diff?.length || 0} byte(s) differ` }
+            patches[page] = { crc32: local.crc32, syncState: status, lastVerifiedAt: matches ? nowIso() : null }
+          } catch (error) {
+            check(context)
+            comparison.ok = false
+            comparison.errors.push(page)
+            comparison.pageStates[page] = 'verify-failed'
+            comparison.pageDiffs[page] = { pageId: page, status: 'verify-failed', summary: error.message }
+            if (snapshot) patches[page] = { syncState: 'verify-failed', lastVerifiedAt: null }
           }
-
-          updateOperation({
-            current: index + 1,
-            total: pagesToSync.length,
-          });
+          get().updateOperation({ current: index + 1 })
         }
-
-        set((s) => {
-          const nextPages = updatePageSnapshotStates(
-            s.currentProject,
-            pageStateUpdates,
-          );
-          return {
-            currentProject: {
-              ...s.currentProject,
-              ecu: {
-                ...s.currentProject.ecu,
-                sync: {
-                  ...s.currentProject.ecu.sync,
-                  state: deriveProjectSyncState(
-                    { pages: nextPages },
-                    s.currentProject.ecu.sync.activePages,
-                  ),
-                },
-              },
-              constants: {
-                ...(s.currentProject.constants || {}),
-                pages: nextPages,
-              },
-            },
-          };
-        });
-
-        console.log("[project] compareWithECU summary", {
-          matching: results.matching,
-          different: results.different,
-          generated: results.generated,
-          missing: results.missing,
-          errors: results.errors,
-          pageStates: results.pageStates,
-        });
-
-        return results;
-      } finally {
-        serialService.resumeOutputChannelsPolling();
-        clearOperation();
-      }
+        if (get().currentProject.constants !== context.constants) throw new Error('Project tune changed during compare')
+        patchPages(context, patches)
+        return comparison
+      })
+      // Keep the dialog's comparison shape even on contract/session errors.
+      if (!result.pageStates) return { ...result, matching: [], different: [], generated: [], missing: [], pageStates: {}, pageDiffs: {} }
+      return result
     },
 
-    uploadToECU: async (pages = null) => {
-      const { currentProject, connection, notify, syncPagesToECU } = get();
-      if (connection.status !== "connected") {
-        return { ok: false, error: "Not connected" };
+    syncAllFromECU: () => transaction('download', async context => {
+      const pages = targets(context)
+      const snapshots = {}, decoded = {}
+      get().updateOperation({ total: pages.length })
+      for (const [index, page] of pages.entries()) {
+        get().updateOperation({ stage: 'read', label: `Reading page ${page}`, current: index })
+        const result = await readVerified(context, page)
+        snapshots[page] = result.snapshot
+        decoded[page] = result.decoded
+        get().updateOperation({ current: index + 1 })
       }
-
-      const decodedPages = getDecodedPages(currentProject?.constants);
-      const targetPages = pages || Object.keys(decodedPages).map(Number);
-
-      try {
-        notify(`Uploading ${targetPages.length} pages to ECU...`, "info");
-        return await syncPagesToECU(targetPages, { burn: true });
-      } catch (err) {
-        console.error("[ECU Sync] Upload failed:", err);
-        return { ok: false, error: err.message };
+      check(context)
+      if (Object.keys(get().fieldDrafts || {}).length || Object.keys(get().tableDrafts || {}).length) throw new Error('Local edits were made during download; nothing was replaced')
+      if (get().currentProject.constants !== context.constants || get().tables !== context.tables) {
+        throw new Error('Local tune changed during download; nothing was replaced')
       }
-    },
-
-    syncAllFromECU: async () => {
-      const {
-        parsedIni,
-        readPageFromECU,
-        connection,
-        notify,
-        setOperation,
-        updateOperation,
-        clearOperation,
-      } = get();
-      if (connection.status !== "connected") {
-        notify("Not connected to ECU", "error");
-        return;
-      }
-
-      notify("Synchronizing with ECU...", "info");
-
-      const pagesToSync = DEFAULT_ACTIVE_PAGES;
-      const decodedPages = {};
-      const pageSnapshots = {};
-
-      serialService.suspendOutputChannelsPolling();
-      try {
-        setOperation({
-          type: "pull",
-          stage: "read",
-          label: "Pulling from ECU",
-          current: 0,
-          total: pagesToSync.length,
-          scope: "sync",
-        });
-
-        for (let index = 0; index < pagesToSync.length; index += 1) {
-          const pId = pagesToSync[index];
-          if (parsedIni.constants.pages[pId]) {
-            updateOperation({
-              stage: "read",
-              label: `Reading page ${pId}`,
-              current: index,
-              total: pagesToSync.length,
-            });
-            const pageResult = await readPageFromECU(pId);
-
-            updateOperation({
-              stage: "verify",
-              label: `Checking page ${pId}`,
-              current: index,
-              total: pagesToSync.length,
-            });
-            const ecuCRC = await serialService.readPageCRC(pId);
-            decodedPages[pId] = pageResult.decoded;
-            pageSnapshots[pId] = {
-              ...createPageSnapshot({
-                pageId: pId,
-                size: pageResult.buffer.length,
-                buffer: pageResult.buffer,
-                source: "ecu-read",
-                syncState: "verified",
-                lastReadAt: nowIso(),
-                lastVerifiedAt: nowIso(),
-              }),
-              crc32: ecuCRC,
-            };
-            updateOperation({
-              current: index + 1,
-              total: pagesToSync.length,
-            });
-            await new Promise((r) => setTimeout(r, 100));
-          }
-        }
-
-        const refreshedTables = buildDisplayTablesFromDecodedPages(
-          parsedIni,
-          {
-            ...(get().currentProject?.constants?.decodedPages || {}),
-            ...decodedPages,
-          },
-          get().tables,
-        );
-
-        try {
-          const ve2Def = resolveRuntimeTable(parsedIni, "ve2");
-          const ve2Page = decodedPages?.[ve2Def.page];
-          const ve2Table = ve2Page
-            ? readRuntimeTableFromDecodedPage(ve2Page, ve2Def)
-            : null;
-          if (ve2Table) {
-            console.log("[ECU Sync] VE2 snapshot", {
-              rawHead: ve2Table.rawValues.slice(0, 16),
-              rawTail: ve2Table.rawValues.slice(-16),
-              rpmAxis: ve2Table.rawRpmAxis,
-              loadAxis: ve2Table.rawLoadAxis,
-            });
-          }
-        } catch (error) {
-          console.warn("[ECU Sync] Failed to inspect VE2 snapshot", error);
-        }
-
-        set((s) => ({
-          currentProject: {
-            ...s.currentProject,
-            ecu: {
-              ...s.currentProject.ecu,
-              sync: {
-                ...s.currentProject.ecu.sync,
-                state: deriveProjectSyncState(
-                  {
-                    pages: {
-                      ...(s.currentProject.constants?.pages || {}),
-                      ...pageSnapshots,
-                    },
-                  },
-                  s.currentProject.ecu.sync.activePages,
-                ),
-                lastSyncAt: nowIso(),
-              },
-            },
-            constants: {
-              pages: {
-                ...(s.currentProject.constants?.pages || {}),
-                ...pageSnapshots,
-              },
-              decodedPages: {
-                ...(s.currentProject.constants?.decodedPages || {}),
-                ...decodedPages,
-              },
-            },
-          },
-          tables: refreshedTables,
-        }));
-
-        notify("ECU Data Synchronized", "success");
-        console.log("[ECU Sync] Synchronization complete", {
-          pages: Object.keys(pageSnapshots).map(Number),
-        });
-      } catch (e) {
-        const message = formatErrorMessage(e);
-        console.error("[ECU Sync] Failed:", {
-          message,
-          error: e,
-          pagesToSync,
-          parsedIniPages: Object.keys(parsedIni?.constants?.pages || {}),
-        });
-        notify(`ECU sync failed: ${message}`, "error", 12000);
-      } finally {
-        serialService.resumeOutputChannelsPolling();
-        clearOperation();
-      }
-    },
-  };
+      const constants = { pages: { ...context.constants.pages, ...snapshots },
+        decodedPages: { ...context.constants.decodedPages, ...decoded } }
+      const tables = buildDisplayTablesFromDecodedPages(context.ini, constants.decodedPages, get().tables)
+      set(state => ({ currentProject: { ...state.currentProject, constants, tables,
+        ecu: { ...state.currentProject.ecu, sync: { ...state.currentProject.ecu.sync,
+          state: deriveProjectSyncState(constants, state.currentProject.ecu.sync.activePages), lastSyncAt: nowIso() } } },
+        tables, tableDrafts: {}, runtimeProfileSession: { state: "Base", activeProfile: null, history: state.runtimeProfileSession?.history || [] } }))
+      get().notify('ECU RAM downloaded and verified. Save the project to keep the .rynproj file.', 'success')
+      return { ok: true, pages, errors: [], saved: false }
+    })
+  }
 }

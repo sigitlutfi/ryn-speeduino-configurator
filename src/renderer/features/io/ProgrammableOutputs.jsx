@@ -1,3 +1,4 @@
+import PinSelect from "../shared/components/PinSelect";
 import React, { useState, useMemo } from "react";
 import { useStore } from "../../core/store";
 import {
@@ -105,6 +106,7 @@ export default function ProgrammableOutputs() {
 
   // Constants mapping logic
   const {
+    pinPages,
     localConstants,
     setLocalPage,
     handleSave,
@@ -185,7 +187,6 @@ export default function ProgrammableOutputs() {
 
     const firstDataIn = clean(`firstDataIn${currentRule}`);
     const secondDataIn = clean(`secondDataIn${currentRule}`);
-    const pins = clean(`outputPin${currentRule}`);
     const polarity = clean(`outputInverted${currentRule}`);
     const limiting = clean(`kindOfLimiting${currentRule}`);
     const firstComp = page13[`firstCompType${currentRule}`]?.options || [
@@ -201,7 +202,6 @@ export default function ProgrammableOutputs() {
     return {
       firstDataIn,
       secondDataIn,
-      pins,
       polarity,
       limiting,
       firstComp,
@@ -279,10 +279,8 @@ export default function ProgrammableOutputs() {
                     </span>
                   </div>
                   <div className="flex-1 grid grid-cols-2 md:grid-cols-5 gap-4">
-                    <SelectRow
-                      label="Output Pin"
+                    <PinSelect fieldName={`outputPin${currentRule}`} decodedPages={pinPages} label="Output Pin"
                       value={getVal("outputPin")}
-                      options={iniOptions.pins}
                       onChange={(v) => updateField("outputPin", v)}
                       description={getFieldError("outputPin")}
                     />

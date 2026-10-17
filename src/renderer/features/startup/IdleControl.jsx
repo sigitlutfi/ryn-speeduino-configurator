@@ -14,7 +14,11 @@ import {
 } from "lucide-react";
 import { useTuningModule } from "../shared/hooks/useTuningModule";
 import TuningHeader from "../shared/components/TuningHeader";
-import { SelectField } from "../shared/components/SelectField";
+import {
+  GroupHeader,
+  StatField,
+  SelectField,
+} from "../shared/components/TuningComponents";
 import { toDisplay, toRaw } from "../shared/utils/normalization";
 
 const IDLE_FIELDS = [
@@ -48,6 +52,7 @@ const IDLE_FIELDS = [
 
 const IdleControl = () => {
   const {
+    pinPages,
     getFieldValue,
     setFieldValue,
     getFieldInfo,
@@ -86,37 +91,6 @@ const IdleControl = () => {
   const isClosedLoop = [3, 5, 6, 7].includes(iacAlgorithm);
   const isAnyIdle = iacAlgorithm > 0;
 
-  const SectionHeader = ({ title, icon: Icon, theme = "cyan" }) => (
-    <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-2">
-      <div className={`w-1 h-3 bg-neon-${theme} shadow-glow-${theme} rounded-full`} />
-      <span className="text-[9px] font-black text-white/80 uppercase tracking-[0.2em]">{title}</span>
-      {Icon && <Icon size={12} className={`ml-auto text-neon-${theme} opacity-30`} />}
-    </div>
-  );
-
-  const FormField = ({
-    name,
-    label,
-    unit,
-    theme = "cyan",
-    disabled = false,
-    step = 1,
-  }) => (
-    <div className={`flex flex-col gap-1.5 p-3 rounded-2xl transition-all ${disabled ? "opacity-20 select-none cursor-not-allowed grayscale" : "hover:bg-white/5"}`}>
-      <label className="text-[7px] font-black text-gray-500 uppercase tracking-widest flex justify-between">
-        {label}
-        {unit && <span className="text-white/20 italic">{unit}</span>}
-      </label>
-      <input
-        type="number"
-        step={step}
-        value={getValue(name)}
-        onChange={(e) => updateValue(name, parseFloat(e.target.value))}
-        className="bg-transparent text-sm font-mono font-black text-white outline-none border-none focus:text-neon-cyan"
-      />
-    </div>
-  );
-
   return (
     <div className="flex flex-col h-full bg-black select-none overflow-hidden h-screen animate-in fade-in duration-700">
       <TuningHeader
@@ -137,29 +111,32 @@ const IdleControl = () => {
         <div className="max-w-[1400px] mx-auto space-y-6 pb-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-4 p-5 rounded-3xl glass-card border border-white/5 h-fit space-y-4">
-              <SectionHeader title="Strategy & Hardware" icon={Settings} />
+              <GroupHeader title="Strategy & Hardware" icon={Settings} />
               <div className="grid grid-cols-1 gap-1">
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="iacAlgorithm"
                   label="Algorithm"
                   getValue={getValue}
                   getFieldInfo={getFieldInfo}
                   updateValue={updateValue}
                 />
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="iacChannels"
                   label="Channels"
                   getValue={getValue}
                   getFieldInfo={getFieldInfo}
                   updateValue={updateValue}
                 />
-                <FormField
+                <StatField
                   name="idleFreq"
                   label="PWM Freq"
                   unit="Hz"
                   disabled={!isPWM}
+                  getValue={getValue}
+                  getFieldInfo={getFieldInfo}
+                  updateValue={updateValue}
                 />
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="iacPWMdir"
                   label="Polarity"
                   getValue={getValue}
@@ -170,9 +147,9 @@ const IdleControl = () => {
             </div>
 
             <div className={`lg:col-span-8 p-5 rounded-3xl glass-card border border-white/5 transition-all ${!isAnyIdle && "opacity-30"}`}>
-              <SectionHeader title="Idle-Up Compensation (AC / FAN)" icon={Snowflake} theme="blue" />
+              <GroupHeader title="Idle-Up Compensation (AC / FAN)" icon={Snowflake} theme="blue" />
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="idleUpEnabled"
                   label="Mode"
                   theme="blue"
@@ -180,13 +157,16 @@ const IdleControl = () => {
                   getFieldInfo={getFieldInfo}
                   updateValue={updateValue}
                 />
-                <FormField
+                <StatField
                   name="idleUpAdder"
                   label="Target Adder"
                   unit="+ %/Steps"
                   theme="blue"
+                  getValue={getValue}
+                  getFieldInfo={getFieldInfo}
+                  updateValue={updateValue}
                 />
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="idleUpPin"
                   label="Input Pin"
                   theme="blue"
@@ -194,7 +174,7 @@ const IdleControl = () => {
                   getFieldInfo={getFieldInfo}
                   updateValue={updateValue}
                 />
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="idleUpPolarity"
                   label="Input Polarity"
                   theme="blue"
@@ -208,49 +188,58 @@ const IdleControl = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className={`lg:col-span-8 p-5 rounded-3xl glass-card border border-white/5 bg-gradient-to-r from-neon-orange/5 to-transparent transition-all ${!isClosedLoop && "opacity-20 grayscale"}`}>
-              <SectionHeader title="Closed-Loop (PID)" icon={Gauge} theme="orange" />
+              <GroupHeader title="Closed-Loop (PID)" icon={Gauge} theme="orange" />
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <FormField name="idleKP" label="P-Gain" step={0.1} theme="orange" />
-                <FormField name="idleKI" label="I-Gain" step={0.1} theme="orange" />
-                <FormField name="idleKD" label="D-Gain" step={0.1} theme="orange" />
-                <FormField name="iacCLminValue" label="Min Clamp" theme="orange" />
-                <FormField name="iacCLmaxValue" label="Max Clamp" theme="orange" />
+                <StatField name="idleKP" label="P-Gain" step={0.1} theme="orange" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
+                <StatField name="idleKI" label="I-Gain" step={0.1} theme="orange" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
+                <StatField name="idleKD" label="D-Gain" step={0.1} theme="orange" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
+                <StatField name="iacCLminValue" label="Min Clamp" theme="orange" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
+                <StatField name="iacCLmaxValue" label="Max Clamp" theme="orange" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
               </div>
             </div>
 
             <div className="lg:col-span-4 p-5 rounded-3xl glass-card border border-white/5">
-              <SectionHeader title="Lockout Thresholds" icon={Lock} theme="magenta" />
+              <GroupHeader title="Lockout Thresholds" icon={Lock} theme="magenta" />
               <div className="grid grid-cols-2 gap-4">
-                <FormField name="iacTPSlimit" label="TPS Limit" unit="%" theme="magenta" />
-                <FormField name="iacRPMlimitHysteresis" label="Hysteresis" unit="RPM" theme="magenta" />
+                <StatField name="iacTPSlimit" label="TPS Limit" unit="%" theme="magenta" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
+                <StatField name="iacRPMlimitHysteresis" label="Hysteresis" unit="RPM" theme="magenta" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:col-cols-12 gap-6">
             <div className={`lg:col-span-7 p-5 rounded-3xl glass-card border border-white/5 transition-all ${!isStepper && "opacity-20 grayscale"}`}>
-              <SectionHeader title="Advanced Configuration" icon={MoveUp} theme="yellow" />
+              <GroupHeader title="Advanced Configuration" icon={MoveUp} theme="yellow" />
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <FormField
+                <StatField
                   name="iacStepTime"
                   label="Step Time"
                   unit="ms"
                   theme="yellow"
                   disabled={!isStepper}
+                  getValue={getValue}
+                  getFieldInfo={getFieldInfo}
+                  updateValue={updateValue}
                 />
-                <FormField
+                <StatField
                   name="iacStepHome"
                   label="Home Steps"
                   theme="yellow"
                   disabled={!isStepper}
+                  getValue={getValue}
+                  getFieldInfo={getFieldInfo}
+                  updateValue={updateValue}
                 />
-                <FormField
+                <StatField
                   name="iacMaxSteps"
                   label="Max Limit"
                   theme="yellow"
                   disabled={!isStepper}
+                  getValue={getValue}
+                  getFieldInfo={getFieldInfo}
+                  updateValue={updateValue}
                 />
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="iacStepperPower"
                   label="Power Mode"
                   theme="yellow"
@@ -258,14 +247,17 @@ const IdleControl = () => {
                   getFieldInfo={getFieldInfo}
                   updateValue={updateValue}
                 />
-                <FormField
+                <StatField
                   name="idleTaperTime"
                   label="Taper Time"
                   unit="s"
                   step={0.1}
                   theme="yellow"
+                  getValue={getValue}
+                  getFieldInfo={getFieldInfo}
+                  updateValue={updateValue}
                 />
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="iacPWMrun"
                   label="PWM Run Mode"
                   theme="yellow"
@@ -277,18 +269,18 @@ const IdleControl = () => {
             </div>
 
             <div className="lg:col-span-5 p-5 rounded-3xl glass-card border border-white/5 h-fit">
-              <SectionHeader title="Idle Advance" icon={Zap} />
+              <GroupHeader title="Idle Advance" icon={Zap} />
               <div className="grid grid-cols-2 gap-4">
-                <SelectField
+                <SelectField pinPages={pinPages}
                   name="idleAdvEnabled"
                   label="Adv Strategy"
                   getValue={getValue}
                   getFieldInfo={getFieldInfo}
                   updateValue={updateValue}
                 />
-                <FormField name="idleAdvRPM" label="RPM Threshold" unit="RPM" />
-                <FormField name="idleAdvTPS" label="TPS Threshold" unit="%" />
-                <FormField name="idleAdvDelay" label="Delay" unit="s" />
+                <StatField name="idleAdvRPM" label="RPM Threshold" unit="RPM" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
+                <StatField name="idleAdvTPS" label="TPS Threshold" unit="%" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
+                <StatField name="idleAdvDelay" label="Delay" unit="s" getValue={getValue} getFieldInfo={getFieldInfo} updateValue={updateValue} />
               </div>
             </div>
           </div>

@@ -47,7 +47,7 @@ export function deriveProjectSyncState(
 
   for (const pageId of activePages) {
     const snapshot = pageSnapshots[pageId] || pageSnapshots[String(pageId)];
-    if (!snapshot) continue;
+    if (!snapshot) { relevant += 1; continue; }
     relevant += 1;
     if (snapshot.syncState === "verified") verified += 1;
   }
